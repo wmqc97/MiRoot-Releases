@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 双屏示意：主屏 + 背屏，箭头指向副屏 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4,5h7v12H4V5zM14,7h6v8h-6V7zM15.5,11.5l2,1.5l-2,1.5v-1H14v-1h1.5V11.5z" />
+</vector>

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+      视觉参考：https://github.com/compose-miuix-ui/miuix（主色 0xFF3482FF）。
+      主页为 Material3 DayNight；「音乐」页 Compose 内使用 MiuixTheme + 跟随系统深色。
+    -->
+    <style name="Theme.MiRoot" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/miuix_primary</item>
+        <item name="colorOnPrimary">@color/miuix_on_primary</item>
+        <item name="colorPrimaryContainer">@color/miuix_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/miuix_on_primary_container</item>
+        <item name="colorSecondary">@color/miuix_primary</item>
+        <item name="colorOnSecondary">@color/miuix_on_primary</item>
+        <item name="android:colorBackground">@color/mi_page_bg</item>
+        <item name="colorSurface">@color/miuix_surface</item>
+        <item name="colorOnSurface">@color/mi_text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/mi_text_secondary</item>
+        <item name="colorSurfaceContainer">@color/miuix_surface_container</item>
+        <item name="colorSurfaceContainerLow">@color/miuix_surface_container</item>
+        <item name="colorOutline">@color/mi_divider</item>
+        <item name="colorOutlineVariant">@color/mi_divider</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/miuix_surface</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+        <item name="bottomNavigationStyle">@style/Widget.MiRoot.BottomNavigation</item>
+        <item name="materialButtonStyle">@style/Widget.MiRoot.Button</item>
+        <item name="materialButtonOutlinedStyle">@style/Widget.MiRoot.Button.Outlined</item>
+    </style>
+
+    <style name="Widget.MiRoot.BottomNavigation" parent="Widget.Material3.BottomNavigationView">
+        <item name="backgroundTint">@color/miuix_surface</item>
+    </style>
+
+    <!-- 带壳贴图：首帧按大屏宽布局；高度由 FeaturesFragment 中 setLayout(98%×95%) 设置（windowMinHeight* 在部分 SDK 上不可链接） -->
+    <style name="ThemeOverlay.MiRoot.StickerDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="android:windowMinWidthMajor">98%</item>
+        <item name="android:windowMinWidthMinor">98%</item>
+    </style>
+
+    <!-- AI 目录列表略缩图：仅上圆角与卡片一致，下缘与标题条衔接 -->
+    <style name="ShapeAppearanceOverlay.MiRoot.ThemeDirectoryThumb" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopLeft">12dp</item>
+        <item name="cornerSizeTopRight">12dp</item>
+        <item name="cornerSizeBottomLeft">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
+    </style>
+</resources>

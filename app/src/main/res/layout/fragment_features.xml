@@ -1,0 +1,420 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/mi_page_bg"
+    android:clipToPadding="false"
+    android:fillViewport="true">
+
+    <!-- 边距：水平与音乐页一致；垂直/卡片间距为功能页专用 mi_features_*，略收紧以提高一屏信息量 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="@dimen/mi_music_page_padding_horizontal"
+        android:paddingTop="@dimen/mi_features_page_padding_vertical"
+        android:paddingEnd="@dimen/mi_music_page_padding_horizontal"
+        android:paddingBottom="@dimen/mi_features_page_padding_vertical">
+
+        <TextView
+            android:id="@+id/text_features_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clickable="true"
+            android:focusable="true"
+            android:text="@string/features_title"
+            android:textAppearance="@style/TextAppearance.MiRoot.PageTitle" />
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/mi_features_card_spacing">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="@dimen/mi_features_card_inner_padding">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/text_section_features_record"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:text="@string/features_section_record_screenshot"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                    <TextView
+                        android:id="@+id/text_features_device_model"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:textAppearance="?attr/textAppearanceLabelLarge"
+                        android:textColor="@color/miuix_primary"
+                        tools:text="ProMax" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/features_shell_title"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionSubtitle" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_composite_xy"
+                        style="@style/Widget.MiRoot.Button.Text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/features_adjust_composite_xy" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_sticker_overlay"
+                        style="@style/Widget.MiRoot.Button.Text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/features_sticker_overlay_button" />
+                </LinearLayout>
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="@dimen/mi_features_chips_padding_top">
+
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chip_group_shell_color"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
+                        app:selectionRequired="true"
+                        app:singleLine="false"
+                        app:singleSelection="true">
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chip_shell_green"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:checked="true"
+                            android:text="@string/shell_color_green"
+                            app:checkedIconVisible="false" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chip_shell_white"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/shell_color_white"
+                            app:checkedIconVisible="false" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chip_shell_gray"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/shell_color_gray"
+                            app:checkedIconVisible="false" />
+
+                        <com.google.android.material.chip.Chip
+                            android:id="@+id/chip_shell_purple"
+                            style="@style/Widget.Material3.Chip.Filter"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/shell_color_purple"
+                            app:checkedIconVisible="false" />
+                    </com.google.android.material.chip.ChipGroup>
+                </FrameLayout>
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_promax_shell_full"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:text="@string/features_shell_full"
+                    android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel"
+                    android:visibility="gone" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_screenshot_shell"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:checked="true"
+                    android:text="@string/features_screenshot_shell_switch"
+                    android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_switch_group_gap"
+                    android:baselineAligned="false"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_screenshot"
+                        style="@style/Widget.MiRoot.Button.Tonal"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/features_screenshot_capture" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_open_rear_record"
+                        style="@style/Widget.MiRoot.Button.Tonal"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/mi_features_switch_row_gap"
+                        android:layout_weight="1"
+                        android:text="@string/features_open_record" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/mi_features_card_spacing">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="@dimen/mi_features_card_inner_padding">
+
+                <TextView
+                    android:id="@+id/text_section_features_charging"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:text="@string/features_section_charging_animation"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_charging_animation"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:text="@string/features_charging_animation_switch"
+                    android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:text="@string/features_charging_fill_speed"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSliderLabel" />
+
+                <TextView
+                    android:id="@+id/text_charging_fill_speed_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="@dimen/mi_card_hint_after_control"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="@color/miuix_primary"
+                    tools:text="100%（默认 100%）" />
+
+                <androidx.compose.ui.platform.ComposeView
+                    android:id="@+id/compose_charging_fill_speed_slider"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_compose_slider_top"
+                    android:minHeight="@dimen/mi_features_compose_slider_min_height" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_switch_gap_medium"
+                    android:baselineAligned="false"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_charging_always_on"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/features_charging_always_on_switch"
+                        android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/mi_features_switch_row_gap"
+                        android:layout_weight="1"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:id="@+id/text_charging_debug_main_label"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:background="?attr/selectableItemBackground"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:text="@string/features_charging_debug_main_switch"
+                            android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+
+                        <com.google.android.material.materialswitch.MaterialSwitch
+                            android:id="@+id/switch_charging_debug_main"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:contentDescription="@string/features_charging_debug_main_switch" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/mi_features_card_spacing">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="@dimen/mi_features_card_inner_padding">
+
+                <TextView
+                    android:id="@+id/text_section_features_rear_assist"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:text="@string/features_section_rear_assist"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_official_subscreen_service"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:text="@string/settings_disable_official_subscreen_service"
+                    android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_rear_cover_detection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_switch_group_gap"
+                    android:checked="true"
+                    android:text="@string/features_rear_cover_detection"
+                    android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_switch_group_gap"
+                    android:baselineAligned="false"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_rear_keep_screen_on"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/features_rear_keep_screen_on"
+                        android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_rear_always_wakeup"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/mi_features_switch_row_gap"
+                        android:layout_weight="1"
+                        android:text="@string/features_rear_always_wakeup"
+                        android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:baselineAligned="false"
+                    android:orientation="horizontal"
+                    android:paddingTop="@dimen/mi_card_hint_after_control">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/features_rear_keep_screen_on_hint_short"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/mi_features_switch_row_gap"
+                        android:layout_weight="1"
+                        android:text="@string/features_rear_always_wakeup_hint_short"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/text_rear_burn_in_hint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="@dimen/mi_card_hint_after_control"
+                    android:text="@string/features_rear_burn_in_hint"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="@color/perm_red"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:text="@string/features_rear_wake_interval"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSliderLabel" />
+
+                <TextView
+                    android:id="@+id/text_rear_wake_interval_value"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingTop="@dimen/mi_card_hint_after_control"
+                    android:textAppearance="?attr/textAppearanceBodyMedium"
+                    android:textColor="@color/miuix_primary"
+                    tools:text="800 ms（100 ms – 10 s）" />
+
+                <androidx.compose.ui.platform.ComposeView
+                    android:id="@+id/compose_rear_wake_slider"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_compose_slider_top"
+                    android:minHeight="@dimen/mi_features_compose_slider_min_height" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

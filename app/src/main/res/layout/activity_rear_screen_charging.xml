@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 背屏充电：陀螺仪+加速度计水波液面、触摸/自动涟漪 + 中央电量 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/charging_container"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/charging_window_bg">
+
+    <com.wmqc.miroot.charging.GyroWaterRippleView
+        android:id="@+id/gyro_water_ripple"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <TextView
+        android:id="@+id/charging_debug_badge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="36dp"
+        android:background="#99000000"
+        android:paddingHorizontal="14dp"
+        android:paddingVertical="8dp"
+        android:text="@string/charging_debug_badge_main_preview"
+        android:textColor="#FFFFFFFF"
+        android:textSize="13sp"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/battery_text"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:letterSpacing="0.05"
+        android:shadowColor="#80000000"
+        android:shadowDx="0"
+        android:shadowDy="6"
+        android:shadowRadius="12"
+        android:text="100%"
+        android:textColor="#FFFFFFFF"
+        android:textSize="60sp"
+        android:textStyle="bold" />
+</FrameLayout>

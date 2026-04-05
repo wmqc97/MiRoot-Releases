@@ -1,0 +1,411 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- API 34+：AudioRecord（含 AudioPlaybackCapture 内录）视为麦克风类前台使用，须与 manifest 中 microphone 类型一致 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- 有 Root/Shizuku 时可 pm grant；REMOTE_SUBMIX 系统混音内录 -->
+    <uses-permission
+        android:name="android.permission.CAPTURE_AUDIO_OUTPUT"
+        tools:ignore="ProtectedPermissions" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <queries>
+        <package android:name="moe.shizuku.privileged.api" />
+        <package android:name="rikka.shizuku" />
+        <package android:name="com.xiaomi.subscreencenter" />
+        <package android:name="com.geely.consumer" />
+        <!-- 悬浮窗：小米安全中心（Xiaomi HyperOS 兼容）权限页 -->
+        <package android:name="com.miui.securitycenter" />
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.MiRoot"
+        android:usesCleartextTraffic="true">
+
+        <!--
+          Target API 36：在 sw600dp+ 大屏上系统默认忽略方向/比例限制；
+          背屏歌词等依赖 setRequestedOrientation，暂保留兼容模式（API 37 起将失效，需改为自适应布局）。
+        -->
+        <property
+            android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
+            android:value="true" />
+
+        <!-- 🔑 关键：背屏准入证！已验证有效！ -->
+        <meta-data
+            android:name="miui.rear.policy"
+            android:value="1"/>
+
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"
+            tools:targetApi="31" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.MiRoot"
+            android:enableOnBackInvokedCallback="true">
+            <!-- 主壳迁到背屏时与背屏专用页同类策略，便于系统派发边缘返回/手势 -->
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".ui.permission.RootManageActivity"
+            android:exported="false"
+            android:label="@string/root_manage_title"
+            android:theme="@style/Theme.MiRoot"
+            android:enableOnBackInvokedCallback="true">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+        <activity
+            android:name=".ui.permission.ShizukuManageActivity"
+            android:exported="false"
+            android:label="@string/shizuku_manage_title"
+            android:theme="@style/Theme.MiRoot"
+            android:enableOnBackInvokedCallback="true">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+
+        <!-- 独立 taskAffinity：避免与 MainActivity 同任务，弹出系统录屏授权时把整个 MiRoot 主界面拉到前台 -->
+        <activity
+            android:name=".record.MediaProjectionRequestActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.wmqc.miroot.record.projection"
+            android:theme="@style/Theme.MiRoot.Transparent"
+            android:enableOnBackInvokedCallback="true">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+
+        <service
+            android:name=".record.RearScreenRecordService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse|mediaProjection|microphone">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="MiRoot rear screen record overlay" />
+        </service>
+
+        <service
+            android:name=".rear.RearAssistService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="MiRoot rear display wake and proximity assist" />
+        </service>
+
+        <service
+            android:name=".charging.ChargingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="MiRoot rear screen charging animation listener" />
+        </service>
+
+        <receiver
+            android:name=".charging.ChargingBootReceiver"
+            android:directBootAware="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".record.RearRecordQsTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_qs_record"
+            android:label="@string/tile_record_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".shell.RearScreenshotQsTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_qs_screenshot"
+            android:label="@string/tile_screenshot_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".lyrics.MusicProjectionQsTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_qs_music"
+            android:label="@string/tile_music_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".shell.SwitchToRearQsTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_qs_switch_rear"
+            android:label="@string/tile_switch_rear_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".rear.RearSwitchKeeperService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="MiRoot rear screen cast task keeper" />
+        </service>
+
+        <service
+            android:name=".lyrics.RootTaskService"
+            android:exported="false" />
+
+        <service
+            android:name=".lyrics.MusicProjectionService"
+            android:exported="false" />
+
+        <service
+            android:name=".lyrics.RearScreenWakeService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="MiRoot music lyrics rear display wake" />
+        </service>
+
+        <receiver
+            android:name=".lyrics.LyricsMusicProjectionReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.wmqc.miroot.lyrics.ACTION_OPEN_MUSIC_PROJECTION" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".rear.AppProjectionService"
+            android:exported="false" />
+
+        <receiver
+            android:name=".rear.AppProjectionBroadcastReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.wmqc.miroot.rear.ACTION_APP_PROJECTION" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".lyrics.ScreenshotSavedReceiver"
+            android:exported="false" />
+
+        <!-- 通知栏结束投屏：显式 Broadcast，避免 PendingIntent 拉起 Activity 在主屏闪一下 -->
+        <receiver
+            android:name=".rear.ProjectionNotificationStopReceiver"
+            android:exported="false" />
+
+        <activity
+            android:name=".lyrics.RearScreenWakeupActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.wmqc.miroot.lyrics.wakeup"
+            android:theme="@style/Theme.MiRoot.Transparent"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:enableOnBackInvokedCallback="true">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+
+        <activity
+            android:name=".lyrics.RearScreenLyricsActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.wmqc.miroot.lyrics.lyrics"
+            android:theme="@style/Theme.MiRoot.Transparent"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode|smallestScreenSize|density"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:enableOnBackInvokedCallback="true">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+
+        <receiver
+            android:name=".car.CarControlBroadcastReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.wmqc.miroot.car.ACTION_OPEN_CAR_CONTROL_PROJECTION" />
+                <action android:name="com.wmqc.miroot.car.ACTION_STOP_CAR_CONTROL_PROJECTION" />
+                <action android:name="com.tgwgroup.MiRearScreenSwitchers.ACTION_CAR_CONTROL_COMMAND" />
+                <action android:name="com.tgwgroup.MiRearScreenSwitchers.ACTION_QUERY_VEHICLE_STATUS" />
+                <action android:name="com.wmqc.miroot.car.ACTION_CAR_CONTROL_COMMAND" />
+                <action android:name="com.wmqc.miroot.car.ACTION_QUERY_VEHICLE_STATUS" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".car.CarControlProjectionService"
+            android:exported="false" />
+        <service
+            android:name=".car.CarControlCommandService"
+            android:exported="false" />
+        <service
+            android:name=".car.VehicleStatusQueryService"
+            android:exported="false" />
+
+        <activity
+            android:name=".car.CarControlLoginActivity"
+            android:exported="false"
+            android:label="@string/car_control_login_title"
+            android:theme="@style/Theme.MiRoot"
+            android:enableOnBackInvokedCallback="true">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+        <activity
+            android:name=".car.CarControlSettingsActivity"
+            android:exported="false"
+            android:label="@string/car_control_settings_title"
+            android:theme="@style/Theme.MiRoot"
+            android:enableOnBackInvokedCallback="true">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+
+        <activity
+            android:name=".car.RearScreenCarControlActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.wmqc.miroot.carcontrol"
+            android:theme="@style/Theme.MiRoot.Transparent"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode|smallestScreenSize|density"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:enableOnBackInvokedCallback="true">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+
+        <activity
+            android:name=".charging.RearScreenChargingActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.wmqc.miroot.charging"
+            android:theme="@style/Theme.MiRoot.Transparent"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode|smallestScreenSize|density"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:hardwareAccelerated="true"
+            android:enableOnBackInvokedCallback="true">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+
+        <activity
+            android:name=".rear.RearScreenTestActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.wmqc.miroot.rear_test"
+            android:theme="@style/Theme.MiRoot.Transparent"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode|smallestScreenSize|density"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:enableOnBackInvokedCallback="true">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+
+        <service
+            android:name=".service.MiRootNotificationListenerService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".ui.music.MusicAutoProjectionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="MiRoot music auto rear projection monitor" />
+        </service>
+
+        <receiver
+            android:name=".ui.music.MusicAutoProjectionBootReceiver"
+            android:directBootAware="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

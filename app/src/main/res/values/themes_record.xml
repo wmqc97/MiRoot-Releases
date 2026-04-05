@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MiRoot.Transparent" parent="Theme.MiRoot">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:colorBackgroundCacheHint">@null</item>
+    </style>
+
+    <!-- 主屏调试预览、或 API&lt;R 单屏路径用；背屏常规路径 Activity 主题为 Theme.MiRoot.Transparent，内容由窗口/布局设为不透。 -->
+    <style name="Theme.MiRoot.ChargingRear" parent="Theme.MiRoot">
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowBackground">@color/charging_window_bg</item>
+        <item name="android:colorBackground">@color/charging_window_bg</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:colorBackgroundCacheHint">@color/charging_window_bg</item>
+    </style>
+</resources>

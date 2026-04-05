@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.MiRoot" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/miuix_primary</item>
+        <item name="colorOnPrimary">@color/miuix_on_primary</item>
+        <item name="colorPrimaryContainer">@color/miuix_primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/miuix_on_primary_container</item>
+        <item name="colorSecondary">@color/miuix_primary</item>
+        <item name="colorOnSecondary">@color/miuix_on_primary</item>
+        <item name="android:colorBackground">@color/mi_page_bg</item>
+        <item name="colorSurface">@color/miuix_surface</item>
+        <item name="colorOnSurface">@color/mi_text_primary</item>
+        <item name="colorOnSurfaceVariant">@color/mi_text_secondary</item>
+        <item name="colorSurfaceContainer">@color/miuix_surface_container</item>
+        <item name="colorSurfaceContainerLow">@color/miuix_surface_container</item>
+        <item name="colorOutline">@color/mi_divider</item>
+        <item name="colorOutlineVariant">@color/mi_divider</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/miuix_surface</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="bottomNavigationStyle">@style/Widget.MiRoot.BottomNavigation</item>
+    </style>
+</resources>

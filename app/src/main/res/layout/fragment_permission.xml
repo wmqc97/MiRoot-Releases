@@ -1,0 +1,513 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/mi_page_bg"
+    android:fillViewport="false"
+    android:clipToPadding="false">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="@dimen/mi_page_scroll_padding"
+        android:paddingTop="@dimen/mi_page_scroll_padding"
+        android:paddingEnd="@dimen/mi_page_scroll_padding"
+        android:paddingBottom="@dimen/mi_page_scroll_padding">
+
+        <!-- 顶部：左侧状态卡片 + 右侧 Root / Shizuku 入口（底对齐至右侧 Shizuku 卡片底） -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:gravity="bottom"
+            android:orientation="horizontal">
+
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/card_permission_status"
+                style="@style/Widget.MiRoot.Card.PermissionStatus"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom"
+                android:layout_weight="1"
+                android:minHeight="140dp">
+
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="140dp">
+
+                    <!-- 底图叠层：向右下略加深，打钩叠在其右下角之上 -->
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/bg_perm_status_card_decoration" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top|start"
+                        android:layout_marginEnd="92dp"
+                        android:orientation="vertical"
+                        android:paddingStart="18dp"
+                        android:paddingTop="22dp"
+                        android:paddingEnd="18dp"
+                        android:paddingBottom="22dp">
+
+                        <TextView
+                            android:id="@+id/text_perm_title"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:background="?attr/selectableItemBackground"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle"
+                            tools:text="MiRoot · Root" />
+
+                        <TextView
+                            android:id="@+id/text_perm_version"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:layout_marginStart="-4dp"
+                            android:layout_marginEnd="-4dp"
+                            android:background="?attr/selectableItemBackground"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:paddingStart="4dp"
+                            android:paddingTop="6dp"
+                            android:paddingEnd="4dp"
+                            android:paddingBottom="6dp"
+                            android:textAppearance="@style/TextAppearance.MiRoot.Body"
+                            android:textSize="14sp"
+                            android:contentDescription="@string/settings_version_cd_readme"
+                            tools:text="v1.2" />
+                    </LinearLayout>
+
+                    <ImageView
+                        android:id="@+id/image_perm_state"
+                        android:layout_width="80dp"
+                        android:layout_height="80dp"
+                        android:layout_gravity="bottom|end"
+                        android:layout_marginEnd="10dp"
+                        android:layout_marginBottom="8dp"
+                        android:contentDescription="@null"
+                        android:scaleType="fitCenter"
+                        tools:src="@drawable/ic_perm_status_tick_large" />
+                </FrameLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <LinearLayout
+                android:layout_width="88dp"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom"
+                android:layout_marginStart="12dp"
+                android:orientation="vertical">
+
+                <FrameLayout
+                    android:id="@+id/card_action_force_stop"
+                    android:layout_width="52dp"
+                    android:layout_height="52dp"
+                    android:layout_gravity="end"
+                    android:background="@android:color/transparent"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackgroundBorderless">
+
+                    <ImageView
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="@string/content_desc_force_stop"
+                        android:padding="12dp"
+                        android:scaleType="fitCenter"
+                        app:srcCompat="@drawable/ic_power"
+                        app:tint="?attr/colorOnSurface" />
+                </FrameLayout>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_action_root"
+                    style="@style/Widget.MiRoot.Card"
+                    android:layout_width="88dp"
+                    android:layout_height="60dp"
+                    android:layout_marginTop="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground">
+
+                    <TextView
+                        android:id="@+id/text_action_root"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:text="@string/perm_short_root"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Title"
+                        android:textSize="15sp" />
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_action_shizuku"
+                    style="@style/Widget.MiRoot.Card"
+                    android:layout_width="88dp"
+                    android:layout_height="60dp"
+                    android:layout_marginTop="8dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:foreground="?attr/selectableItemBackground">
+
+                    <TextView
+                        android:id="@+id/text_action_shizuku"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:gravity="center"
+                        android:text="@string/perm_short_shizuku"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Title"
+                        android:textSize="15sp" />
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 权限授权状态 -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_runtime_auth"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            app:cardBackgroundColor="@color/mi_card_surface"
+            app:cardCornerRadius="@dimen/mi_corner_radius"
+            app:cardElevation="0dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:id="@+id/text_section_runtime_auth"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:text="@string/runtime_auth_section"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                <LinearLayout
+                    android:id="@+id/row_storage"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:background="@android:color/transparent"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:minHeight="48dp"
+                    android:orientation="horizontal"
+                    android:paddingVertical="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/runtime_auth_storage"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/status_storage"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.MiRoot.BodyStrong"
+                        android:textSize="14sp"
+                        tools:text="@string/runtime_auth_denied" />
+                </LinearLayout>
+
+                <View
+                    android:id="@+id/divider_after_storage"
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/mi_divider" />
+
+                <LinearLayout
+                    android:id="@+id/row_overlay"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@android:color/transparent"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:minHeight="48dp"
+                    android:orientation="horizontal"
+                    android:paddingVertical="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/runtime_auth_overlay"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/status_overlay"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.MiRoot.BodyStrong"
+                        android:textSize="14sp"
+                        tools:text="@string/runtime_auth_denied" />
+                </LinearLayout>
+
+                <View
+                    android:id="@+id/divider_after_overlay"
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/mi_divider" />
+
+                <LinearLayout
+                    android:id="@+id/row_battery"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@android:color/transparent"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:minHeight="48dp"
+                    android:orientation="horizontal"
+                    android:paddingVertical="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/runtime_auth_battery"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/status_battery"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.MiRoot.BodyStrong"
+                        android:textSize="14sp"
+                        tools:text="@string/runtime_auth_denied" />
+                </LinearLayout>
+
+                <View
+                    android:id="@+id/divider_after_battery"
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/mi_divider" />
+
+                <LinearLayout
+                    android:id="@+id/row_notification"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@android:color/transparent"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:minHeight="48dp"
+                    android:orientation="horizontal"
+                    android:paddingVertical="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/runtime_auth_notification"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/status_notification"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.MiRoot.BodyStrong"
+                        android:textSize="14sp"
+                        tools:text="@string/runtime_auth_denied" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- 系统信息 -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_system_info"
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:id="@+id/text_section_sys_info"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:text="@string/sys_info_section"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                <TextView
+                    android:id="@+id/label_os_version"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/sys_info_os_title"
+                    android:textAppearance="@style/TextAppearance.MiRoot.BodyStrong"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/value_os_version"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:gravity="start"
+                    android:textAppearance="@style/TextAppearance.MiRoot.Body"
+                    android:textSize="14sp"
+                    tools:text="Android 16 (API 36)" />
+
+                <TextView
+                    android:id="@+id/label_app_version"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/sys_info_app_title"
+                    android:textAppearance="@style/TextAppearance.MiRoot.BodyStrong"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/value_app_version"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:gravity="start"
+                    android:textAppearance="@style/TextAppearance.MiRoot.Body"
+                    android:textSize="14sp"
+                    tools:text="1.2" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_coolapk"
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp">
+
+            <LinearLayout
+                android:id="@+id/row_coolapk"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:contentDescription="@string/settings_coolapk_cd"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:minHeight="56dp"
+                android:orientation="horizontal"
+                android:padding="16dp">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="14dp"
+                    android:contentDescription="@null"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/kuan" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_coolapk_title"
+                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textColor="@color/mi_text_primary" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_coolapk_subtitle"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_about"
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp">
+
+            <LinearLayout
+                android:id="@+id/row_about"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:minHeight="56dp"
+                android:orientation="horizontal"
+                android:padding="16dp">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="14dp"
+                    android:contentDescription="@null"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    android:src="@mipmap/ic_launcher" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_about"
+                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textColor="@color/mi_text_primary" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_about_row_subtitle"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/button_refresh"
+            style="@style/Widget.MiRoot.Button.Text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="20dp"
+            android:text="@string/action_refresh" />
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

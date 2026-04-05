@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 状态卡片轻量底图：向右下略加深，衬托右下角打钩 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="315"
+        android:endColor="#14000000"
+        android:startColor="#00000000"
+        android:type="linear" />
+</shape>
