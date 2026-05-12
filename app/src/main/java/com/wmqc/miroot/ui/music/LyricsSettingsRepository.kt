@@ -8,6 +8,7 @@ import com.wmqc.miroot.lyrics.RearScreenLyricsActivity
 object LyricsSettingsRepository {
 
     private const val PREFS = "LyricsSettings"
+    private const val KEY_SHUFFLE_SPLIT_SCALE_VARIANCE = "shuffleSplitScaleVariance"
 
     fun load(context: Context): LyricsUiSettings {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -17,12 +18,29 @@ object LyricsSettingsRepository {
             normalLyricsAlpha = p.getInt("normalLyricsAlpha", 30),
             backgroundTextureAlpha = p.getInt("backgroundTextureAlpha", 20),
             wordByWord = p.getBoolean("wordByWord", false),
+            shuffleSplitEffect = p.getBoolean("shuffleSplitEffect", false),
+            shuffleSplitMode = p.getString("shuffleSplitMode", "WORD") ?: "WORD",
+            shuffleSplitOnlyCurrentLine = p.getBoolean("shuffleSplitOnlyCurrentLine", true),
+            shuffleSplitTiltRatio = p.getFloat("shuffleSplitTiltRatio", 5f),
+            shuffleSplitScaleVariance = if (p.contains(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE)) {
+                p.getFloat(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE, 0.22f)
+            } else {
+                adaptiveShuffleSplitScaleVariance(p.getFloat("textSize", 78f))
+            },
+            shuffleSplitPerformanceGuard = p.getBoolean("shuffleSplitPerformanceGuard", false),
             marqueeLight = p.getBoolean("marqueeLight", true),
+            neonDisplayEnabled = p.getBoolean("neonDisplay", p.getBoolean("lyricsNeonGlow", true)),
             neonBorder = p.getBoolean("neonBorder", true),
             marqueeLightSize = p.getFloat("marqueeLightSize", 18f),
             gestureControl = p.getBoolean("gestureControl", false),
             backgroundTexture = p.getBoolean("backgroundTexture", false),
             autoProjection = p.getBoolean("autoProjection", false),
+            breathingRhythmMs = p.getInt("breathingRhythmMs", 2000),
+            breathingScaleVariance = p.getFloat("breathingScaleVariance", 0.055f),
+            breathingDisplacementStrength = p.getFloat("breathingDisplacementStrength", 1f),
+            colorChangeIntervalMs = p.getInt("colorChangeIntervalMs", 1500),
+            shuffleLayoutRebuildIntervalMs = p.getInt("shuffleLayoutRebuildIntervalMs", 0),
+            projectionSyncOffsetMs = p.getInt("projectionSyncOffsetMs", DEFAULT_PROJECTION_SYNC_OFFSET_MS),
             abyssalMirror = p.getBoolean("abyssalMirror", false),
             abyssalGyroSensitivity = p.getFloat("abyssalGyroSensitivity", 1f),
             abyssalMovableRange = p.getFloat("abyssalMovableRange", 2.5f),
@@ -88,12 +106,25 @@ object LyricsSettingsRepository {
             .putInt("normalLyricsAlpha", fixed.normalLyricsAlpha)
             .putInt("backgroundTextureAlpha", fixed.backgroundTextureAlpha)
             .putBoolean("wordByWord", fixed.wordByWord)
+            .putBoolean("shuffleSplitEffect", fixed.shuffleSplitEffect)
+            .putString("shuffleSplitMode", fixed.shuffleSplitMode)
+            .putBoolean("shuffleSplitOnlyCurrentLine", fixed.shuffleSplitOnlyCurrentLine)
+            .putFloat("shuffleSplitTiltRatio", fixed.shuffleSplitTiltRatio)
+            .putFloat(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE, fixed.shuffleSplitScaleVariance)
+            .putBoolean("shuffleSplitPerformanceGuard", fixed.shuffleSplitPerformanceGuard)
             .putBoolean("marqueeLight", fixed.marqueeLight)
+            .putBoolean("neonDisplay", fixed.neonDisplayEnabled)
             .putBoolean("neonBorder", fixed.neonBorder)
             .putFloat("marqueeLightSize", fixed.marqueeLightSize)
             .putBoolean("gestureControl", fixed.gestureControl)
             .putBoolean("backgroundTexture", fixed.backgroundTexture)
             .putBoolean("autoProjection", fixed.autoProjection)
+            .putInt("breathingRhythmMs", fixed.breathingRhythmMs)
+            .putFloat("breathingScaleVariance", fixed.breathingScaleVariance)
+            .putFloat("breathingDisplacementStrength", fixed.breathingDisplacementStrength)
+            .putInt("colorChangeIntervalMs", fixed.colorChangeIntervalMs)
+            .putInt("shuffleLayoutRebuildIntervalMs", fixed.shuffleLayoutRebuildIntervalMs)
+            .putInt("projectionSyncOffsetMs", fixed.projectionSyncOffsetMs)
             .putBoolean("abyssalMirror", fixed.abyssalMirror)
             .putFloat("abyssalGyroSensitivity", fixed.abyssalGyroSensitivity)
             .putFloat("abyssalMovableRange", fixed.abyssalMovableRange)
@@ -112,5 +143,18 @@ object LyricsSettingsRepository {
         val p = stored?.trim().orEmpty()
         if (p.isEmpty() || !File(p).isFile) return null
         return p
+    }
+
+    /**
+     * 滑块未配置时按歌词字号给一个自适应默认值：
+     * 大字号默认浮动更小，小字号默认浮动更大。
+     */
+    private fun adaptiveShuffleSplitScaleVariance(textSize: Float): Float {
+        val minSize = 40f
+        val maxSize = 140f
+        val t = ((textSize - minSize) / (maxSize - minSize)).coerceIn(0f, 1f)
+        val maxVariance = 0.30f
+        val minVariance = 0.16f
+        return (maxVariance - (maxVariance - minVariance) * t).coerceIn(minVariance, maxVariance)
     }
 }

@@ -30,6 +30,7 @@ import android.view.animation.LinearInterpolator;
 import android.animation.ValueAnimator;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
+import com.wmqc.miroot.BuildConfig;
 
 import java.util.Random;
 
@@ -68,6 +69,8 @@ public class MarqueeLightView extends View {
     // 随机颜色相关
     private int[] lightColors = new int[LIGHT_COUNT];  // 每条光线的颜色
     private long lastColorChangeTime = 0;  // 上次颜色变化时间
+    private static final long DEBUG_COLOR_LOG_INTERVAL_MS = 5000L; // debug 下颜色日志最小间隔
+    private long lastColorLogTime = 0L;
     
     // 动画
     private ValueAnimator animator;
@@ -99,8 +102,10 @@ public class MarqueeLightView extends View {
     private float[] headPosResult = new float[2];
     private float[] tailPosResult = new float[2];
     
-    // 霓虹灯边框效果
-    private boolean neonBorderEnabled = false;  // 是否启用霓虹灯边框
+    /** 边框显示：是否绘制屏幕边缘边框路径（可与 {@link #neonEffectsEnabled} 独立）。 */
+    private boolean borderFrameEnabled = false;
+    /** 霓虹显示：为真时边框与跑马灯使用光晕/呼吸等霓虹效果；为假时边框为纯描边、跑马灯无光晕层。 */
+    private boolean neonEffectsEnabled = true;
     private Paint neonBorderPaint;  // 霓虹灯边框画笔
     private Paint neonBorderGlowPaint1;  // 霓虹边框外散光效1（最外层）
     private Paint neonBorderGlowPaint2;  // 霓虹边框外散光效2（中间层）
@@ -225,19 +230,58 @@ public class MarqueeLightView extends View {
     }
     
     /**
-     * 生成随机颜色
+     * 生成随机颜色：仅使用一组预设高亮色（保证始终为高亮颜色值）。
      */
     private void generateRandomColors() {
+        // 高亮色调色板（ARGB）：一律高饱和高亮，覆盖红橙黄绿青蓝紫等
+        final int[] highlightPalette = new int[] {
+                0xFFFF1744, // 亮红
+                0xFFFF4081, // 亮粉
+                0xFFFF6E40, // 橙红
+                0xFFFF9100, // 亮橙
+                0xFFFFC107, // 琥珀黄
+                0xFFFFEA00, // 柠檬黄
+                0xFFCDFF00, // 黄绿
+                0xFF00E676, // 祖母绿
+                0xFF69F0AE, // 鲜绿色
+                0xFF1DE9B6, // 青绿
+                0xFF00E5FF, // 湖蓝
+                0xFF40C4FF, // 亮蓝
+                0xFF2979FF, // 亮靛蓝
+                0xFF7C4DFF, // 亮紫
+                0xFFE040FB, // 品红紫
+                0xFFFF5252, // 强红
+                0xFFFF1744, // 亮红
+                0xFFFF80AB, // 浅粉
+                0xFFFFAB91, // 浅橘红
+                0xFFFFD740, // 金黄
+                0xFFFFF300, // 亮黄
+                0xFF76FF03, // 亮柠檬绿
+                0xFF64DD17, // 强绿
+                0xFF00C853, // 深绿
+                0xFF00BFA5, // 青绿
+                0xFF00C6FF, // 天蓝
+                0xFF00E5FF, // 亮青蓝
+                0xFF4D7CFF, // 蓝紫
+                0xFF3D5AFE, // 靛蓝
+                0xFF8C9EFF, // 淡靛蓝
+                0xFFD500F9, // 强紫
+                0xFFAA00FF  // 强紫红
+        };
+        final int n = highlightPalette.length;
         for (int i = 0; i < LIGHT_COUNT; i++) {
-            // 使用 HSV 生成“高饱和 + 高亮度”的随机色，跑马灯更艳、更丰富
-            float hue = random.nextFloat() * 360f;                 // 0-360
-            float saturation = 0.85f + random.nextFloat() * 0.15f; // 0.85-1.00
-            float value = 0.85f + random.nextFloat() * 0.15f;      // 0.85-1.00
-            lightColors[i] = Color.HSVToColor(new float[]{hue, saturation, value});
+            int idx = random.nextInt(n);
+            lightColors[i] = highlightPalette[idx];
         }
         lastColorChangeTime = System.currentTimeMillis();
-        LogHelper.d(TAG, "🎨 生成随机颜色: " + String.format("#%06X", lightColors[0] & 0x00FFFFFF) + 
-                  ", " + String.format("#%06X", lightColors[1] & 0x00FFFFFF));
+        if (BuildConfig.DEBUG) {
+            LogHelper.d(
+                    TAG,
+                    "🎨 高亮随机颜色: " +
+                            String.format("#%06X", lightColors[0] & 0x00FFFFFF) + ", " +
+                            String.format("#%06X", lightColors[1] & 0x00FFFFFF)
+            );
+        }
     }
     
     @Override
@@ -610,6 +654,17 @@ public class MarqueeLightView extends View {
         
         animator.start();
     }
+
+    private int resolveBorderBaseColor() {
+        if (colorSyncEnabled && colorSyncCallback != null) {
+            try {
+                return colorSyncCallback.getSyncColor() & 0x00FFFFFF;
+            } catch (Exception e) {
+                return NEON_BORDER_COLOR & 0x00FFFFFF;
+            }
+        }
+        return NEON_BORDER_COLOR & 0x00FFFFFF;
+    }
     
     @Override
     protected void onDraw(Canvas canvas) {
@@ -619,43 +674,28 @@ public class MarqueeLightView extends View {
             return;
         }
         
-        // 绘制霓虹灯边框（如果启用）- 多层叠加实现真实霓虹效果
-        if (neonBorderEnabled && borderPath != null) {
-            // 使用动画值控制边框透明度（呼吸效果）
-            int alphaValue = (int) (neonBorderAlpha * 255);
-            
-            // 获取边框颜色：如果启用了颜色联动，使用歌词颜色；否则使用默认颜色
-            int baseColor;
-            if (colorSyncEnabled && colorSyncCallback != null) {
-                try {
-                    baseColor = colorSyncCallback.getSyncColor() & 0x00FFFFFF;  // 使用歌词颜色
-                } catch (Exception e) {
-                    // 如果回调抛出异常（如lyricsView为null），使用默认颜色
-                    baseColor = NEON_BORDER_COLOR & 0x00FFFFFF;  // 使用默认粉色
-                }
+        // 边框路径（边框显示开时始终绘制；霓虹效果由 neonEffectsEnabled 决定）
+        if (borderFrameEnabled && borderPath != null) {
+            int baseColor = resolveBorderBaseColor();
+            if (neonEffectsEnabled) {
+                int alphaValue = (int) (neonBorderAlpha * 255);
+                int outerColor1 = (int)(alphaValue * 0.15f) << 24 | baseColor;
+                neonBorderGlowPaint1.setColor(outerColor1);
+                canvas.drawPath(borderPath, neonBorderGlowPaint1);
+                int outerColor2 = (int)(alphaValue * 0.30f) << 24 | baseColor;
+                neonBorderGlowPaint2.setColor(outerColor2);
+                canvas.drawPath(borderPath, neonBorderGlowPaint2);
+                int outerColor3 = (int)(alphaValue * 0.50f) << 24 | baseColor;
+                neonBorderGlowPaint3.setColor(outerColor3);
+                canvas.drawPath(borderPath, neonBorderGlowPaint3);
+                int borderColor = alphaValue << 24 | baseColor;
+                neonBorderPaint.setColor(borderColor);
+                canvas.drawPath(borderPath, neonBorderPaint);
             } else {
-                baseColor = NEON_BORDER_COLOR & 0x00FFFFFF;  // 使用默认粉色
+                int borderColor = 0xDD000000 | baseColor;
+                neonBorderPaint.setColor(borderColor);
+                canvas.drawPath(borderPath, neonBorderPaint);
             }
-            
-            // 第一层：最外层光效（最淡、最宽、最模糊）
-            int outerColor1 = (int)(alphaValue * 0.15f) << 24 | baseColor;  // 15%透明度
-            neonBorderGlowPaint1.setColor(outerColor1);
-            canvas.drawPath(borderPath, neonBorderGlowPaint1);
-            
-            // 第二层：中间层光效
-            int outerColor2 = (int)(alphaValue * 0.30f) << 24 | baseColor;  // 30%透明度
-            neonBorderGlowPaint2.setColor(outerColor2);
-            canvas.drawPath(borderPath, neonBorderGlowPaint2);
-            
-            // 第三层：内层光效（较亮）
-            int outerColor3 = (int)(alphaValue * 0.50f) << 24 | baseColor;  // 50%透明度
-            neonBorderGlowPaint3.setColor(outerColor3);
-            canvas.drawPath(borderPath, neonBorderGlowPaint3);
-            
-            // 第四层：主边框（最亮、最清晰）
-            int borderColor = alphaValue << 24 | baseColor;
-            neonBorderPaint.setColor(borderColor);
-            canvas.drawPath(borderPath, neonBorderPaint);
         }
         
         // 更新跑马灯颜色：如果启用了颜色联动，从歌词获取颜色；否则使用随机颜色
@@ -674,7 +714,10 @@ public class MarqueeLightView extends View {
                 }
                 if (colorChanged) {
                     lastColorChangeTime = currentTime;
-                    LogHelper.d(TAG, "🎨 跑马灯颜色已更新为歌词颜色: " + String.format("#%06X", lyricsColor & 0x00FFFFFF));
+                    if (BuildConfig.DEBUG && (currentTime - lastColorLogTime) >= DEBUG_COLOR_LOG_INTERVAL_MS) {
+                        lastColorLogTime = currentTime;
+                        LogHelper.d(TAG, "🎨 跑马灯颜色已更新为歌词颜色: " + String.format("#%06X", lyricsColor & 0x00FFFFFF));
+                    }
                 }
             } catch (Exception e) {
                 // 如果回调抛出异常（如lyricsView为null），使用随机颜色
@@ -728,22 +771,23 @@ public class MarqueeLightView extends View {
             // V3.17: 创建随机颜色渐变（从随机颜色到透明）
             int headColor = lightColors[lineIndex];  // 使用随机颜色作为头部颜色
             
-            // 单层外散光效（原三层合并：线宽约 4×、渐变与 14px 模糊折中原视觉）
-            Paint glowPaint = lightGlowPaints[lineIndex];
-            int glowHead = (headColor & 0x00FFFFFF) | 0x42000000;   // ~26% 头部
-            int glowMid = (headColor & 0x00FFFFFF) | 0x1A000000;    // ~10% 中段
-            LinearGradient glowGradient = new LinearGradient(
-                headPosResult[0], headPosResult[1],
-                tailPosResult[0], tailPosResult[1],
-                new int[]{glowHead, glowMid, 0x00000000},
-                new float[]{0f, 0.38f, 1f},
-                Shader.TileMode.CLAMP
-            );
-            glowPaint.setShader(glowGradient);
-            glowPaint.setStrokeWidth(lightSize * 4f);
-            glowPaint.setMaskFilter(marqueeGlowBlur);
-            canvas.drawPath(snakePathReuse, glowPaint);
-            glowPaint.setShader(null);
+            if (neonEffectsEnabled) {
+                Paint glowPaint = lightGlowPaints[lineIndex];
+                int glowHead = (headColor & 0x00FFFFFF) | 0x42000000;   // ~26% 头部
+                int glowMid = (headColor & 0x00FFFFFF) | 0x1A000000;    // ~10% 中段
+                LinearGradient glowGradient = new LinearGradient(
+                    headPosResult[0], headPosResult[1],
+                    tailPosResult[0], tailPosResult[1],
+                    new int[]{glowHead, glowMid, 0x00000000},
+                    new float[]{0f, 0.38f, 1f},
+                    Shader.TileMode.CLAMP
+                );
+                glowPaint.setShader(glowGradient);
+                glowPaint.setStrokeWidth(lightSize * 4f);
+                glowPaint.setMaskFilter(marqueeGlowBlur);
+                canvas.drawPath(snakePathReuse, glowPaint);
+                glowPaint.setShader(null);
+            }
             
             // V3.17: 确保线条粗细一致（在所有位置，包括圆角）
             LinearGradient gradient = new LinearGradient(
@@ -774,7 +818,7 @@ public class MarqueeLightView extends View {
             stopNeonBorderAnimation();
         } else if (screenWidth > 0 && screenHeight > 0) {
             startAnimation();
-            if (neonBorderEnabled) startNeonBorderAnimation();
+            if (borderFrameEnabled && neonEffectsEnabled) startNeonBorderAnimation();
         }
     }
     
@@ -788,7 +832,7 @@ public class MarqueeLightView extends View {
             } else if (animator == null) {
                 startAnimation();
             }
-            if (neonBorderEnabled) startNeonBorderAnimation();
+            if (borderFrameEnabled && neonEffectsEnabled) startNeonBorderAnimation();
         }
     }
     
@@ -823,25 +867,51 @@ public class MarqueeLightView extends View {
     }
     
     /**
-     * 设置霓虹灯边框是否启用
+     * 边框显示：是否绘制边缘边框路径（无霓虹时仅为描边）。
      */
-    public void setNeonBorderEnabled(boolean enabled) {
-        if (neonBorderEnabled != enabled) {
-            neonBorderEnabled = enabled;
-            if (enabled) {
+    public void setBorderFrameEnabled(boolean enabled) {
+        if (borderFrameEnabled != enabled) {
+            borderFrameEnabled = enabled;
+            if (enabled && neonEffectsEnabled) {
                 startNeonBorderAnimation();
             } else {
                 stopNeonBorderAnimation();
             }
             invalidate();
-            LogHelper.d(TAG, "🎨 霓虹灯边框: " + (enabled ? "启用" : "禁用"));
+            LogHelper.d(TAG, "🖼 边框显示: " + (enabled ? "启用" : "禁用"));
         }
+    }
+
+    /**
+     * 霓虹显示：控制边框与跑马灯的光晕/呼吸等霓虹效果（关时仍可显示边框与跑马灯线条）。
+     */
+    public void setNeonEffectsEnabled(boolean enabled) {
+        if (neonEffectsEnabled != enabled) {
+            neonEffectsEnabled = enabled;
+            if (borderFrameEnabled && neonEffectsEnabled) {
+                startNeonBorderAnimation();
+            } else {
+                stopNeonBorderAnimation();
+            }
+            invalidate();
+            LogHelper.d(TAG, "✨ 霓虹效果: " + (enabled ? "启用" : "禁用"));
+        }
+    }
+
+    /** @deprecated 使用 {@link #setBorderFrameEnabled(boolean)} 与 {@link #setNeonEffectsEnabled(boolean)} */
+    @Deprecated
+    public void setNeonBorderEnabled(boolean enabled) {
+        setBorderFrameEnabled(enabled);
+        setNeonEffectsEnabled(enabled);
     }
     
     /**
      * 启动霓虹灯边框呼吸动画
      */
     private void startNeonBorderAnimation() {
+        if (!borderFrameEnabled || !neonEffectsEnabled) {
+            return;
+        }
         if (neonBorderAnimator != null) {
             neonBorderAnimator.cancel();
         }
@@ -874,11 +944,18 @@ public class MarqueeLightView extends View {
         neonBorderAlpha = 0.5f;  // 重置为默认值
     }
     
-    /**
-     * 获取霓虹灯边框是否启用
-     */
+    public boolean isBorderFrameEnabled() {
+        return borderFrameEnabled;
+    }
+
+    public boolean isNeonEffectsEnabled() {
+        return neonEffectsEnabled;
+    }
+
+    /** @deprecated 见 {@link #isBorderFrameEnabled()} */
+    @Deprecated
     public boolean isNeonBorderEnabled() {
-        return neonBorderEnabled;
+        return borderFrameEnabled;
     }
     
     /**

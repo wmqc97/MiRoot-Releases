@@ -20,6 +20,9 @@ import kotlin.concurrent.thread
 object ForegroundAppRearSwitcher {
 
     private const val TAG = "FgAppRearSwitcher"
+    private const val REAR_DISPLAY_ID = 1
+    private const val REAR_DEFAULT_DPI = 450
+    private const val REAR_DEFAULT_ROTATION = 0
 
     private fun getAppName(ctx: Context, packageName: String): String =
         try {
@@ -41,8 +44,6 @@ object ForegroundAppRearSwitcher {
         onTileSubtitle: ((String) -> Unit)? = null,
     ) {
         val appCtx = ctx.applicationContext
-        val rearDisplayId = 1
-
         fun feedback(msg: String) {
             onTileSubtitle?.invoke(msg) ?: Unit
         }
@@ -53,7 +54,7 @@ object ForegroundAppRearSwitcher {
                 try {
                     val oldParts = prev.split(":")
                     val oldPackageName = oldParts[0]
-                    val rearForegroundApp = ts.getForegroundAppOnDisplay(rearDisplayId)
+                    val rearForegroundApp = ts.getForegroundAppOnDisplay(REAR_DISPLAY_ID)
                     if (rearForegroundApp != null && rearForegroundApp == prev) {
                         val oldAppName = getAppName(appCtx, oldPackageName)
                         try {
@@ -84,27 +85,46 @@ object ForegroundAppRearSwitcher {
 
             val currentApp = ts.getCurrentForegroundApp()
 
-            val serviceIntent = Intent(appCtx, RearSwitchKeeperService::class.java).apply {
-                putExtra("lastMovedTask", currentApp)
-                putExtra("keepScreenOnEnabled", RearAssistPrefs.isKeepScreenOnEnabled(appCtx))
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                appCtx.startForegroundService(serviceIntent)
-            } else {
-                appCtx.startService(serviceIntent)
-            }
-
             if (currentApp != null && currentApp.contains(":")) {
                 val parts = currentApp.split(":")
                 val packageName = parts[0]
                 val taskId = parts[1].toInt()
                 val appName = getAppName(appCtx, packageName)
+                val appConfig = AppProjectionDisplayPrefs.getConfig(appCtx, packageName)
+                if (appConfig != null) {
+                    val appliedConfigOk = applyProjectionDisplayConfig(
+                        context = appCtx,
+                        ts = ts,
+                        config = appConfig,
+                    )
+                    if (!appliedConfigOk) {
+                        mainHandler.post {
+                            Toast.makeText(appCtx, R.string.apps_projection_apply_failed, Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } else {
+                    // 未为该应用设置投屏参数：保持背屏当前 DPI/旋转不变
+                    AppProjectionDisplayPrefs.clearSessionSnapshot(appCtx)
+                }
 
-                val success = ts.moveTaskToDisplay(taskId, rearDisplayId)
+                val serviceIntent = Intent(appCtx, RearSwitchKeeperService::class.java).apply {
+                    putExtra("lastMovedTask", currentApp)
+                    putExtra("keepScreenOnEnabled", RearAssistPrefs.isKeepScreenOnEnabled(appCtx))
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    appCtx.startForegroundService(serviceIntent)
+                } else {
+                    appCtx.startService(serviceIntent)
+                }
+
+                val success = ts.moveTaskToDisplay(taskId, REAR_DISPLAY_ID)
 
                 if (success) {
                     SwitchToRearQsTileService.recordLastMovedTask(currentApp)
                     LyricsTaskTracking.saveLastTask(packageName, taskId)
+                    if (appConfig != null) {
+                        scheduleReapplyProjectionDisplayConfig(ts, appConfig)
+                    }
 
                     try {
                         thread(name = "MiRoot-CollapseStatusBar") {
@@ -127,7 +147,7 @@ object ForegroundAppRearSwitcher {
                     }, 300)
 
                     try {
-                        if (!ts.launchWakeActivity(rearDisplayId)) {
+                        if (!ts.launchWakeActivity(REAR_DISPLAY_ID)) {
                             LogHelper.w(TAG, "TaskService launchWakeActivity returned false")
                         }
                     } catch (e: Exception) {
@@ -136,6 +156,7 @@ object ForegroundAppRearSwitcher {
 
                     feedback(appCtx.getString(R.string.tile_switch_feedback_ok))
                 } else {
+                    restoreProjectionDisplayState(appCtx, ts)
                     try {
                         ts.collapseStatusBar()
                     } catch (e: Exception) {
@@ -157,6 +178,95 @@ object ForegroundAppRearSwitcher {
         } catch (e: Exception) {
             LogHelper.e(TAG, "Error switching app", e)
             feedback(appCtx.getString(R.string.tile_switch_feedback_error))
+        }
+    }
+
+    private fun applyProjectionDisplayConfig(
+        context: Context,
+        ts: ITaskService,
+        config: AppProjectionDisplayPrefs.AppDisplayConfig,
+    ): Boolean {
+        return try {
+            // 结束投屏统一恢复固定默认值，不再记录/恢复原始快照。
+            AppProjectionDisplayPrefs.clearSessionSnapshot(context)
+
+            val dpiOk = runShellWithDiagnostics(ts, "wm density ${config.dpi} -d $REAR_DISPLAY_ID")
+            val rotationOk = ts.setDisplayRotation(REAR_DISPLAY_ID, config.rotation)
+            LogHelper.d(
+                TAG,
+                "apply projection display config: displayId=$REAR_DISPLAY_ID dpi=${config.dpi} dpiOk=$dpiOk rotation=${config.rotation} rotationOk=$rotationOk",
+            )
+            dpiOk && rotationOk
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "applyProjectionDisplayConfig failed: ${e.message}")
+            false
+        }
+    }
+
+    private fun restoreProjectionDisplayState(
+        context: Context,
+        ts: ITaskService,
+    ) {
+        try {
+            // 结束或失败时强制恢复固定默认值：DPI 450 + 旋转 0。
+            val dpiOk = runShellWithDiagnostics(ts, "wm density $REAR_DEFAULT_DPI -d $REAR_DISPLAY_ID")
+            val rotOk =
+                runCatching { ts.setDisplayRotation(REAR_DISPLAY_ID, REAR_DEFAULT_ROTATION) }
+                    .getOrDefault(false)
+            if (!dpiOk || !rotOk) {
+                LogHelper.w(
+                    TAG,
+                    "restoreProjectionDisplayState fixed-default restore failed: dpiOk=$dpiOk rotOk=$rotOk",
+                )
+            }
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "restoreProjectionDisplayState failed: ${e.message}")
+        } finally {
+            AppProjectionDisplayPrefs.clearSessionSnapshot(context)
+        }
+    }
+
+    private fun scheduleReapplyProjectionDisplayConfig(
+        ts: ITaskService,
+        config: AppProjectionDisplayPrefs.AppDisplayConfig,
+    ) {
+        try {
+            thread(name = "MiRoot-ReapplyProjectionConfig") {
+                val waits = longArrayOf(180L, 420L, 900L)
+                for (wait in waits) {
+                    Thread.sleep(wait)
+                    val dpiOk = runShellWithDiagnostics(ts, "wm density ${config.dpi} -d $REAR_DISPLAY_ID")
+                    val rotationOk = try {
+                        ts.setDisplayRotation(REAR_DISPLAY_ID, config.rotation)
+                    } catch (e: Exception) {
+                        LogHelper.w(TAG, "reapply rotation failed: ${e.message}")
+                        false
+                    }
+                    if (dpiOk && rotationOk) {
+                        LogHelper.d(TAG, "reapply projection config success after ${wait}ms")
+                        return@thread
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "scheduleReapplyProjectionDisplayConfig failed: ${e.message}")
+        }
+    }
+
+    private fun runShellWithDiagnostics(ts: ITaskService, rawCmd: String): Boolean {
+        return try {
+            val cmd = "$rawCmd 2>&1; echo __RC:$?"
+            val out = ts.executeShellCommandWithResult(cmd).orEmpty().trim()
+            val ok = out.contains("__RC:0")
+            if (ok) {
+                LogHelper.d(TAG, "shell ok: $rawCmd")
+            } else {
+                LogHelper.w(TAG, "shell fail: $rawCmd ; out=$out")
+            }
+            ok
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "shell ex: $rawCmd ; ${e.message}")
+            false
         }
     }
 }

@@ -1,6 +1,7 @@
 package com.wmqc.miroot.capability
 
 import android.Manifest
+import android.app.AppOpsManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -9,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.os.PowerManager
+import android.os.Process
 import android.provider.Settings
 import androidx.core.content.ContextCompat
 
@@ -52,6 +54,25 @@ object RuntimePermissionGate {
             .any { it.packageName == pkg }
     }
 
+    /**
+     * Android 11+：应用列表可见性（QUERY_ALL_PACKAGES）。
+     * Android 16 部分 ROM 会提供用户侧开关，通常映射到 AppOps。
+     */
+    fun canQueryAllPackages(ctx: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return true
+        val permGranted = ContextCompat.checkSelfPermission(
+            ctx,
+            Manifest.permission.QUERY_ALL_PACKAGES,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!permGranted) return false
+
+        val appOps = ctx.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        val queryAllAllowed = isAppOpAllowed(appOps, OPSTR_QUERY_ALL_PACKAGES, ctx.packageName)
+        // Xiaomi HyperOS/MIUI 上常见的“读取应用列表”开关，可能走独立 AppOps。
+        val miuiListAllowed = isAppOpAllowed(appOps, OPSTR_MIUI_GET_INSTALLED_APPS, ctx.packageName)
+        return queryAllAllowed && miuiListAllowed
+    }
+
     fun intentAppDetails(ctx: Context): Intent =
         Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
             data = Uri.fromParts("package", ctx.packageName, null)
@@ -61,6 +82,38 @@ object RuntimePermissionGate {
         Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
             data = Uri.parse("package:${ctx.packageName}")
         }
+
+    /**
+     * 应用列表权限设置：优先小米权限编辑器，再回落到应用详情页。
+     */
+    fun queryAllPackagesPermissionIntents(ctx: Context): List<Intent> {
+        val pkg = ctx.packageName
+        return buildList {
+            add(
+                Intent("miui.intent.action.APP_PERM_EDITOR").apply {
+                    component = ComponentName(
+                        "com.miui.securitycenter",
+                        "com.miui.permcenter.permissions.PermissionsEditorActivity",
+                    )
+                    putExtra("extra_pkgname", pkg)
+                    putExtra("extra_perm_id", "android.permission.QUERY_ALL_PACKAGES")
+                },
+            )
+            add(
+                Intent("miui.intent.action.APP_PERM_EDITOR").apply {
+                    component = ComponentName(
+                        "com.miui.securitycenter",
+                        "com.miui.permcenter.permissions.AppPermissionsEditorActivity",
+                    )
+                    putExtra("extra_pkgname", pkg)
+                },
+            )
+            add(intentAppDetails(ctx))
+        }
+    }
+
+    fun firstResolvableQueryAllPackagesIntent(ctx: Context, pm: PackageManager): Intent? =
+        queryAllPackagesPermissionIntents(ctx).firstOrNull { it.resolveActivity(pm) != null }
 
     /**
      * 悬浮窗设置：优先小米权限编辑器（否则系统页常出现「找不到该应用」），再 AOSP，最后打开总列表。
@@ -115,6 +168,66 @@ object RuntimePermissionGate {
     fun intentNotificationListenerSettings(): Intent =
         Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
 
+    /**
+     * Xiaomi/MIUI/HyperOS：自启动管理入口（不同版本组件名可能不同，调用方需做 resolveActivity 兜底）。
+     *
+     * 说明：通知监听在 MIUI 上常受「自启动 / 后台限制 / 省电策略」影响导致系统拒绝绑定服务，
+     * 即便用户已在系统页勾选了「通知使用权」。
+     */
+    fun miuiAutostartManagementIntents(ctx: Context): List<Intent> {
+        // 组件名参考：MIUI SecurityCenter / PermCenter 常见路径
+        val comps = listOf(
+            ComponentName(
+                "com.miui.securitycenter",
+                "com.miui.permcenter.autostart.AutoStartManagementActivity",
+            ),
+            ComponentName(
+                "com.miui.securitycenter",
+                "com.miui.permcenter.permissions.PermissionsEditorActivity",
+            ),
+            ComponentName(
+                "com.miui.securitycenter",
+                "com.miui.permcenter.permissions.AppPermissionsEditorActivity",
+            ),
+        )
+        val pkg = ctx.packageName
+        return buildList {
+            for (c in comps) {
+                add(
+                    Intent("miui.intent.action.OP_AUTO_START").apply {
+                        component = c
+                        // 不同页面支持的 extra 不完全一致；多塞不会崩
+                        putExtra("package_name", pkg)
+                        putExtra("extra_pkgname", pkg)
+                    },
+                )
+            }
+            // 最后兜底到应用详情页（用户可手动找「自启动/后台弹出界面/省电策略」等）
+            add(intentAppDetails(ctx))
+        }
+    }
+
+    fun firstResolvableMiuiAutostartIntent(ctx: Context, pm: PackageManager): Intent? =
+        miuiAutostartManagementIntents(ctx).firstOrNull { it.resolveActivity(pm) != null }
+
     fun intentBatteryOptimizationList(): Intent =
         Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+
+    private fun isAppOpAllowed(appOps: AppOpsManager, op: String, packageName: String): Boolean {
+        return try {
+            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                appOps.unsafeCheckOpNoThrow(op, Process.myUid(), packageName)
+            } else {
+                @Suppress("DEPRECATION")
+                appOps.checkOpNoThrow(op, Process.myUid(), packageName)
+            }
+            mode == AppOpsManager.MODE_ALLOWED || mode == AppOpsManager.MODE_DEFAULT
+        } catch (_: Throwable) {
+            // 某些 ROM 对未知 op 直接抛异常；按“未限制”处理，避免状态页崩溃。
+            true
+        }
+    }
+
+    private const val OPSTR_QUERY_ALL_PACKAGES = "android:query_all_packages"
+    private const val OPSTR_MIUI_GET_INSTALLED_APPS = "android:get_installed_apps"
 }

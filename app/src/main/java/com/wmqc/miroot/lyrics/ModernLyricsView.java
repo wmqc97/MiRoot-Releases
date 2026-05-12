@@ -17,11 +17,11 @@ package com.wmqc.miroot.lyrics;
 
 import android.animation.ValueAnimator;
 import android.content.Context;
+import android.graphics.BlurMaskFilter;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
-import android.graphics.BlurMaskFilter;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.text.Layout;
@@ -36,10 +36,19 @@ import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewParent;
 import android.view.animation.DecelerateInterpolator;
+import com.wmqc.miroot.BuildConfig;
+import com.wmqc.miroot.R;
 
+import java.text.BreakIterator;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 现代化歌词显示视图
@@ -73,7 +82,7 @@ public class ModernLyricsView extends View {
     private int colorTransitionStart = 0xFFFF0000;  // 颜色过渡起始颜色
     private float colorTransitionProgress = 0f;  // 颜色过渡进度（0-1）
     private long lastColorChangeTime = 0;        // 上次颜色变化时间
-    private static final long COLOR_CHANGE_INTERVAL = 1500;  // 颜色变化间隔（1.5秒）
+    private static final long COLOR_CHANGE_INTERVAL_DEFAULT_MS = 1500;  // 颜色变化间隔（1.5秒）
     private long lastColorUpdateTime = 0;        // 上次颜色更新时间（用于节流）
     private static final long COLOR_UPDATE_THROTTLE_MS = 33;  // 颜色更新节流（约30fps，减轻与跑马灯同屏时的 CPU）
     
@@ -123,23 +132,50 @@ public class ModernLyricsView extends View {
     }
     private static final int TRANSLATION_COLOR = 0x66CCCCCC;   // 翻译颜色(浅灰色，适配黑色背景)
     private static final long SCROLL_ANIMATION_DURATION = 300; // 滚动动画时长(毫秒)
+    private static final long SCROLL_ANIMATION_THROTTLE_MS = 80L;
+    private static final float SCROLL_ANIMATION_MIN_DELTA_PX = 6f;
+    private static final long PAUSE_LOW_FPS_AFTER_MS = 3000L;
+    private static final long PAUSE_LOW_FPS_FRAME_INTERVAL_MS = 250L;
+    private static final long SHUFFLE_INVALIDATE_THROTTLE_MS = 50L; // 约20fps，降低背屏分词模式重绘压力
     private static final int VISIBLE_LINES = 7;                // 可见行数
     private static final float STROKE_WIDTH = 1f;              // 描边宽度(1px)
     private static final int STROKE_COLOR = 0x4D000000;       // 描边颜色(30%透明度黑色)
     private static final float TEXT_OUTLINE_WIDTH = 1.5f;    // 文字轮廓描边宽度(1.5px)
     private static final int TEXT_OUTLINE_COLOR = 0x80000000; // 文字轮廓描边颜色(50%透明度黑色)
-    private static final float SCALE_MIN = 0.98f;              // 缩放最小值
-    private static final float SCALE_MAX = 1.1f;               // 缩放最大值（从1.02调整为1.1）
-    private static final float DISPLACEMENT_OFFSET = 2.5f;     // 微位移偏移(2-3px)
+    // 呼吸缩放幅度中等：降低夸张感，保留可感知的字体浮动
+    private static final float SCALE_MIN = 0.97f;              // 缩放最小值
+    private static final float SCALE_MAX = 1.08f;              // 缩放最大值
+    private static final long BREATHING_RHYTHM_MIN_MS = 600L;
+    private static final long BREATHING_RHYTHM_MAX_MS = 5000L;
+    private static final float BREATHING_SCALE_VARIANCE_MIN = 0f;
+    private static final float BREATHING_SCALE_VARIANCE_MAX = 0.20f;
+    private static final float BREATHING_DISPLACEMENT_STRENGTH_MIN = 0f;
+    private static final float BREATHING_DISPLACEMENT_STRENGTH_MAX = 3.0f;
+    private static final long COLOR_CHANGE_INTERVAL_MIN_MS = 500L;
+    private static final long COLOR_CHANGE_INTERVAL_MAX_MS = 5000L;
+    private static final long SHUFFLE_LAYOUT_REBUILD_INTERVAL_MAX_MS = 300L;
+    private static final float DISPLACEMENT_OFFSET = 2.2f;     // 微位移偏移
     private static final long WORD_FADE_DURATION = 100;        // 逐字淡入动画时长(0.1s)
+    private static final float SHUFFLE_MAX_OFFSET_X = 28f;
+    private static final float SHUFFLE_MAX_OFFSET_Y = 14f;
+    private static final float SHUFFLE_MAX_ROTATION = 7f;
+    private static final float SHUFFLE_MIN_SCALE = 0.92f;
+    private static final float SHUFFLE_MAX_SCALE = 1.08f;
+    private static final float SHUFFLE_CAMERA_AVOID_WIDTH_RATIO = 0.34f;
+    private static final float SHUFFLE_CAMERA_AVOID_HEIGHT_RATIO = 0.22f;
+    private static final float SHUFFLE_LEFT_CAMERA_AVOID_PX = 280f;
+    private static final float SHUFFLE_MIN_TOKEN_SPACING = 56f;
     
     // 数据
     private List<EnhancedLRCParser.EnhancedLyricLine> lyricLines = new ArrayList<>();
     private int currentLineIndex = -1;
     private long currentPosition = 0;
+    /** 最近一次来自 MediaSession/动画器的原始播放位置（毫秒），不含 [timeAdjustOffset]。 */
+    private long lastRawPlaybackPosition = 0;
     private float scrollY = 0f;
     private float targetScrollY = 0f;
-    private long timeAdjustOffset = 0; // 时间调整偏移量（毫秒），V3.16: 已禁用时间快进，设置为0
+    /** 时间调整偏移量（毫秒）：正数表示相对媒体进度提前显示（与歌词滞后于声音时调大）。 */
+    private long timeAdjustOffset = 0;
     
     // 绘图相关
     private TextPaint currentPaint;
@@ -149,17 +185,27 @@ public class ModernLyricsView extends View {
     private Paint progressPaint;
     private Paint bgPaint;  // 纯黑背景，避免 onDraw 每帧 new Paint
     private Paint strokePaint;  // 描边画笔
+    private Paint shufflePaint; // 分词打乱绘制画笔
     private TextPaint backgroundTexturePaint;  // V3.17: 背景纹理画笔
-    private Paint glowPaint;  // 发光效果画笔
     private TextPaint outlinePaint;  // 文字轮廓描边画笔（用于增强可读性）
+    private TextPaint neonGlowPaintOuter; // 兼容旧逻辑保留
+    private TextPaint neonGlowPaintInner; // 兼容旧逻辑保留
+    private TextPaint neonGlowStrokePaint; // 兼容旧逻辑保留
     
     // 动画
     private ValueAnimator scrollAnimator;
+    private long lastScrollAnimateStartMs = 0L;
+    private float lastScrollAnimateTargetY = Float.NaN;
     private ValueAnimator scaleAnimator;  // 缩放动画（呼吸动画）
     private float currentScale = 1.0f;    // 当前缩放值
     private float currentDisplacement = 0f; // 当前位移值
     private long baseScaleAnimationDuration = 2000;  // 基础缩放动画时长（毫秒）
     private long currentScaleAnimationDuration = 2000;  // 当前缩放动画时长（关联音谱）
+    private float breathingScaleVariance = 0.055f;
+    private float breathingScaleMin = SCALE_MIN;
+    private float breathingScaleMax = SCALE_MAX;
+    private float breathingDisplacementStrength = 1.0f;
+    private long colorChangeIntervalMs = COLOR_CHANGE_INTERVAL_DEFAULT_MS;
     
     
     // 手势
@@ -182,13 +228,38 @@ public class ModernLyricsView extends View {
     private boolean enableGesture = true;       // 是否启用手势交互
     private boolean showBackgroundTexture = true; // V3.17: 是否显示背景纹理
     private boolean showBackgroundGradient = false; // V3.17: 禁用背景渐变，使用纯黑背景
+    private boolean enableShuffleSplitEffect = false; // 当前行分词打乱效果（默认关闭，不影响原有歌词效果）
+    private boolean neonLyricsEnabled = true; // 歌词霓虹开关（由“霓虹效果”控制）
+    private boolean shuffleOnlyCurrentLine = true; // 只显示当前行
+    private String shuffleSplitMode = "WORD"; // CHAR / WORD / PHRASE
+    private float shuffleSplitTiltRatio = 5f; // 0..20: 最大倾斜角度（度）
+    private float shuffleSplitScaleVariance = 0.22f; // 0..0.4: 词组大小正负浮动强度
+    private String stableShuffleSignature = "";
+    private List<ShuffleToken> stableShuffleTokens = new ArrayList<>();
+    private int lastShuffleLineCount = 0;
+    private int lastShuffleTokenCount = 0;
+    private OnShuffleDebugInfoListener shuffleDebugInfoListener;
     
     // 调试 / 节流
     private long lastDrawTime = 0;
     private long lastOffCenterLogTime = 0;
+    private static final long DEBUG_DRAW_LOG_INTERVAL_MS = 5000L;
+    private static final long DEBUG_OFFCENTER_LOG_INTERVAL_MS = 8000L;
     /** 逐字模式下行内进度刷新：限制 postInvalidate 频率 */
     private long lastLyricProgressInvalidateTime = 0;
     private static final long LYRIC_PROGRESS_INVALIDATE_MS = 33L;
+    private boolean shufflePerformanceGuardEnabled = true;
+    private boolean powerSavingModeEnabled = false;
+    private boolean trackLoading = false;
+    private boolean playbackActive = true;
+    private long playbackStateChangedAtMs = 0L;
+    private long lastPausedInvalidateAtMs = 0L;
+    private long shuffleLastFrameSampleMs = 0L;
+    private float shuffleFpsEma = 60f;
+    private int shufflePerfLevel = 0; // 0=全特效, 1=轻降级, 2=强降级
+    private long shuffleLastLayoutBuildMs = 0L;
+    private long shuffleLayoutBuildIntervalOverrideMs = -1L;
+    private long shuffleLayoutBuildIntervalMs = 0L;
     
     // 回调接口
     public interface OnLyricLineClickListener {
@@ -202,6 +273,42 @@ public class ModernLyricsView extends View {
     
     private OnLyricLineClickListener lineClickListener;
     private OnExitProjectionListener exitProjectionListener;
+    private final ExecutorService tokenizeExecutor = Executors.newSingleThreadExecutor();
+    private final ConcurrentHashMap<String, List<TokenChunk>> tokenCache = new ConcurrentHashMap<>();
+    private final Set<String> pendingTokenTasks = ConcurrentHashMap.newKeySet();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private long lastShuffleInvalidateAtMs = 0L;
+    private final Runnable tokenizerReadyListener = new Runnable() {
+        @Override
+        public void run() {
+            clearTokenizationCache();
+            refreshShuffleAfterWordTokenChange();
+        }
+    };
+
+    private static class ShuffleToken {
+        final String text;
+        final float width;
+        final float x;
+        final float y;
+        final float rotation;
+        final float scale;
+        final float textSize;
+
+        ShuffleToken(String text, float width, float x, float y, float rotation, float scale, float textSize) {
+            this.text = text;
+            this.width = width;
+            this.x = x;
+            this.y = y;
+            this.rotation = rotation;
+            this.scale = scale;
+            this.textSize = textSize;
+        }
+    }
+
+    public interface OnShuffleDebugInfoListener {
+        void onDebugInfo(float textSize, float variance, float angle, int lineCount, int tokenCount);
+    }
     
     public ModernLyricsView(Context context) {
         this(context, null);
@@ -217,6 +324,8 @@ public class ModernLyricsView extends View {
     }
     
     private void init() {
+        // 优先由 RenderThread 合成滚动动画，减轻 UI 线程同步绘制压力。
+        setLayerType(LAYER_TYPE_HARDWARE, null);
         Typeface lyricTypeface = LyricsFontHelper.resolveTypeface(getContext(), LyricsFontHelper.DEFAULT_ID, null);
 
         // 初始化画笔 - V3.17: 背屏优化
@@ -251,6 +360,12 @@ public class ModernLyricsView extends View {
         progressPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         progressPaint.setStyle(Paint.Style.FILL);
 
+        shufflePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        shufflePaint.setStyle(Paint.Style.FILL);
+        shufflePaint.setTextAlign(Paint.Align.CENTER);
+        shufflePaint.setTextSize(CURRENT_TEXT_SIZE);
+        shufflePaint.setTypeface(lyricTypeface);
+
         bgPaint = new Paint();
         bgPaint.setColor(0xFF000000);
         
@@ -273,12 +388,6 @@ public class ModernLyricsView extends View {
         backgroundTexturePaint.setTypeface(lyricTypeface);
         backgroundTexturePaint.setFakeBoldText(false);  // 使用正常粗细，不使用粗体
         
-        // 发光效果画笔（用于文字发光）
-        glowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        glowPaint.setStyle(Paint.Style.STROKE);
-        glowPaint.setStrokeWidth(8f);
-        glowPaint.setMaskFilter(new BlurMaskFilter(20f, BlurMaskFilter.Blur.NORMAL));
-        
         // 文字轮廓描边画笔（用于增强可读性）
         outlinePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         outlinePaint.setStyle(Paint.Style.STROKE);
@@ -288,6 +397,28 @@ public class ModernLyricsView extends View {
         outlinePaint.setTextSize(CURRENT_TEXT_SIZE);
         outlinePaint.setTypeface(lyricTypeface);
         outlinePaint.setLetterSpacing(LETTER_SPACING / CURRENT_TEXT_SIZE);
+
+        neonGlowPaintOuter = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        neonGlowPaintOuter.setStyle(Paint.Style.FILL);
+        neonGlowPaintOuter.setTextAlign(Paint.Align.CENTER);
+        neonGlowPaintOuter.setTextSize(CURRENT_TEXT_SIZE);
+        neonGlowPaintOuter.setTypeface(lyricTypeface);
+        neonGlowPaintOuter.setLetterSpacing(LETTER_SPACING / CURRENT_TEXT_SIZE);
+
+        neonGlowPaintInner = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        neonGlowPaintInner.setStyle(Paint.Style.FILL);
+        neonGlowPaintInner.setTextAlign(Paint.Align.CENTER);
+        neonGlowPaintInner.setTextSize(CURRENT_TEXT_SIZE);
+        neonGlowPaintInner.setTypeface(lyricTypeface);
+        neonGlowPaintInner.setLetterSpacing(LETTER_SPACING / CURRENT_TEXT_SIZE);
+
+        neonGlowStrokePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        neonGlowStrokePaint.setStyle(Paint.Style.STROKE);
+        neonGlowStrokePaint.setStrokeWidth(2.2f);
+        neonGlowStrokePaint.setTextAlign(Paint.Align.CENTER);
+        neonGlowStrokePaint.setTextSize(CURRENT_TEXT_SIZE);
+        neonGlowStrokePaint.setTypeface(lyricTypeface);
+        neonGlowStrokePaint.setLetterSpacing(LETTER_SPACING / CURRENT_TEXT_SIZE);
         
         // 初始化自动居中Handler
         autoCenterHandler = new Handler(Looper.getMainLooper());
@@ -334,6 +465,7 @@ public class ModernLyricsView extends View {
         });
 
         applyAutoLineSpacingFromFontIfNeeded();
+        LyricsWordTokenizer.addOnTokenizerReadyListener(tokenizerReadyListener);
     }
 
     /**
@@ -441,9 +573,10 @@ public class ModernLyricsView extends View {
         // 不再强制居中，允许用户自由滚动
         // 用户停止操作1.5秒后会自动居中（由autoCenterRunnable处理）
         
-        // 添加绘制调试日志（每秒最多1次）
+        // 添加绘制调试日志（debug 下节流，避免高频刷屏）
         long now = System.currentTimeMillis();
-        if (now - lastDrawTime > 1000) {
+        updateShufflePerformanceState(now);
+        if (BuildConfig.DEBUG && now - lastDrawTime > DEBUG_DRAW_LOG_INTERVAL_MS) {
             LogHelper.d(TAG, "🎨 绘制歌词: 行数=" + lyricLines.size() + 
                       ", 当前行=" + currentLineIndex + 
                       ", 位置=" + currentPosition + "ms" +
@@ -454,7 +587,11 @@ public class ModernLyricsView extends View {
         // 绘制每一行歌词（lineAnchorY 为该行主歌词的垂直中心，与字号无关）
         for (int i = 0; i < lyricLines.size(); i++) {
             EnhancedLRCParser.EnhancedLyricLine line = lyricLines.get(i);
-            
+
+            if (enableShuffleSplitEffect && shuffleOnlyCurrentLine && i != currentLineIndex) {
+                continue;
+            }
+
             float lineAnchorY = centerY + (i * LINE_SPACING) - scrollY;
             
             // V3.17: 只绘制可见区域的歌词，只显示三行（当前行、上一行、下一行）
@@ -468,7 +605,9 @@ public class ModernLyricsView extends View {
             alpha = Math.max(0.2f, Math.min(1f, alpha));
             
             if (i == currentLineIndex) {
-                if (Math.abs(lineAnchorY - centerY) > 5f && now - lastOffCenterLogTime > 2000L) {
+                if (BuildConfig.DEBUG &&
+                    Math.abs(lineAnchorY - centerY) > 5f &&
+                    now - lastOffCenterLogTime > DEBUG_OFFCENTER_LOG_INTERVAL_MS) {
                     lastOffCenterLogTime = now;
                     LogHelper.d(TAG, "📊 当前行锚点偏离中心: lineAnchorY=" + lineAnchorY + ", centerY=" + centerY +
                               ", scrollY=" + scrollY + ", currentLineIndex=" + currentLineIndex);
@@ -526,7 +665,7 @@ public class ModernLyricsView extends View {
      * 绘制占位文本
      */
     private void drawPlaceholder(Canvas canvas) {
-        String text = "暂无歌词";
+        String text = getContext().getString(R.string.music_no_lyrics);
         float bandCenterY = getLyricsBandVerticalCenterY();
         float baseline = verticalCenterToBaseline(normalPaint, bandCenterY);
         float centerX = getWidth() / 2f + 100;
@@ -552,7 +691,9 @@ public class ModernLyricsView extends View {
         canvas.translate(-centerX, -scalePivotY);
         
         // 根据逐字显示开关决定绘制方式
-        if (enableWordByWord) {
+        if (enableShuffleSplitEffect) {
+            drawShuffledSplitLine(canvas, line, centerX, finalY);
+        } else if (enableWordByWord) {
             // 逐字高亮模式：开启逐字显示时，无论是否有逐字时间戳，都使用逐字显示模式
             // 如果有逐字时间戳，使用精确的逐字时间戳；如果没有，使用行进度模拟逐字效果
             drawWordByWord(canvas, line, centerX, finalY);
@@ -571,35 +712,610 @@ public class ModernLyricsView extends View {
         //     drawProgressBar(canvas, centerX, finalY + CURRENT_TEXT_SIZE * 0.8f, progress);
         // }
         
-        // V3.17: 启动缩放动画（如果还没有运行）
-        if (scaleAnimator == null || !scaleAnimator.isRunning()) {
+        // V3.17: 启动缩放动画（如果还没有运行）；省电模式不启动呼吸，避免每帧再次拉起动画
+        if (!powerSavingModeEnabled && (scaleAnimator == null || !scaleAnimator.isRunning())) {
             startScaleAnimation();
         }
     }
     
+    private enum ShuffleSplitMode {
+        CHAR,
+        WORD,
+        PHRASE
+    }
+
+    private static class TokenChunk {
+        final String text;
+        final boolean separator;
+
+        TokenChunk(String text, boolean separator) {
+            this.text = text;
+            this.separator = separator;
+        }
+    }
+
+    private List<TokenChunk> splitLyricTokens(String text, ShuffleSplitMode mode) {
+        List<TokenChunk> tokens = new ArrayList<>();
+        if (text == null || text.isEmpty()) {
+            return tokens;
+        }
+        if (mode == ShuffleSplitMode.CHAR) {
+            for (int i = 0; i < text.length(); i++) {
+                char c = text.charAt(i);
+                if (!Character.isWhitespace(c)) {
+                    tokens.add(new TokenChunk(String.valueOf(c), false));
+                }
+            }
+            return tokens;
+        }
+        if (mode == ShuffleSplitMode.WORD) {
+            String cacheKey = "WORD|" + text;
+            List<TokenChunk> cached = tokenCache.get(cacheKey);
+            if (cached != null && !cached.isEmpty()) {
+                return cached;
+            }
+            if (pendingTokenTasks.add(cacheKey)) {
+                tokenizeExecutor.execute(() -> {
+                    try {
+                        List<TokenChunk> computed = new ArrayList<>();
+                        for (String word : LyricsWordTokenizer.tokenize(text)) {
+                            if (!word.isEmpty()) {
+                                computed.add(new TokenChunk(word, false));
+                            }
+                        }
+                        if (computed.isEmpty()) {
+                            computed = fallbackWordTokens(text);
+                        }
+                        tokenCache.put(cacheKey, computed);
+                        refreshShuffleAfterWordTokenChange();
+                    } catch (Throwable ignored) {
+                    } finally {
+                        pendingTokenTasks.remove(cacheKey);
+                    }
+                });
+            }
+            return fallbackWordTokens(text);
+        }
+
+        StringBuilder current = new StringBuilder();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c)) {
+                if (current.length() > 0) {
+                    tokens.add(new TokenChunk(current.toString(), false));
+                    current.setLength(0);
+                }
+                continue;
+            }
+            if (isPhraseBoundary(c)) {
+                if (current.length() > 0) {
+                    tokens.add(new TokenChunk(current.toString(), false));
+                    current.setLength(0);
+                }
+                tokens.add(new TokenChunk(String.valueOf(c), true));
+                continue;
+            }
+            current.append(c);
+        }
+        if (current.length() > 0) {
+            tokens.add(new TokenChunk(current.toString(), false));
+        }
+        return tokens;
+    }
+
+    private List<TokenChunk> fallbackWordTokens(String text) {
+        List<TokenChunk> fallback = new ArrayList<>();
+        if (text == null || text.isEmpty()) return fallback;
+        StringBuilder chunk = new StringBuilder();
+        boolean chunkIsCjk = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (Character.isWhitespace(c)) {
+                if (chunk.length() > 0) {
+                    fallback.add(new TokenChunk(chunk.toString(), false));
+                    chunk.setLength(0);
+                }
+                continue;
+            }
+            boolean isCjk = Character.UnicodeScript.of(c) == Character.UnicodeScript.HAN;
+            if (chunk.length() == 0) {
+                chunk.append(c);
+                chunkIsCjk = isCjk;
+            } else if (chunkIsCjk == isCjk) {
+                chunk.append(c);
+            } else {
+                fallback.add(new TokenChunk(chunk.toString(), false));
+                chunk.setLength(0);
+                chunk.append(c);
+                chunkIsCjk = isCjk;
+            }
+        }
+        if (chunk.length() > 0) {
+            fallback.add(new TokenChunk(chunk.toString(), false));
+        }
+        return fallback;
+    }
+
+    private void postShuffleInvalidateIfNeeded() {
+        long now = System.currentTimeMillis();
+        if (now - lastShuffleInvalidateAtMs < SHUFFLE_INVALIDATE_THROTTLE_MS) {
+            return;
+        }
+        lastShuffleInvalidateAtMs = now;
+        mainHandler.post(this::postInvalidateOnAnimation);
+    }
+
+    private void refreshShuffleAfterWordTokenChange() {
+        mainHandler.post(() -> {
+            if (!enableShuffleSplitEffect) {
+                return;
+            }
+            if (resolveShuffleSplitMode(null) != ShuffleSplitMode.WORD) {
+                return;
+            }
+            stableShuffleSignature = "";
+            stableShuffleTokens.clear();
+            postShuffleInvalidateIfNeeded();
+        });
+    }
+
+
+    private boolean isPhraseBoundary(char c) {
+        return c == '，' || c == '。' || c == '！' || c == '？' || c == '、' || c == ',' || c == '.' || c == '!' || c == '?';
+    }
+
+    private boolean isPunctuation(char c) {
+        return String.valueOf(c).matches("\\p{Punct}");
+    }
+
+    private float stableFloat(long seed, float maxAbs) {
+        long mixed = seed;
+        mixed ^= (mixed >>> 33);
+        mixed *= 0xff51afd7ed558ccdL;
+        mixed ^= (mixed >>> 33);
+        mixed *= 0xc4ceb9fe1a85ec53L;
+        mixed ^= (mixed >>> 33);
+        float normalized = ((mixed & 0x7fffffffL) / (float) 0x7fffffffL) * 2f - 1f;
+        return normalized * maxAbs;
+    }
+
+    private float chooseScale(long seed, String tokenText) {
+        int len = tokenText == null ? 1 : tokenText.length();
+        float base = 1f;
+        if (isCoreWord(tokenText)) {
+            base += 0.14f;
+        } else if (isConnectorWord(tokenText)) {
+            base -= 0.12f;
+        }
+        if (len >= 4) {
+            base -= 0.10f;
+        } else if (len <= 1) {
+            base += 0.12f;
+        } else if (len == 2) {
+            base += 0.06f;
+        } else if (len == 3) {
+            base += 0.03f;
+        }
+        // 词组“正负浮动”基准缩放：进一步拉大大小差异，再叠加整行呼吸缩放
+        base += stableFloat(seed, shuffleSplitScaleVariance);
+        return Math.max(0.66f, Math.min(1.44f, base));
+    }
+
+    private float chooseRotation(long seed) {
+        float maxAngle = Math.max(0f, Math.min(20f, shuffleSplitTiltRatio));
+        if (shufflePerformanceGuardEnabled && enableShuffleSplitEffect) {
+            if (shufflePerfLevel >= 2) {
+                maxAngle = Math.min(maxAngle, 8f);
+            } else if (shufflePerfLevel == 1) {
+                maxAngle = Math.min(maxAngle, 14f);
+            }
+        }
+        if (powerSavingModeEnabled) {
+            return 0f;
+        }
+        if (maxAngle <= 0.01f) {
+            return 0f;
+        }
+        // 正/斜随机分配：一部分保持正向，其他词按 ±maxAngle 随机倾斜
+        float uprightChance = 0.42f;
+        float p = Math.abs(stableFloat(seed, 1f));
+        if (p < uprightChance) {
+            return 0f;
+        }
+        return stableFloat(seed + 1L, maxAngle);
+    }
+
+    private ShuffleSplitMode resolveShuffleSplitMode(String text) {
+        if ("CHAR".equals(shuffleSplitMode)) {
+            return ShuffleSplitMode.CHAR;
+        }
+        if ("PHRASE".equals(shuffleSplitMode)) {
+            return ShuffleSplitMode.PHRASE;
+        }
+        return ShuffleSplitMode.WORD;
+    }
+
+    public void setShuffleSplitTiltRatio(float ratio) {
+        if (ratio < 0f) ratio = 0f;
+        if (ratio > 20f) ratio = 20f;
+        this.shuffleSplitTiltRatio = ratio;
+        this.stableShuffleSignature = "";
+        this.stableShuffleTokens.clear();
+        notifyShuffleDebugInfo();
+        postInvalidate();
+        invalidate();
+    }
+
+    public void setShuffleSplitScaleVariance(float variance) {
+        if (variance < 0f) variance = 0f;
+        if (variance > 0.4f) variance = 0.4f;
+        this.shuffleSplitScaleVariance = variance;
+        this.stableShuffleSignature = "";
+        this.stableShuffleTokens.clear();
+        notifyShuffleDebugInfo();
+        postInvalidate();
+        invalidate();
+    }
+
+    public void setShufflePerformanceGuardEnabled(boolean enabled) {
+        this.shufflePerformanceGuardEnabled = true;
+        this.shufflePerfLevel = 0;
+        this.shuffleLayoutBuildIntervalMs = 0L;
+        this.shuffleLastFrameSampleMs = 0L;
+        this.shuffleFpsEma = 60f;
+        this.stableShuffleSignature = "";
+        this.stableShuffleTokens.clear();
+        postInvalidate();
+        invalidate();
+    }
+
+    public void setPowerSavingModeEnabled(boolean enabled) {
+        this.powerSavingModeEnabled = enabled;
+        if (enabled) {
+            this.shufflePerformanceGuardEnabled = true;
+            this.enableWordByWord = false;
+            this.showBackgroundTexture = false;
+            this.currentScale = 1.0f;
+            this.currentDisplacement = 0f;
+            this.breathingScaleVariance = 0f;
+            this.breathingScaleMin = 1f;
+            this.breathingScaleMax = 1f;
+            if (scaleAnimator != null && scaleAnimator.isRunning()) {
+                scaleAnimator.cancel();
+            }
+        }
+        postInvalidate();
+        invalidate();
+    }
+
+    private void ensureStableShuffleLayout(EnhancedLRCParser.EnhancedLyricLine line, String sourceText) {
+        ShuffleSplitMode mode = resolveShuffleSplitMode(sourceText);
+        String signature =
+            line.time + "|" + sourceText + "|" + mode.name() + "|" + getWidth() + "|" + getHeight() +
+                "|" + CURRENT_TEXT_SIZE + "|" + shuffleSplitScaleVariance;
+        long nowMs = System.currentTimeMillis();
+        if (shufflePerformanceGuardEnabled && enableShuffleSplitEffect && shuffleLayoutBuildIntervalMs > 0L) {
+            boolean sameSignature = signature.equals(stableShuffleSignature);
+            boolean withinCooldown = (nowMs - shuffleLastLayoutBuildMs) < shuffleLayoutBuildIntervalMs;
+            if (!sameSignature && withinCooldown && !stableShuffleTokens.isEmpty()) {
+                return;
+            }
+        }
+        if (signature.equals(stableShuffleSignature)) {
+            return;
+        }
+        stableShuffleSignature = signature;
+        stableShuffleTokens = new ArrayList<>();
+
+        List<TokenChunk> chunks = splitLyricTokens(sourceText, mode);
+        if (chunks.isEmpty()) {
+            return;
+        }
+
+        List<List<TokenChunk>> lines = buildSemanticLines(chunks, mode);
+        lastShuffleLineCount = lines.size();
+        float w = Math.max(1f, getWidth());
+        float h = Math.max(1f, getHeight());
+        // 左侧 290px 为安全区，不显示歌词；歌词在右侧可视区内居中分散
+        float safeLeft = SHUFFLE_LEFT_CAMERA_AVOID_PX;
+        float left = Math.min(Math.max(safeLeft, 0f), Math.max(0f, w - 40f));
+        float right = w - Math.max(16f, w * 0.02f);
+        if (right <= left + 20f) {
+            left = w * 0.35f;
+            right = w - 16f;
+        }
+        float top = h * 0.14f;
+        float bottom = h * 0.86f;
+        float avoidRight = left;
+        float avoidBottom = Math.max(h * 0.30f, h * SHUFFLE_CAMERA_AVOID_HEIGHT_RATIO);
+
+        int lineCount = lines.size();
+        boolean twoLineLayout = lineCount == 2;
+        float blockH = bottom - top;
+        float rowHeight = blockH / Math.max(1, lineCount);
+        float baseShuffleTextSize = CURRENT_TEXT_SIZE;
+        if (lineCount >= 3) {
+            // 三行及以上：若可显示高度不足，按比例缩小分词字号，避免挤不下
+            float estimatedNeedHeight = lineCount * CURRENT_TEXT_SIZE * 1.18f;
+            if (estimatedNeedHeight > blockH) {
+                float fit = blockH / Math.max(1f, estimatedNeedHeight);
+                baseShuffleTextSize = Math.max(CURRENT_TEXT_SIZE * 0.72f, CURRENT_TEXT_SIZE * fit);
+            }
+        }
+        float measureScale = baseShuffleTextSize / Math.max(1f, CURRENT_TEXT_SIZE);
+        ArrayList<float[]> placed = new ArrayList<>();
+
+        for (int row = 0; row < lines.size(); row++) {
+            List<TokenChunk> rowTokens = lines.get(row);
+            if (rowTokens.isEmpty()) continue;
+
+            float y;
+            if (lineCount == 1) {
+                // 单行：按整屏高度居中
+                y = h * 0.5f;
+            } else if (twoLineLayout) {
+                // 两行：按可显示高度分布
+                float twoLineRowHeight = blockH / 2f;
+                y = top + twoLineRowHeight * (row + 0.5f);
+            } else {
+                // 三行及以上：按可显示高度区间均匀分布
+                y = top + rowHeight * (row + 0.5f);
+            }
+            float availableW = right - left;
+            float centerX = (left + right) * 0.5f;
+            float totalTextW = 0f;
+            for (TokenChunk token : rowTokens) {
+                float measured = currentPaint.measureText(token.text) * measureScale;
+                totalTextW += Math.max(measured, baseShuffleTextSize * 0.92f);
+            }
+            float spacing = rowTokens.size() > 1
+                    ? Math.max(18f, (availableW - totalTextW) / (rowTokens.size() - 1))
+                    : 0f;
+            spacing = Math.min(spacing, w * 0.05f);
+            float rowWidth = totalTextW + Math.max(0, rowTokens.size() - 1) * spacing;
+            float cursorX = Math.max(left, Math.min(centerX - rowWidth * 0.5f, right - rowWidth));
+
+            for (int index = 0; index < rowTokens.size(); index++) {
+                TokenChunk chunk = rowTokens.get(index);
+                String tokenText = chunk.text;
+                if (tokenText == null || tokenText.isEmpty()) continue;
+                float measuredWidth = currentPaint.measureText(tokenText) * measureScale;
+                float width = Math.max(measuredWidth, baseShuffleTextSize * 0.9f);
+                float height = Math.max(baseShuffleTextSize * 1.18f, 20f);
+
+                float x = cursorX + width * 0.5f;
+                float yJitterFactor = twoLineLayout ? 0.15f : 0.08f;
+                float adjustY = stableFloat((line.time + row * 31L + index * 17L) ^ tokenText.hashCode(), rowHeight * yJitterFactor);
+                float adjustX = stableFloat((line.time + row * 17L + index * 11L) ^ (tokenText.hashCode() * 7L), w * 0.012f);
+                x += adjustX;
+                float finalY = y + adjustY;
+
+                if (x < avoidRight && finalY < avoidBottom) {
+                    x = Math.max(left + Math.min(16f, w * 0.01f), avoidRight + Math.min(44f, w * 0.04f));
+                    finalY = Math.max(finalY, avoidBottom + rowHeight * 0.35f);
+                }
+
+                boolean collides = false;
+                for (float[] p : placed) {
+                    float dx = x - p[0];
+                    float dy = finalY - p[1];
+                    float minDx = Math.max(SHUFFLE_MIN_TOKEN_SPACING, (width + p[2]) * 0.55f);
+                    float minDy = Math.max(rowHeight * 0.30f, (height + p[3]) * 0.30f);
+                    if (Math.abs(dx) < minDx && Math.abs(dy) < minDy) {
+                        collides = true;
+                        break;
+                    }
+                }
+                if (collides) {
+                    x += width * 0.35f;
+                    finalY += rowHeight * (twoLineLayout ? 0.14f : 0.08f);
+                }
+
+                long seed = line.time * 131L + row * 997L + index * 17L + tokenText.hashCode();
+                float offsetX = stableFloat(seed, SHUFFLE_MAX_OFFSET_X * 0.03f);
+                float offsetY = stableFloat(seed + 11L, SHUFFLE_MAX_OFFSET_Y * (twoLineLayout ? 0.08f : 0.03f));
+                float rotation = chooseRotation(seed + 23L);
+                float scale = chooseScale(seed + 37L, tokenText);
+                stableShuffleTokens.add(new ShuffleToken(tokenText, width, x + offsetX, finalY + offsetY, rotation, scale, baseShuffleTextSize));
+
+                cursorX += width + spacing;
+            }
+        }
+        shuffleLastLayoutBuildMs = nowMs;
+    }
+
+    private List<List<TokenChunk>> buildSemanticLines(List<TokenChunk> chunks, ShuffleSplitMode mode) {
+        List<List<TokenChunk>> result = new ArrayList<>();
+        if (chunks.isEmpty()) return result;
+        if (chunks.size() <= 3) {
+            result.add(new ArrayList<>(chunks));
+            return result;
+        }
+
+        int targetLines = Math.min(3, Math.max(2, (int) Math.ceil(chunks.size() / 4.0f)));
+        int totalWeight = 0;
+        for (TokenChunk c : chunks) {
+            totalWeight += Math.max(1, semanticWeight(c.text));
+        }
+        int targetPerLine = Math.max(1, (int) Math.ceil(totalWeight / (float) targetLines));
+
+        List<TokenChunk> current = new ArrayList<>();
+        int currentWeight = 0;
+        int lineIndex = 0;
+        for (int i = 0; i < chunks.size(); i++) {
+            TokenChunk c = chunks.get(i);
+            int w = Math.max(1, semanticWeight(c.text));
+            current.add(c);
+            currentWeight += w;
+
+            boolean hardBreak = isStrongSemanticBreak(c.text);
+            boolean shouldBreak = false;
+            if (hardBreak && lineIndex < targetLines - 1) {
+                shouldBreak = true;
+            } else if (currentWeight >= targetPerLine && lineIndex < targetLines - 1) {
+                shouldBreak = true;
+            } else if (i == chunks.size() - 1) {
+                shouldBreak = true;
+            }
+
+            if (shouldBreak) {
+                result.add(current);
+                current = new ArrayList<>();
+                currentWeight = 0;
+                lineIndex++;
+            }
+        }
+        if (!current.isEmpty()) result.add(current);
+        return result;
+    }
+
+    private int semanticWeight(String text) {
+        if (text == null || text.isEmpty()) return 1;
+        if (isPunctuationChar(text)) return 1;
+        if (text.length() >= 4) return 4;
+        if (text.length() == 3) return 3;
+        if (text.length() == 2) return 2;
+        return 1;
+    }
+
+    private boolean isStrongSemanticBreak(String text) {
+        if (text == null || text.isEmpty()) return false;
+        if (isPunctuationChar(text)) return true;
+        return text.equals("但") || text.equals("却") || text.equals("而") || text.equals("所以") || text.equals("然后") || text.equals("后来") || text.equals("再见") || text.equals("曾经") || text.equals("终于");
+    }
+
+    private boolean isCoreWord(String text) {
+        if (text == null || text.isEmpty()) return false;
+        return text.equals("我") || text.equals("你") || text.equals("他") || text.equals("她") || text.equals("它") || text.equals("我们") || text.equals("他们") || text.equals("她们") || text.equals("它们") || text.equals("你们") || text.equals("咱们") || text.equals("自己") || text.equals("大家") || text.equals("心") || text.equals("爱") || text.equals("梦") || text.equals("你我");
+    }
+
+    private boolean isConnectorWord(String text) {
+        if (text == null || text.isEmpty()) return false;
+        return text.equals("的") || text.equals("了") || text.equals("着") || text.equals("过") || text.equals("啊") || text.equals("吗") || text.equals("吧") || text.equals("呢") || text.equals("和") || text.equals("与") || text.equals("及") || text.equals("在");
+    }
+
+    private boolean isPunctuationChar(String text) {
+        return text.length() == 1 && isPunctuation(text.charAt(0));
+    }
+
+    private void updateShufflePerformanceState(long nowMs) {
+        if (!shufflePerformanceGuardEnabled || !enableShuffleSplitEffect) {
+            shufflePerfLevel = 0;
+            shuffleLayoutBuildIntervalMs = 0L;
+            shuffleLastFrameSampleMs = nowMs;
+            if (shuffleLayoutBuildIntervalOverrideMs >= 0L) {
+                shuffleLayoutBuildIntervalMs = shuffleLayoutBuildIntervalOverrideMs;
+            }
+            return;
+        }
+        if (shuffleLastFrameSampleMs > 0L) {
+            long dt = nowMs - shuffleLastFrameSampleMs;
+            if (dt > 0L) {
+                float fps = 1000f / Math.max(1f, dt);
+                shuffleFpsEma = shuffleFpsEma * 0.85f + fps * 0.15f;
+            }
+        }
+        shuffleLastFrameSampleMs = nowMs;
+
+        if (shufflePerfLevel == 0) {
+            if (shuffleFpsEma < 38f) {
+                shufflePerfLevel = 2;
+            } else if (shuffleFpsEma < 48f) {
+                shufflePerfLevel = 1;
+            }
+        } else if (shufflePerfLevel == 1) {
+            if (shuffleFpsEma < 36f) {
+                shufflePerfLevel = 2;
+            } else if (shuffleFpsEma > 54f) {
+                shufflePerfLevel = 0;
+            }
+        } else {
+            if (shuffleFpsEma > 46f) {
+                shufflePerfLevel = 1;
+            }
+        }
+
+        if (shufflePerfLevel >= 2) {
+            shuffleLayoutBuildIntervalMs = 180L;
+        } else if (shufflePerfLevel == 1) {
+            shuffleLayoutBuildIntervalMs = 90L;
+        } else {
+            shuffleLayoutBuildIntervalMs = 0L;
+        }
+        if (shuffleLayoutBuildIntervalOverrideMs >= 0L) {
+            shuffleLayoutBuildIntervalMs = shuffleLayoutBuildIntervalOverrideMs;
+        }
+    }
+
+    private void drawShuffledSplitLine(Canvas canvas, EnhancedLRCParser.EnhancedLyricLine line, float centerX, float baseline) {
+        String sourceText = line != null ? line.text : null;
+        if (sourceText == null || sourceText.isEmpty()) {
+            return;
+        }
+        ensureStableShuffleLayout(line, sourceText);
+        if (stableShuffleTokens.isEmpty()) {
+            drawLineWithProgress(canvas, sourceText, centerX, baseline, 1f);
+            return;
+        }
+
+        shufflePaint.setColor(currentTextColor);
+        shufflePaint.setAlpha(255);
+        for (int i = 0; i < stableShuffleTokens.size(); i++) {
+            ShuffleToken token = stableShuffleTokens.get(i);
+            canvas.save();
+            canvas.translate(token.x, token.y);
+            canvas.rotate(token.rotation);
+            canvas.scale(token.scale, token.scale);
+            shufflePaint.setTextSize(token.textSize);
+            drawNeonTextGlow(canvas, token.text, 0f, 0f, currentTextColor, shufflePaint);
+            if (outlinePaint != null) {
+                outlinePaint.setTextSize(token.textSize);
+                outlinePaint.setStyle(Paint.Style.STROKE);
+                outlinePaint.setStrokeWidth(3f);
+                outlinePaint.setColor(0xB3000000);
+                canvas.drawText(token.text, 0f, 0f, outlinePaint);
+                outlinePaint.setStyle(Paint.Style.FILL);
+            }
+            canvas.drawText(token.text, 0f, 0f, shufflePaint);
+            canvas.restore();
+        }
+    }
+
     /**
      * 启动缩放动画（微位移+缩放效果）
      * V3.17: 背屏优化 - 0.5倍速缩放动画，从0.98到1.1
      */
     private void startScaleAnimation() {
+        if (powerSavingModeEnabled) {
+            currentScale = 1f;
+            currentDisplacement = 0f;
+            return;
+        }
+        if (Math.abs(breathingScaleMax - breathingScaleMin) < 0.0001f) {
+            currentScale = 1f;
+            currentDisplacement = 0f;
+            return;
+        }
         if (scaleAnimator != null && scaleAnimator.isRunning()) {
             return;
         }
         
         // 初始化缩放值
-        currentScale = SCALE_MIN;
+        currentScale = breathingScaleMin;
         currentDisplacement = 0f;
         
-        // 创建往返动画：0.98 -> 1.1 -> 0.98
-        scaleAnimator = ValueAnimator.ofFloat(SCALE_MIN, SCALE_MAX, SCALE_MIN);
+        // 创建往返动画：min -> max -> min
+        scaleAnimator = ValueAnimator.ofFloat(breathingScaleMin, breathingScaleMax, breathingScaleMin);
         scaleAnimator.setDuration(currentScaleAnimationDuration); // 根据音谱动态调整速度
         scaleAnimator.setRepeatCount(ValueAnimator.INFINITE);
         scaleAnimator.setInterpolator(new android.view.animation.LinearInterpolator());
         scaleAnimator.addUpdateListener(animation -> {
             currentScale = (float) animation.getAnimatedValue();
             // 同时更新微位移（轻微向上位移2-3px）
-            currentDisplacement = (currentScale - 1.0f) * DISPLACEMENT_OFFSET * 2f;
-            postInvalidate();
+            currentDisplacement = (currentScale - 1.0f) * DISPLACEMENT_OFFSET * 2f * breathingDisplacementStrength;
+            if (shouldInvalidateForCurrentPlaybackState()) {
+                postInvalidate();
+            }
         });
         scaleAnimator.start();
     }
@@ -609,6 +1325,9 @@ public class ModernLyricsView extends View {
      * 关联音谱，动态调整动画时长以匹配音乐节奏
      */
     private void updateScaleAnimationSpeed() {
+        if (powerSavingModeEnabled) {
+            return;
+        }
         if (scaleAnimator == null || !scaleAnimator.isRunning()) {
             return;
         }
@@ -621,16 +1340,16 @@ public class ModernLyricsView extends View {
         
         // 计算新的起始值和结束值（保持连续性）
         float newStart = currentProgress;
-        float newEnd = currentProgress >= SCALE_MAX ? SCALE_MIN : SCALE_MAX;
-        float newMid = currentProgress < SCALE_MAX ? SCALE_MAX : SCALE_MIN;
+        float newEnd = currentProgress >= breathingScaleMax ? breathingScaleMin : breathingScaleMax;
+        float newMid = currentProgress < breathingScaleMax ? breathingScaleMax : breathingScaleMin;
         
         // 创建新动画，从当前进度继续
-        if (currentProgress < SCALE_MAX) {
+        if (currentProgress < breathingScaleMax) {
             // 正在上升阶段
-            scaleAnimator = ValueAnimator.ofFloat(newStart, newMid, SCALE_MIN);
+            scaleAnimator = ValueAnimator.ofFloat(newStart, newMid, breathingScaleMin);
         } else {
             // 正在下降阶段
-            scaleAnimator = ValueAnimator.ofFloat(newStart, newMid, SCALE_MAX);
+            scaleAnimator = ValueAnimator.ofFloat(newStart, newMid, breathingScaleMax);
         }
         
         scaleAnimator.setDuration(currentScaleAnimationDuration);
@@ -639,8 +1358,10 @@ public class ModernLyricsView extends View {
         scaleAnimator.addUpdateListener(animation -> {
             currentScale = (float) animation.getAnimatedValue();
             // 同时更新微位移（轻微向上位移2-3px）
-            currentDisplacement = (currentScale - 1.0f) * DISPLACEMENT_OFFSET * 2f;
-            postInvalidate();
+            currentDisplacement = (currentScale - 1.0f) * DISPLACEMENT_OFFSET * 2f * breathingDisplacementStrength;
+            if (shouldInvalidateForCurrentPlaybackState()) {
+                postInvalidate();
+            }
         });
         
         scaleAnimator.start();
@@ -773,14 +1494,7 @@ public class ModernLyricsView extends View {
             
             TextPaint gradientPaint = new TextPaint(currentPaint);
             gradientPaint.setShader(progressGradient);
-            
-            // 先绘制发光效果
-            glowPaint.setColor(currentTextColor);
-            glowPaint.setTextSize(currentPaint.getTextSize());
-            glowPaint.setTextAlign(Paint.Align.CENTER);
-            glowPaint.setTypeface(currentPaint.getTypeface());
-            glowPaint.setLetterSpacing(currentPaint.getLetterSpacing());
-            canvas.drawText(displayText, adjustedCenterX, y, glowPaint);
+            drawNeonTextGlow(canvas, displayText, adjustedCenterX, y, currentTextColor, gradientPaint);
             
             // 绘制文字轮廓描边（增强可读性）
             outlinePaint.setTextSize(currentPaint.getTextSize());
@@ -793,14 +1507,7 @@ public class ModernLyricsView extends View {
             // 全部播放完成，使用随机颜色
             TextPaint colorPaint = new TextPaint(currentPaint);
             colorPaint.setColor(currentTextColor);
-            
-            // 先绘制发光效果
-            glowPaint.setColor(currentTextColor);
-            glowPaint.setTextSize(currentPaint.getTextSize());
-            glowPaint.setTextAlign(Paint.Align.CENTER);
-            glowPaint.setTypeface(currentPaint.getTypeface());
-            glowPaint.setLetterSpacing(currentPaint.getLetterSpacing());
-            canvas.drawText(displayText, adjustedCenterX, y, glowPaint);
+            drawNeonTextGlow(canvas, displayText, adjustedCenterX, y, currentTextColor, colorPaint);
             
             // 绘制文字轮廓描边（增强可读性）
             outlinePaint.setTextSize(currentPaint.getTextSize());
@@ -811,6 +1518,7 @@ public class ModernLyricsView extends View {
             canvas.drawText(displayText, adjustedCenterX, y, colorPaint);
         } else {
             // 未开始播放，使用普通色
+            drawNeonTextGlow(canvas, displayText, adjustedCenterX, y, getNormalLyricsColor(), normalPaint);
             canvas.drawText(displayText, adjustedCenterX, y, normalPaint);
         }
     }
@@ -865,14 +1573,7 @@ public class ModernLyricsView extends View {
             
             TextPaint gradientPaint = new TextPaint(currentPaint);
             gradientPaint.setShader(progressGradient);
-            
-            // 先绘制发光效果
-            glowPaint.setColor(currentTextColor);
-            glowPaint.setTextSize(currentPaint.getTextSize());
-            glowPaint.setTextAlign(Paint.Align.CENTER);
-            glowPaint.setTypeface(currentPaint.getTypeface());
-            glowPaint.setLetterSpacing(currentPaint.getLetterSpacing());
-            canvas.drawText(displayText, adjustedCenterX, y, glowPaint);
+            drawNeonTextGlow(canvas, displayText, adjustedCenterX, y, currentTextColor, gradientPaint);
             
             // 绘制文字轮廓描边（增强可读性）
             outlinePaint.setTextSize(currentPaint.getTextSize());
@@ -885,14 +1586,7 @@ public class ModernLyricsView extends View {
             // 全部播放完成，使用随机颜色
             TextPaint colorPaint = new TextPaint(currentPaint);
             colorPaint.setColor(currentTextColor);
-            
-            // 先绘制发光效果
-            glowPaint.setColor(currentTextColor);
-            glowPaint.setTextSize(currentPaint.getTextSize());
-            glowPaint.setTextAlign(Paint.Align.CENTER);
-            glowPaint.setTypeface(currentPaint.getTypeface());
-            glowPaint.setLetterSpacing(currentPaint.getLetterSpacing());
-            canvas.drawText(displayText, adjustedCenterX, y, glowPaint);
+            drawNeonTextGlow(canvas, displayText, adjustedCenterX, y, currentTextColor, colorPaint);
             
             // 绘制文字轮廓描边（增强可读性）
             outlinePaint.setTextSize(currentPaint.getTextSize());
@@ -903,8 +1597,13 @@ public class ModernLyricsView extends View {
             canvas.drawText(displayText, adjustedCenterX, y, colorPaint);
         } else {
             // 未开始播放，使用普通色
+            drawNeonTextGlow(canvas, displayText, adjustedCenterX, y, getNormalLyricsColor(), normalPaint);
             canvas.drawText(displayText, adjustedCenterX, y, normalPaint);
         }
+    }
+
+    private void drawNeonTextGlow(Canvas canvas, String text, float x, float y, int baseColor, Paint referencePaint) {
+        return;
     }
     
     /**
@@ -1054,6 +1753,20 @@ public class ModernLyricsView extends View {
      * 平滑滚动动画
      */
     private void animateScroll(float from, float to) {
+        if (trackLoading) {
+            return;
+        }
+        float delta = Math.abs(to - from);
+        if (delta < SCROLL_ANIMATION_MIN_DELTA_PX) {
+            scrollY = to;
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (!Float.isNaN(lastScrollAnimateTargetY)
+            && Math.abs(lastScrollAnimateTargetY - to) < SCROLL_ANIMATION_MIN_DELTA_PX
+            && (now - lastScrollAnimateStartMs) < SCROLL_ANIMATION_THROTTLE_MS) {
+            return;
+        }
         if (scrollAnimator != null && scrollAnimator.isRunning()) {
             scrollAnimator.cancel();
         }
@@ -1066,6 +1779,8 @@ public class ModernLyricsView extends View {
             postInvalidate();  // 使用 postInvalidate 确保在任何线程都能触发重绘
         });
         scrollAnimator.start();
+        lastScrollAnimateStartMs = now;
+        lastScrollAnimateTargetY = to;
         LogHelper.d(TAG, "✅ 滚动动画已启动: " + from + " -> " + to);
     }
     
@@ -1164,7 +1879,7 @@ public class ModernLyricsView extends View {
         } else {
             // 使用原有的随机颜色生成逻辑
             // 检查是否需要生成新的目标颜色
-            if (currentTime - lastColorChangeTime >= COLOR_CHANGE_INTERVAL) {
+            if (currentTime - lastColorChangeTime >= colorChangeIntervalMs) {
                 // 保存当前颜色作为新的起始颜色
                 colorTransitionStart = currentTextColor;
                 // 生成新的目标颜色
@@ -1176,7 +1891,7 @@ public class ModernLyricsView extends View {
         
         // 计算颜色过渡进度
         long elapsed = currentTime - lastColorChangeTime;
-        colorTransitionProgress = Math.min(1.0f, (float) elapsed / COLOR_CHANGE_INTERVAL);
+        colorTransitionProgress = Math.min(1.0f, (float) elapsed / Math.max(1f, colorChangeIntervalMs));
         
         // 从起始颜色平滑过渡到目标颜色
         currentTextColor = interpolateColor(colorTransitionStart, targetTextColor, colorTransitionProgress);
@@ -1218,6 +1933,9 @@ public class ModernLyricsView extends View {
      * 在updatePosition中调用，用于实时检查是否需要居中
      */
     private void checkAndAutoCenter() {
+        if (trackLoading) {
+            return;
+        }
         // 检查用户操作状态
         long timeSinceLastInteraction = System.currentTimeMillis() - lastUserInteractionTime;
         
@@ -1232,6 +1950,8 @@ public class ModernLyricsView extends View {
                 }
             }
         }
+        lastShuffleTokenCount = stableShuffleTokens.size();
+        notifyShuffleDebugInfo();
     }
     
     @Override
@@ -1286,6 +2006,9 @@ public class ModernLyricsView extends View {
         this.currentLineIndex = -1;
         this.scrollY = 0f;
         this.targetScrollY = 0f;
+        clearTokenizationCache();
+        this.stableShuffleSignature = "";
+        this.stableShuffleTokens.clear();
         
         LogHelper.d(TAG, "📝 设置歌词: " + this.lyricLines.size() + " 行");
         if (!this.lyricLines.isEmpty()) {
@@ -1339,11 +2062,15 @@ public class ModernLyricsView extends View {
         if (position < 0) {
             position = 0;
         }
+        lastRawPlaybackPosition = position;
+        long adjusted = position + timeAdjustOffset;
+        if (adjusted < 0) {
+            adjusted = 0;
+        }
+        this.currentPosition = adjusted;
         
-        this.currentPosition = position;
-        
-        // 查找当前行
-        int newIndex = findCurrentLineIndex(position);
+        // 查找当前行（使用含偏移后的时间，逐字/行同步与设置一致）
+        int newIndex = findCurrentLineIndex(adjusted);
         
         // 验证索引是否合理
         if (lyricLines.isEmpty()) {
@@ -1363,7 +2090,7 @@ public class ModernLyricsView extends View {
         
         if (lineChanged) {
             LogHelper.d(TAG, "🎵 歌词行变化: " + currentLineIndex + " -> " + newIndex + 
-                      " (位置: " + position + "ms)");
+                      " (位置: " + adjusted + "ms, 原始: " + lastRawPlaybackPosition + "ms)");
             int oldIndex = currentLineIndex;
             currentLineIndex = newIndex;
             
@@ -1394,6 +2121,8 @@ public class ModernLyricsView extends View {
         // 非逐字模式且当前行未变时，画面仅随呼吸缩放动画刷新，无需随 MediaSession 每次回调 postInvalidate
         long nowMs = System.currentTimeMillis();
         if (lineChanged) {
+            stableShuffleSignature = "";
+            stableShuffleTokens.clear();
             lastLyricProgressInvalidateTime = nowMs;
             postInvalidate();
         } else if (enableWordByWord) {
@@ -1555,6 +2284,8 @@ public class ModernLyricsView extends View {
         if (lineIndex >= 0 && lineIndex < lyricLines.size()) {
             currentLineIndex = lineIndex;
             targetScrollY = lineIndex * LINE_SPACING;
+            stableShuffleSignature = "";
+            stableShuffleTokens.clear();
             animateScroll(scrollY, targetScrollY);
         }
     }
@@ -1597,7 +2328,7 @@ public class ModernLyricsView extends View {
         // 额外触发一次 onDraw 确保立即更新
         invalidate();
     }
-    
+
     public void setShowProgress(boolean show) {
         this.showProgress = show;
         invalidate();
@@ -1615,9 +2346,6 @@ public class ModernLyricsView extends View {
         strokePaint.setTypeface(lyricTypeface);
         backgroundTexturePaint.setTypeface(lyricTypeface);
         outlinePaint.setTypeface(lyricTypeface);
-        if (glowPaint != null) {
-            glowPaint.setTypeface(lyricTypeface);
-        }
         applyAutoLineSpacingFromFontIfNeeded();
         postInvalidate();
     }
@@ -1659,12 +2387,33 @@ public class ModernLyricsView extends View {
         if (backgroundTexturePaint != null) {
             backgroundTexturePaint.setTextSize(CURRENT_TEXT_SIZE * backgroundTextureSizeScale);
         }
+        if (shufflePaint != null) {
+            shufflePaint.setTextSize(CURRENT_TEXT_SIZE);
+        }
+        if (outlinePaint != null) {
+            outlinePaint.setTextSize(CURRENT_TEXT_SIZE);
+        }
         if (outlinePaint != null) {
             outlinePaint.setTextSize(CURRENT_TEXT_SIZE);
             outlinePaint.setLetterSpacing(LETTER_SPACING / CURRENT_TEXT_SIZE);
         }
+        if (neonGlowPaintOuter != null) {
+            neonGlowPaintOuter.setTextSize(CURRENT_TEXT_SIZE);
+            neonGlowPaintOuter.setLetterSpacing(LETTER_SPACING / CURRENT_TEXT_SIZE);
+        }
+        if (neonGlowPaintInner != null) {
+            neonGlowPaintInner.setTextSize(CURRENT_TEXT_SIZE);
+            neonGlowPaintInner.setLetterSpacing(LETTER_SPACING / CURRENT_TEXT_SIZE);
+        }
+        if (neonGlowStrokePaint != null) {
+            neonGlowStrokePaint.setTextSize(CURRENT_TEXT_SIZE);
+            neonGlowStrokePaint.setLetterSpacing(LETTER_SPACING / CURRENT_TEXT_SIZE);
+        }
 
         applyAutoLineSpacingFromFontIfNeeded();
+        stableShuffleSignature = "";
+        stableShuffleTokens.clear();
+        notifyShuffleDebugInfo();
         invalidate();
         LogHelper.d(TAG, "📝 字体大小已更新: 当前行=" + CURRENT_TEXT_SIZE + "px, 普通行=" + NORMAL_TEXT_SIZE + "px, 行距=" + LINE_SPACING + "px");
     }
@@ -1749,20 +2498,28 @@ public class ModernLyricsView extends View {
     
     /**
      * 设置时间调整偏移量
-     * @param offset 偏移量（毫秒），正数表示提前，负数表示延后
+     * @param offset 偏移量（毫秒），正数表示相对媒体进度提前显示，负数表示延后
      */
     public void setTimeAdjustOffset(long offset) {
         this.timeAdjustOffset = offset;
         LogHelper.d(TAG, "⏰ 时间调整偏移量已设置为: " + offset + "ms");
-        // 如果当前有歌词，重新计算当前行
-        if (!lyricLines.isEmpty() && currentPosition > 0) {
-            int newIndex = findCurrentLineIndex(currentPosition);
-            if (newIndex != currentLineIndex) {
-                currentLineIndex = newIndex;
-                targetScrollY = currentLineIndex * LINE_SPACING;
-                postInvalidate();
-            }
+        long adjusted = lastRawPlaybackPosition + timeAdjustOffset;
+        if (adjusted < 0) {
+            adjusted = 0;
         }
+        this.currentPosition = adjusted;
+        if (lyricLines.isEmpty()) {
+            return;
+        }
+        int newIndex = findCurrentLineIndex(adjusted);
+        if (newIndex < 0 || newIndex >= lyricLines.size()) {
+            newIndex = currentLineIndex >= 0 ? currentLineIndex : 0;
+        }
+        currentLineIndex = newIndex;
+        if (currentLineIndex >= 0 && currentLineIndex < lyricLines.size()) {
+            targetScrollY = currentLineIndex * LINE_SPACING;
+        }
+        postInvalidate();
     }
     
     /**
@@ -1775,6 +2532,11 @@ public class ModernLyricsView extends View {
     public void setEnableGesture(boolean enable) {
         this.enableGesture = enable;
     }
+
+    public void setNeonLyricsEnabled(boolean enabled) {
+        this.neonLyricsEnabled = enabled;
+        invalidate();
+    }
     
     /**
      * 设置是否显示背景纹理
@@ -1784,6 +2546,154 @@ public class ModernLyricsView extends View {
         this.showBackgroundTexture = show;
         invalidate();
         LogHelper.d(TAG, "🖼️ 背景纹理显示已" + (show ? "启用" : "禁用"));
+    }
+
+    /**
+     * 切歌与异步拉词期间临时冻结自动滚动，避免空歌词阶段反复触发动画。
+     */
+    public void setTrackLoading(boolean loading) {
+        this.trackLoading = loading;
+        if (loading && scrollAnimator != null && scrollAnimator.isRunning()) {
+            scrollAnimator.cancel();
+        }
+        if (loading) {
+            // 切歌加载期间暂时回收硬件层，避免短时叠层。
+            setLayerType(LAYER_TYPE_NONE, null);
+        } else {
+            setLayerType(LAYER_TYPE_HARDWARE, null);
+        }
+    }
+
+    /**
+     * 同步播放状态；暂停超过阈值后自动降帧重绘。
+     */
+    public void setPlaybackActive(boolean active) {
+        if (this.playbackActive == active) {
+            return;
+        }
+        this.playbackActive = active;
+        this.playbackStateChangedAtMs = System.currentTimeMillis();
+        this.lastPausedInvalidateAtMs = 0L;
+    }
+
+    private boolean shouldInvalidateForCurrentPlaybackState() {
+        if (playbackActive) {
+            return true;
+        }
+        long now = System.currentTimeMillis();
+        if (now - playbackStateChangedAtMs < PAUSE_LOW_FPS_AFTER_MS) {
+            return true;
+        }
+        if (now - lastPausedInvalidateAtMs < PAUSE_LOW_FPS_FRAME_INTERVAL_MS) {
+            return false;
+        }
+        lastPausedInvalidateAtMs = now;
+        return true;
+    }
+
+    public void setEnableShuffleSplitEffect(boolean enable) {
+        boolean oldValue = this.enableShuffleSplitEffect;
+        this.enableShuffleSplitEffect = enable;
+        if (!enable) {
+            stableShuffleSignature = "";
+            stableShuffleTokens.clear();
+            lastShuffleLineCount = 0;
+            lastShuffleTokenCount = 0;
+            tokenCache.clear();
+            pendingTokenTasks.clear();
+        }
+        if (powerSavingModeEnabled && enable) {
+            this.shufflePerformanceGuardEnabled = true;
+        }
+        notifyShuffleDebugInfo();
+        LogHelper.d(TAG, "🌀 分词打乱效果已" + (enable ? "启用" : "禁用") + " (从 " + oldValue + " 改为 " + enable + ")");
+        postInvalidate();
+        invalidate();
+    }
+
+    public void clearTokenizationCache() {
+        tokenCache.clear();
+        pendingTokenTasks.clear();
+        stableShuffleSignature = "";
+        stableShuffleTokens.clear();
+        lastShuffleLineCount = 0;
+        lastShuffleTokenCount = 0;
+    }
+
+    public void setBreathingRhythmMs(long durationMs) {
+        long clamped = Math.max(BREATHING_RHYTHM_MIN_MS, Math.min(BREATHING_RHYTHM_MAX_MS, durationMs));
+        this.baseScaleAnimationDuration = clamped;
+        this.currentScaleAnimationDuration = clamped;
+        if (scaleAnimator != null && scaleAnimator.isRunning()) {
+            scaleAnimator.cancel();
+            startScaleAnimation();
+        }
+    }
+
+    public void setBreathingScaleVariance(float variance) {
+        float clamped = Math.max(BREATHING_SCALE_VARIANCE_MIN, Math.min(BREATHING_SCALE_VARIANCE_MAX, variance));
+        this.breathingScaleVariance = clamped;
+        this.breathingScaleMin = 1f - clamped;
+        this.breathingScaleMax = 1f + clamped;
+        if (scaleAnimator != null && scaleAnimator.isRunning()) {
+            scaleAnimator.cancel();
+            startScaleAnimation();
+        }
+    }
+
+    public void setBreathingDisplacementStrength(float strength) {
+        float clamped = Math.max(BREATHING_DISPLACEMENT_STRENGTH_MIN, Math.min(BREATHING_DISPLACEMENT_STRENGTH_MAX, strength));
+        this.breathingDisplacementStrength = clamped;
+    }
+
+    public void setColorChangeIntervalMs(long intervalMs) {
+        long clamped = Math.max(COLOR_CHANGE_INTERVAL_MIN_MS, Math.min(COLOR_CHANGE_INTERVAL_MAX_MS, intervalMs));
+        this.colorChangeIntervalMs = clamped;
+    }
+
+    public void setShuffleLayoutRebuildIntervalMs(long intervalMs) {
+        long clamped = Math.max(0L, Math.min(SHUFFLE_LAYOUT_REBUILD_INTERVAL_MAX_MS, intervalMs));
+        this.shuffleLayoutBuildIntervalOverrideMs = clamped;
+        this.shuffleLayoutBuildIntervalMs = clamped;
+        this.shuffleLastLayoutBuildMs = 0L;
+    }
+
+    public void setShuffleSplitMode(String mode) {
+        if (mode == null || mode.trim().isEmpty()) return;
+        this.shuffleSplitMode = mode.trim().toUpperCase();
+        if ("WORD".equals(this.shuffleSplitMode)) {
+            clearTokenizationCache();
+        }
+        this.stableShuffleSignature = "";
+        this.stableShuffleTokens.clear();
+        notifyShuffleDebugInfo();
+        postInvalidate();
+        invalidate();
+    }
+
+    public void setShuffleOnlyCurrentLine(boolean onlyCurrentLine) {
+        this.shuffleOnlyCurrentLine = onlyCurrentLine;
+        notifyShuffleDebugInfo();
+        postInvalidate();
+        invalidate();
+    }
+
+    public void setOnShuffleDebugInfoListener(OnShuffleDebugInfoListener listener) {
+        this.shuffleDebugInfoListener = listener;
+        notifyShuffleDebugInfo();
+    }
+
+    private void notifyShuffleDebugInfo() {
+        if (shuffleDebugInfoListener == null) {
+            return;
+        }
+        shuffleDebugInfoListener.onDebugInfo(
+            CURRENT_TEXT_SIZE,
+            shuffleSplitScaleVariance,
+            shuffleSplitTiltRatio,
+            lastShuffleLineCount,
+            lastShuffleTokenCount
+        );
     }
     
     public void setOnLyricLineClickListener(OnLyricLineClickListener listener) {
@@ -1800,11 +2710,23 @@ public class ModernLyricsView extends View {
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
+        if (scrollAnimator != null) {
+            scrollAnimator.cancel();
+            scrollAnimator = null;
+        }
+        if (scaleAnimator != null) {
+            scaleAnimator.cancel();
+            scaleAnimator = null;
+        }
+        setLayerType(LAYER_TYPE_NONE, null);
         
         // 清理自动居中定时器，避免内存泄漏
         if (autoCenterHandler != null && autoCenterRunnable != null) {
             autoCenterHandler.removeCallbacks(autoCenterRunnable);
         }
+        LyricsWordTokenizer.removeOnTokenizerReadyListener(tokenizerReadyListener);
+        tokenCache.clear();
+        pendingTokenTasks.clear();
     }
     
     

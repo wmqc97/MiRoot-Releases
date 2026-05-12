@@ -83,7 +83,7 @@
                             android:textAppearance="@style/TextAppearance.MiRoot.Body"
                             android:textSize="14sp"
                             android:contentDescription="@string/settings_version_cd_readme"
-                            tools:text="v1.2" />
+                            tools:text="v1.3" />
                     </LinearLayout>
 
                     <ImageView
@@ -302,6 +302,76 @@
                     android:background="@color/mi_divider" />
 
                 <LinearLayout
+                    android:id="@+id/row_post_notifications"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@android:color/transparent"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:minHeight="48dp"
+                    android:orientation="horizontal"
+                    android:paddingVertical="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/runtime_auth_post_notifications"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/status_post_notifications"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.MiRoot.BodyStrong"
+                        android:textSize="14sp"
+                        tools:text="@string/runtime_auth_denied" />
+                </LinearLayout>
+
+                <View
+                    android:id="@+id/divider_after_post_notifications"
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/mi_divider" />
+
+                <LinearLayout
+                    android:id="@+id/row_app_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@android:color/transparent"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:minHeight="48dp"
+                    android:orientation="horizontal"
+                    android:paddingVertical="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/runtime_auth_app_list"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
+                        android:textSize="14sp" />
+
+                    <TextView
+                        android:id="@+id/status_app_list"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textAppearance="@style/TextAppearance.MiRoot.BodyStrong"
+                        android:textSize="14sp"
+                        tools:text="@string/runtime_auth_denied" />
+                </LinearLayout>
+
+                <View
+                    android:id="@+id/divider_after_app_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/mi_divider" />
+
+                <LinearLayout
                     android:id="@+id/row_notification"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -392,7 +462,7 @@
                     android:gravity="start"
                     android:textAppearance="@style/TextAppearance.MiRoot.Body"
                     android:textSize="14sp"
-                    tools:text="1.2" />
+                    tools:text="1.3" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -443,6 +513,59 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp"
                         android:text="@string/settings_coolapk_subtitle"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_sponsor_ifdian"
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp">
+
+            <LinearLayout
+                android:id="@+id/row_sponsor_ifdian"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:contentDescription="@string/settings_sponsor_cd"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:minHeight="56dp"
+                android:orientation="horizontal"
+                android:padding="16dp">
+
+                <ImageView
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:layout_marginEnd="14dp"
+                    android:contentDescription="@null"
+                    android:importantForAccessibility="no"
+                    android:scaleType="fitCenter"
+                    app:srcCompat="@drawable/ic_sponsor_ifdian" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_sponsor_title"
+                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textColor="@color/mi_text_primary" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_sponsor_subtitle"
                         android:textAppearance="?attr/textAppearanceBodySmall"
                         android:textColor="@color/mi_text_secondary" />
                 </LinearLayout>

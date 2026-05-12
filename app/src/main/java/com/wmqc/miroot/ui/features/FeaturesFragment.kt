@@ -12,7 +12,11 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
+import android.content.ComponentName
+import android.content.ServiceConnection
 import android.os.Bundle
+import android.os.IBinder
+import android.os.RemoteException
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -64,6 +68,9 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 import com.wmqc.miroot.viewmodel.MainPermissionViewModel
 import com.wmqc.miroot.car.CarControlEntry
+import com.wmqc.miroot.lyrics.ITaskService
+import com.wmqc.miroot.lyrics.LogHelper
+import com.wmqc.miroot.lyrics.RootTaskService
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
@@ -91,9 +98,29 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
     private var lastValidShellChipId = R.id.chip_shell_green
     private var suppressRearAssistCallbacks = false
     private var suppressChargingAnimationCallbacks = false
-    private var suppressChargingAlwaysOnCallbacks = false
-    private var suppressChargingDebugMainCallbacks = false
+    // 充电动画常亮已移除（3.x）：不再暴露该开关。
     private var suppressOfficialSubscreenCallback = false
+
+    private var rearDpiTaskService: ITaskService? = null
+    private var rearDpiServiceBound = false
+    private val rearDpiServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            rearDpiTaskService = ITaskService.Stub.asInterface(service)
+            if (isAdded && _binding != null) {
+                loadRearDpiFromService()
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            rearDpiTaskService = null
+        }
+    }
+
+    /** 背屏旋转等逻辑使用的副屏 displayId（与歌词/车控迁屏约定一致，一般为 1）。 */
+    private var rearDisplayRotation: Int = -1
+    private var suppressRearRotationToggle = false
+    private var rearRotationApplyInFlight = false
+
     private val wakeSliderStepState = mutableIntStateOf(0)
     private val chargingFillSpeedStepState = mutableIntStateOf(27)
 
@@ -258,6 +285,246 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         }
 
         bindRearAssistSection()
+        bindRearDpiSection()
+    }
+
+    private fun bindRearDpiSection() {
+        binding.textSectionRearDpi.setOnClickListener {
+            showSectionHelp(R.string.features_section_rear_dpi, R.string.help_features_rear_dpi)
+        }
+        binding.buttonRearDpiApply.setOnClickListener { applyRearDpi() }
+        binding.buttonRearDpiReset.setOnClickListener { resetRearDpi() }
+        binding.toggleGroupRearRotation.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (suppressRearRotationToggle || !isChecked) return@addOnButtonCheckedListener
+            val target = rearRotationFromButtonId(checkedId)
+            if (target < 0) return@addOnButtonCheckedListener
+            // 某些 ROM 皮肤下 ToggleGroup 可能出现多选，手动强制互斥仅保留当前项。
+            syncRearRotationToggleUi(target)
+            // 防重复点击：同方向重复点，或上一次旋转仍在执行时不重复下发。
+            if (rearRotationApplyInFlight || target == rearDisplayRotation) return@addOnButtonCheckedListener
+            applyRearRotation(target)
+        }
+    }
+
+    private fun bindRearDpiTaskService() {
+        if (rearDpiServiceBound) return
+        val ctx = context ?: return
+        val ok = try {
+            ctx.bindService(
+                Intent(ctx, RootTaskService::class.java),
+                rearDpiServiceConnection,
+                Context.BIND_AUTO_CREATE,
+            )
+        } catch (e: Exception) {
+            LogHelper.e(LOG_TAG, "bind RearDpi RootTaskService failed", e)
+            false
+        }
+        if (ok) {
+            rearDpiServiceBound = true
+        }
+    }
+
+    private fun unbindRearDpiTaskService() {
+        if (!rearDpiServiceBound) return
+        try {
+            context?.unbindService(rearDpiServiceConnection)
+        } catch (e: Exception) {
+            LogHelper.w(LOG_TAG, "unbind RearDpi RootTaskService: ${e.message}")
+        }
+        rearDpiServiceBound = false
+        rearDpiTaskService = null
+    }
+
+    private fun setRearDpiUiBusy(busy: Boolean) {
+        if (_binding == null) return
+        binding.progressRearDpi.visibility = if (busy) View.VISIBLE else View.GONE
+        binding.buttonRearDpiApply.isEnabled = !busy
+        binding.buttonRearDpiReset.isEnabled = !busy
+        binding.editRearDpiValue.isEnabled = !busy
+        binding.toggleGroupRearRotation.isEnabled = !busy
+    }
+
+    private fun loadRearDpiFromService() {
+        if (_binding == null) return
+        val ts = rearDpiTaskService
+        if (ts == null) {
+            binding.textRearDpiStatus.setText(R.string.features_rear_dpi_service_waiting)
+            return
+        }
+        setRearDpiUiBusy(true)
+        binding.textRearDpiStatus.setText(R.string.features_rear_dpi_unknown)
+        thread(name = "MiRoot-ReadRearDpi") {
+            val dpi = try {
+                ts.currentRearDpi
+            } catch (e: RemoteException) {
+                LogHelper.w(LOG_TAG, "getCurrentRearDpi: ${e.message}")
+                0
+            }
+            val rotRaw = try {
+                ts.getDisplayRotation(REAR_DISPLAY_ID)
+            } catch (e: RemoteException) {
+                LogHelper.w(LOG_TAG, "getDisplayRotation: ${e.message}")
+                -1
+            }
+            activity?.runOnUiThread {
+                if (!isAdded || _binding == null) return@runOnUiThread
+                setRearDpiUiBusy(false)
+                if (dpi > 0) {
+                    binding.textRearDpiStatus.text = getString(R.string.features_rear_dpi_current_fmt, dpi)
+                    binding.editRearDpiValue.setText(dpi.toString())
+                } else {
+                    binding.textRearDpiStatus.setText(R.string.features_rear_dpi_unknown)
+                }
+                val rot = if (rotRaw in 0..3) rotRaw else 0
+                rearDisplayRotation = rot
+                syncRearRotationToggleUi(rot)
+            }
+        }
+    }
+
+    private fun syncRearRotationToggleUi(rotation: Int) {
+        if (_binding == null) return
+        suppressRearRotationToggle = true
+        val id = rearRotationButtonId(rotation)
+        if (id != View.NO_ID) {
+            binding.toggleGroupRearRotation.check(id)
+            binding.buttonRearRotation0.isChecked = id == R.id.button_rear_rotation_0
+            binding.buttonRearRotation90.isChecked = id == R.id.button_rear_rotation_90
+            binding.buttonRearRotation180.isChecked = id == R.id.button_rear_rotation_180
+            binding.buttonRearRotation270.isChecked = id == R.id.button_rear_rotation_270
+        } else {
+            binding.toggleGroupRearRotation.clearChecked()
+            binding.buttonRearRotation0.isChecked = false
+            binding.buttonRearRotation90.isChecked = false
+            binding.buttonRearRotation180.isChecked = false
+            binding.buttonRearRotation270.isChecked = false
+        }
+        suppressRearRotationToggle = false
+    }
+
+    private fun rearRotationButtonId(rotation: Int): Int = when (rotation) {
+        0 -> R.id.button_rear_rotation_0
+        1 -> R.id.button_rear_rotation_90
+        2 -> R.id.button_rear_rotation_180
+        3 -> R.id.button_rear_rotation_270
+        else -> View.NO_ID
+    }
+
+    private fun rearRotationFromButtonId(checkedId: Int): Int = when (checkedId) {
+        R.id.button_rear_rotation_0 -> 0
+        R.id.button_rear_rotation_90 -> 1
+        R.id.button_rear_rotation_180 -> 2
+        R.id.button_rear_rotation_270 -> 3
+        else -> -1
+    }
+
+    private fun applyRearRotation(target: Int) {
+        if (target !in 0..3) return
+        if (!requirePrivilege()) {
+            syncRearRotationToggleUi(rearDisplayRotation)
+            return
+        }
+        val ts = rearDpiTaskService
+        if (ts == null) {
+            Toast.makeText(requireContext(), R.string.features_rear_dpi_service_waiting, Toast.LENGTH_SHORT).show()
+            syncRearRotationToggleUi(rearDisplayRotation)
+            bindRearDpiTaskService()
+            return
+        }
+        rearRotationApplyInFlight = true
+        setRearDpiUiBusy(true)
+        thread(name = "MiRoot-SetRearRotation") {
+            val ok = try {
+                ts.setDisplayRotation(REAR_DISPLAY_ID, target)
+            } catch (e: RemoteException) {
+                LogHelper.w(LOG_TAG, "setDisplayRotation: ${e.message}")
+                false
+            }
+            activity?.runOnUiThread {
+                if (!isAdded || _binding == null) return@runOnUiThread
+                rearRotationApplyInFlight = false
+                setRearDpiUiBusy(false)
+                if (ok) {
+                    rearDisplayRotation = target
+                    syncRearRotationToggleUi(target)
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.features_rear_rotation_toast_ok, target * 90),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                } else {
+                    Toast.makeText(requireContext(), R.string.features_rear_rotation_fail, Toast.LENGTH_LONG).show()
+                    syncRearRotationToggleUi(rearDisplayRotation)
+                }
+            }
+        }
+    }
+
+    private fun applyRearDpi() {
+        if (!requirePrivilege()) return
+        val ts = rearDpiTaskService
+        if (ts == null) {
+            Toast.makeText(requireContext(), R.string.features_rear_dpi_service_waiting, Toast.LENGTH_SHORT).show()
+            bindRearDpiTaskService()
+            return
+        }
+        val dpi = binding.editRearDpiValue.text?.toString()?.trim()?.toIntOrNull()
+        if (dpi == null || dpi <= 0 || dpi > 9999) {
+            Toast.makeText(requireContext(), R.string.features_rear_dpi_invalid, Toast.LENGTH_SHORT).show()
+            return
+        }
+        setRearDpiUiBusy(true)
+        thread(name = "MiRoot-SetRearDpi") {
+            val ok = try {
+                ts.setRearDpi(dpi)
+            } catch (e: RemoteException) {
+                LogHelper.w(LOG_TAG, "setRearDpi: ${e.message}")
+                false
+            }
+            activity?.runOnUiThread {
+                if (!isAdded || _binding == null) return@runOnUiThread
+                setRearDpiUiBusy(false)
+                if (ok) {
+                    Toast.makeText(
+                        requireContext(),
+                        getString(R.string.features_rear_dpi_toast_set, dpi),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    loadRearDpiFromService()
+                } else {
+                    Toast.makeText(requireContext(), R.string.features_rear_dpi_fail, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun resetRearDpi() {
+        if (!requirePrivilege()) return
+        val ts = rearDpiTaskService
+        if (ts == null) {
+            Toast.makeText(requireContext(), R.string.features_rear_dpi_service_waiting, Toast.LENGTH_SHORT).show()
+            bindRearDpiTaskService()
+            return
+        }
+        setRearDpiUiBusy(true)
+        thread(name = "MiRoot-ResetRearDpi") {
+            val ok = try {
+                ts.resetRearDpi()
+            } catch (e: RemoteException) {
+                LogHelper.w(LOG_TAG, "resetRearDpi: ${e.message}")
+                false
+            }
+            activity?.runOnUiThread {
+                if (!isAdded || _binding == null) return@runOnUiThread
+                setRearDpiUiBusy(false)
+                if (ok) {
+                    Toast.makeText(requireContext(), R.string.features_rear_dpi_toast_reset, Toast.LENGTH_SHORT).show()
+                    loadRearDpiFromService()
+                } else {
+                    Toast.makeText(requireContext(), R.string.features_rear_dpi_fail, Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     private fun bindChargingAnimationSection() {
@@ -274,31 +541,6 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
             ChargingAnimationPrefs.setEnabled(requireContext(), checked)
             ChargingServiceSync.sync(requireContext(), viewModel.snapshot.value?.privileged == true)
         }
-        binding.switchChargingAlwaysOn.setOnCheckedChangeListener { _, checked ->
-            if (suppressChargingAlwaysOnCallbacks) return@setOnCheckedChangeListener
-            if (!requirePrivilege()) {
-                suppressChargingAlwaysOnCallbacks = true
-                binding.switchChargingAlwaysOn.isChecked = !checked
-                suppressChargingAlwaysOnCallbacks = false
-                return@setOnCheckedChangeListener
-            }
-            ChargingAnimationPrefs.setAlwaysOn(requireContext(), checked)
-            sendReloadChargingSettingsBroadcast(requireContext())
-        }
-        binding.switchChargingDebugMain.setOnCheckedChangeListener { _, checked ->
-            if (suppressChargingDebugMainCallbacks) return@setOnCheckedChangeListener
-            if (!requirePrivilege()) {
-                suppressChargingDebugMainCallbacks = true
-                binding.switchChargingDebugMain.isChecked = !checked
-                suppressChargingDebugMainCallbacks = false
-                return@setOnCheckedChangeListener
-            }
-            ChargingAnimationPrefs.setDebugMainScreenOnly(requireContext(), checked)
-            sendReloadChargingSettingsBroadcast(requireContext())
-        }
-        binding.textChargingDebugMainLabel.setOnClickListener {
-            startChargingAnimationMainPreview()
-        }
     }
 
     private fun setupChargingFillSpeedSliderCompose() {
@@ -313,7 +555,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                         R.string.features_charging_fill_speed_fmt,
                         ChargingAnimationPrefs.fillDurationMsForFullFill(
                             fillSpeedPercentFromStep(step),
-                        ),
+                        ) / 1000f,
                     )
                 },
                 onValueChangeFinished = {
@@ -328,19 +570,25 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         }
     }
 
-    /** 步进 0–99 → 内部涨水参数 25%–300%（与 [ChargingAnimationPrefs] 一致）；界面展示为满幅时长 ms。 */
+    /** 步进 0–99（左→右）映射为满幅 4–8s，再换算为内部 speedPercent。 */
     private fun fillSpeedPercentFromStep(step: Int): Int {
-        val s = step.coerceIn(0, 99)
-        return 25 + s * (ChargingAnimationPrefs.MAX_FILL_RISE_SPEED_PERCENT - ChargingAnimationPrefs.MIN_FILL_RISE_SPEED_PERCENT) / 99
-    }
-
-    private fun fillSpeedStepFromPercent(percent: Int): Int {
-        val p = percent.coerceIn(
+        val durationMs = fillDurationMsFromStep(step)
+        val p = (ChargingAnimationPrefs.FILL_MS_FOR_FULL_SCALE * 100f / durationMs).roundToInt()
+        return p.coerceIn(
             ChargingAnimationPrefs.MIN_FILL_RISE_SPEED_PERCENT,
             ChargingAnimationPrefs.MAX_FILL_RISE_SPEED_PERCENT,
         )
-        val span = (ChargingAnimationPrefs.MAX_FILL_RISE_SPEED_PERCENT - ChargingAnimationPrefs.MIN_FILL_RISE_SPEED_PERCENT).toFloat()
-        return (((p - ChargingAnimationPrefs.MIN_FILL_RISE_SPEED_PERCENT) * 99f / span).roundToInt()).coerceIn(0, 99)
+    }
+
+    private fun fillSpeedStepFromPercent(percent: Int): Int {
+        val durationMs = ChargingAnimationPrefs.fillDurationMsForFullFill(percent).coerceIn(4_000, 8_000)
+        return ((durationMs - 4_000) * 99f / (8_000 - 4_000)).roundToInt().coerceIn(0, 99)
+    }
+
+    /** 滑块左→右：4s→8s。 */
+    private fun fillDurationMsFromStep(step: Int): Int {
+        val s = step.coerceIn(0, 99)
+        return 4_000 + s * (8_000 - 4_000) / 99
     }
 
     private fun syncChargingAnimationUiFromPrefs() {
@@ -348,33 +596,14 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         binding.switchChargingAnimation.isChecked =
             ChargingAnimationPrefs.isEnabled(requireContext())
         suppressChargingAnimationCallbacks = false
-        suppressChargingAlwaysOnCallbacks = true
-        binding.switchChargingAlwaysOn.isChecked =
-            ChargingAnimationPrefs.isAlwaysOn(requireContext())
-        suppressChargingAlwaysOnCallbacks = false
-        suppressChargingDebugMainCallbacks = true
-        binding.switchChargingDebugMain.isChecked =
-            ChargingAnimationPrefs.isDebugMainScreenOnly(requireContext())
-        suppressChargingDebugMainCallbacks = false
         val fillP = ChargingAnimationPrefs.getFillRiseSpeedPercent(requireContext())
         chargingFillSpeedStepState.intValue = fillSpeedStepFromPercent(fillP)
         binding.textChargingFillSpeedValue.text =
             getString(
                 R.string.features_charging_fill_speed_fmt,
-                ChargingAnimationPrefs.fillDurationMsForFullFill(fillP),
+                ChargingAnimationPrefs.fillDurationMsForFullFill(fillP) / 1000f,
             )
         ChargingServiceSync.sync(requireContext(), viewModel.snapshot.value?.privileged == true)
-    }
-
-    private fun startChargingAnimationMainPreview() {
-        val ctx = requireContext()
-        val bm = ctx.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-        val level = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)?.coerceIn(0, 100) ?: 0
-        val i = Intent(ctx, RearScreenChargingActivity::class.java).apply {
-            putExtra(RearScreenChargingActivity.EXTRA_BATTERY_LEVEL, level)
-            putExtra(RearScreenChargingActivity.EXTRA_DEBUG_MAIN_PREVIEW, true)
-        }
-        startActivity(i)
     }
 
     private fun sendReloadChargingSettingsBroadcast(ctx: Context) {
@@ -1322,6 +1551,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
 
     override fun onStart() {
         super.onStart()
+        bindRearDpiTaskService()
         val f = IntentFilter(RearAssistService.ACTION_UI_REAR_PREFS_CHANGED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requireContext().registerReceiver(
@@ -1335,7 +1565,15 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (rearDpiTaskService != null && _binding != null) {
+            loadRearDpiFromService()
+        }
+    }
+
     override fun onStop() {
+        unbindRearDpiTaskService()
         try {
             requireContext().unregisterReceiver(rearAssistUiReceiver)
         } catch (_: IllegalArgumentException) {
@@ -1349,6 +1587,8 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
     }
 
     private companion object {
+        private const val LOG_TAG = "FeaturesFragment"
+        private const val REAR_DISPLAY_ID = 1
         /** 三连击标题时，相邻两次点击允许的最大间隔（毫秒），超时则重新计数。 */
         private const val TITLE_TRIPLE_TAP_WINDOW_MS = 600L
     }

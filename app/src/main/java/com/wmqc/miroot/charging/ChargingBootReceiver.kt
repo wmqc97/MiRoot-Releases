@@ -3,8 +3,10 @@ package com.wmqc.miroot.charging
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.UserManager
 import androidx.core.content.ContextCompat
 import com.wmqc.miroot.capability.EnvironmentProbe
 import kotlin.concurrent.thread
@@ -17,12 +19,19 @@ class ChargingBootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
-        if (action != Intent.ACTION_BOOT_COMPLETED && action != Intent.ACTION_LOCKED_BOOT_COMPLETED) {
+        if (action != Intent.ACTION_BOOT_COMPLETED
+            && action != Intent.ACTION_LOCKED_BOOT_COMPLETED
+            && action != Intent.ACTION_USER_UNLOCKED
+        ) {
             return
         }
         val pendingResult = goAsync()
         thread(name = "MiRootChargingBoot") {
             val app = context.applicationContext
+            if (!isUserUnlocked(app)) {
+                pendingResult.finish()
+                return@thread
+            }
             if (!ChargingAnimationPrefs.isEnabled(app)) {
                 pendingResult.finish()
                 return@thread
@@ -45,5 +54,11 @@ class ChargingBootReceiver : BroadcastReceiver() {
                 }
             }
         }
+    }
+
+    private fun isUserUnlocked(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return true
+        val um = context.getSystemService(UserManager::class.java)
+        return um?.isUserUnlocked == true
     }
 }

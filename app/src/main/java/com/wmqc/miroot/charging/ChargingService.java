@@ -58,7 +58,6 @@ public class ChargingService extends Service {
 
     private static final String PREFS = "MiRootCharging";
     private static final String KEY_ENABLED = "charging_animation_enabled";
-    private static final String KEY_DEBUG_MAIN_SCREEN_ONLY = "charging_debug_main_screen_only";
 
     /** 两次成功迁屏之间的最短间隔（ms）。 */
     private static final long ANIMATION_COOLDOWN_MS = 6000L;
@@ -69,6 +68,11 @@ public class ChargingService extends Service {
     private static final long CHARGING_FLOW_WAKELOCK_MS = 8000L;
 
     private static volatile ChargingService instance;
+    /**
+     * 全局插拔电状态快照，用于解决“拔电广播先于 Activity 注册 receiver 到达”的竞态。
+     * 由 {@link #batteryReceiver} 在插拔电事件到达时及时更新，并在 {@link #onCreate()} 时初始化一次。
+     */
+    private static volatile boolean sIsCurrentlyPlugged = false;
     private ITaskService taskService;
     private long lastChargingAnimationTime;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -86,6 +90,10 @@ public class ChargingService extends Service {
 
     public static ITaskService getTaskService() {
         return instance != null ? instance.taskService : null;
+    }
+
+    public static boolean isCurrentlyPlugged() {
+        return sIsCurrentlyPlugged;
     }
 
     private final ServiceConnection taskServiceConnection = new ServiceConnection() {
@@ -123,7 +131,7 @@ public class ChargingService extends Service {
             }
             LogHelper.d(TAG, "收到恢复充电动画广播");
             mainHandler.postDelayed(() -> executor.execute(() -> {
-                if (!isAnimationEnabled() || isDebugMainScreenOnly()) {
+                if (!isAnimationEnabled()) {
                     return;
                 }
                 if (!chargingFlowInProgress.compareAndSet(false, true)) {
@@ -156,8 +164,10 @@ public class ChargingService extends Service {
             }
             String action = intent.getAction();
             if (Intent.ACTION_POWER_CONNECTED.equals(action)) {
+                sIsCurrentlyPlugged = true;
                 executor.execute(() -> onPowerConnected(context));
             } else if (Intent.ACTION_POWER_DISCONNECTED.equals(action)) {
+                sIsCurrentlyPlugged = false;
                 executor.execute(ChargingService.this::onPowerDisconnected);
             }
         }
@@ -169,6 +179,11 @@ public class ChargingService extends Service {
         // 须在任何其他逻辑之前进入前台，否则系统可能报 ForegroundServiceDidNotStartInTimeException。
         ensureForegroundStarted();
         instance = this;
+        try {
+            sIsCurrentlyPlugged = isCurrentlyPlugged(this);
+        } catch (Throwable t) {
+            sIsCurrentlyPlugged = false;
+        }
         wakeupHandler = new Handler(Looper.getMainLooper());
         try {
             reloadChargingPrefsFromDisk();
@@ -439,10 +454,6 @@ public class ChargingService extends Service {
         return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_ENABLED, true);
     }
 
-    private boolean isDebugMainScreenOnly() {
-        return getSharedPreferences(PREFS, MODE_PRIVATE).getBoolean(KEY_DEBUG_MAIN_SCREEN_ONLY, false);
-    }
-
     private void onPowerConnected(Context context) {
         if (!isAnimationEnabled()) {
             return;
@@ -450,24 +461,6 @@ public class ChargingService extends Service {
         long now = System.currentTimeMillis();
         if (now - lastChargingAnimationTime < ANIMATION_COOLDOWN_MS) {
             LogHelper.d(TAG, "充电动画冷却中，跳过");
-            return;
-        }
-        if (isDebugMainScreenOnly()) {
-            lastChargingAnimationTime = now;
-            int level = getBatteryLevel(context);
-            acquireWakeLockDebug();
-            try {
-                android.content.Intent intent = new android.content.Intent(this, RearScreenChargingActivity.class);
-                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
-                intent.putExtra(RearScreenChargingActivity.EXTRA_BATTERY_LEVEL, level);
-                intent.putExtra(RearScreenChargingActivity.EXTRA_DEBUG_MAIN_PREVIEW, true);
-                startActivity(intent);
-                LogHelper.d(TAG, "主屏调试模式：已直接启动充电动画（未迁背屏）");
-            } catch (Exception e) {
-                LogHelper.e(TAG, "主屏调试充电动画启动失败", e);
-            } finally {
-                releaseChargingWakeLock();
-            }
             return;
         }
         Context app = context.getApplicationContext();
@@ -480,6 +473,7 @@ public class ChargingService extends Service {
     private boolean runRearChargingFlowOnce(Context context, boolean allowDeferredRetry, boolean fromPowerConnect) {
         if (!waitTaskServiceForChargingFlow()) {
             LogHelper.w(TAG, "TaskService 未就绪（10×100ms）");
+            logChargingFlowFailure("MIGRATE_TO_REAR_NO_TASKSERVICE", "waitTaskServiceForChargingFlow=false");
             if (allowDeferredRetry && isCurrentlyPlugged(context)) {
                 executor.execute(() -> delayedRetryAfterNoTaskService(context));
             }
@@ -534,20 +528,40 @@ public class ChargingService extends Service {
             String taskId = pollChargingTaskId(mainCmd);
             if (taskId != null) {
                 try {
-                    if (RearAssistPrefs.INSTANCE.isKeepScreenOnEnabled(context.getApplicationContext())) {
-                        RearScreenWakeManager.getInstance().startWakeService(
+                        // 对齐 3.4：充电动画的常亮/唤醒不再跟随「功能页-投屏常亮」，
+                        // 仅由充电动画自身的「常亮」开关控制。
+                        if (chargingAlwaysOnEnabled) {
+                            RearScreenWakeManager.getInstance().startWakeService(
                                 context.getApplicationContext(), RearScreenChargingActivity.class);
-                        LogHelper.d(TAG, "迁背屏前已启动背屏常亮服务（充电动画）");
-                    } else {
-                        LogHelper.d(TAG, "背屏常亮关，跳过迁背屏前常亮服务（充电动画）");
-                    }
+                            LogHelper.d(TAG, "迁背屏前已启动背屏常亮服务（充电动画）");
+                        } else {
+                            LogHelper.d(TAG, "充电动画常亮关，跳过迁背屏前常亮服务");
+                        }
                 } catch (Exception e) {
                     LogHelper.w(TAG, "迁背屏前启动背屏常亮服务失败: " + e.getMessage());
                 }
                 String moveCmd = "service call activity_task 50 i32 " + taskId + " i32 " + rearDisplayId;
                 taskService.executeShellCommand(moveCmd);
                 Thread.sleep(40);
+                boolean moveConfirmed = confirmChargingTaskMovedToRear(taskId, rearDisplayId, moveCmd);
+                if (!moveConfirmed) {
+                    LogHelper.w(TAG, "充电动画迁屏确认超时，继续广播兜底初始化");
+                    logChargingFlowFailure(
+                        "MIGRATE_TO_REAR_CONFIRM_TIMEOUT",
+                        "taskId=" + taskId + ", displayId=" + rearDisplayId
+                    );
+                }
                 LogHelper.d(TAG, "充电动画迁往背屏 displayId=" + rearDisplayId + " taskId=" + taskId);
+                try {
+                    // 通知 Activity：task 已迁移到背屏（即使 getDisplay()/config change 滞后，也可以据此尽快 inflate UI）
+                    Intent moved = new Intent(ChargingIntents.ACTION_NOTIFY_CHARGING_TASK_MOVED_TO_REAR);
+                    moved.setPackage(getPackageName());
+                    moved.putExtra(RearScreenChargingActivity.EXTRA_REAR_DISPLAY_ID, rearDisplayId);
+                    moved.putExtra("chargingTaskId", Integer.parseInt(taskId));
+                    sendBroadcast(moved);
+                } catch (Throwable t) {
+                    LogHelper.w(TAG, "发送 task moved 广播失败: " + t.getMessage());
+                }
                 movedOk = true;
                 assistPausedHere = false;
                 if (!fromPowerConnect) {
@@ -555,12 +569,14 @@ public class ChargingService extends Service {
                 }
             } else {
                 LogHelper.w(TAG, "未解析到 RearScreenChargingActivity taskId");
+                logChargingFlowFailure("MIGRATE_TO_REAR_NO_TASKID", "pollChargingTaskId=null");
                 if (allowDeferredRetry && isCurrentlyPlugged(context)) {
                     executor.execute(() -> delayedRetryAfterNoTaskId(context));
                 }
             }
         } catch (Exception e) {
             LogHelper.e(TAG, "显示充电动画失败", e);
+            logChargingFlowFailure("MIGRATE_TO_REAR_EXCEPTION", e.getMessage());
         } finally {
             if (assistPausedHere) {
                 RearAssistService.resumeMonitoringAfterCharging();
@@ -575,6 +591,47 @@ public class ChargingService extends Service {
         return movedOk;
     }
 
+    /**
+     * 对齐 3.4 稳定策略：迁屏命令执行后做短轮询确认，避免“shell 返回成功但 task 尚未真正落到背屏”。
+     * 期间会在中途补发 move 命令，降低偶发时序抖动导致的黑屏等待。
+     */
+    private boolean confirmChargingTaskMovedToRear(String taskId, int rearDisplayId, String moveCmd) {
+        if (taskService == null) {
+            return false;
+        }
+        int tid;
+        try {
+            tid = Integer.parseInt(taskId);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+        for (int i = 0; i < 8; i++) {
+            try {
+                if (taskService.isTaskOnDisplay(tid, rearDisplayId)) {
+                    return true;
+                }
+                // 中途补发迁屏命令，提升极端负载下的成功率。
+                if (i == 2 || i == 5) {
+                    taskService.executeShellCommand(moveCmd);
+                }
+                Thread.sleep(35);
+            } catch (Exception e) {
+                LogHelper.w(TAG, "confirm move failed: " + e.getMessage());
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 仅在失败路径输出聚合告警，便于真机快速定位：
+     * - MIGRATE_*: 迁屏阶段失败
+     * - RESTORE_*: 结束恢复阶段失败（由 Activity 打点）
+     */
+    private void logChargingFlowFailure(String stage, String detail) {
+        LogHelper.w(TAG, "[CHARGING_FLOW_FAIL][" + stage + "] " + detail);
+    }
+
     private void delayedRetryAfterNoTaskService(Context context) {
         try {
             Thread.sleep(RETRY_NO_TASKSERVICE_MS);
@@ -582,7 +639,7 @@ public class ChargingService extends Service {
             Thread.currentThread().interrupt();
             return;
         }
-        if (!isAnimationEnabled() || isDebugMainScreenOnly()) {
+        if (!isAnimationEnabled()) {
             return;
         }
         if (!isCurrentlyPlugged(context)) {
@@ -599,7 +656,7 @@ public class ChargingService extends Service {
             Thread.currentThread().interrupt();
             return;
         }
-        if (!isAnimationEnabled() || isDebugMainScreenOnly()) {
+        if (!isAnimationEnabled()) {
             return;
         }
         if (!isCurrentlyPlugged(context)) {
@@ -629,6 +686,23 @@ public class ChargingService extends Service {
         if (taskService == null) {
             return -1;
         }
+        // 优先：直接从背屏当前前台解析 taskId，并用 isTaskOnDisplay 复核。
+        // 这样对“任意第三方 app 被迁到背屏”的场景更稳（不依赖历史记录字符串一致性）。
+        try {
+            String fgNow = taskService.getForegroundAppOnDisplay(rearDisplayId);
+            int tidNow = parseTaskIdFromForegroundLine(fgNow);
+            if (tidNow > 0) {
+                try {
+                    if (taskService.isTaskOnDisplay(tidNow, rearDisplayId)) {
+                        return tidNow;
+                    }
+                } catch (Exception ignored) {
+                    // 继续走后备逻辑
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
         String lastLine = LyricsTaskTracking.getLastMovedLine();
         if (lastLine == null) {
             lastLine = SwitchToRearQsTileService.getLastMovedTask();
@@ -650,6 +724,13 @@ public class ChargingService extends Service {
             return -1;
         }
         try {
+            try {
+                // 若历史 taskId 仍在背屏，则直接使用（比字符串比较可靠）
+                if (taskService.isTaskOnDisplay(lastTid, rearDisplayId)) {
+                    return lastTid;
+                }
+            } catch (Exception ignored) {
+            }
             String fg = taskService.getForegroundAppOnDisplay(rearDisplayId);
             if (fg != null && fg.contains("RearScreenChargingActivity")) {
                 return lastTid;
@@ -682,6 +763,25 @@ public class ChargingService extends Service {
         return -1;
     }
 
+    /**
+     * dumpsys/服务返回的前台信息一般形如 "package.name:1234"。
+     * 取最后一个冒号后的整数作为 taskId（忽略包含 ":" 的组件名情况）。
+     */
+    private static int parseTaskIdFromForegroundLine(String fg) {
+        if (fg == null) return -1;
+        String t = fg.trim();
+        if (t.isEmpty()) return -1;
+        int idx = t.lastIndexOf(':');
+        if (idx <= 0 || idx >= t.length() - 1) return -1;
+        String id = t.substring(idx + 1).trim();
+        try {
+            int v = Integer.parseInt(id);
+            return v > 0 ? v : -1;
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
     private int resolveRearDisplayIdForMove() {
         try {
             String cmd =
@@ -690,12 +790,16 @@ public class ChargingService extends Service {
             if (out != null) {
                 String t = out.trim().split("\\s")[0];
                 if (!t.isEmpty()) {
-                    int id = Integer.parseInt(t);
-                    if (id > 0) {
+                    // SurfaceFlinger 在部分机型会返回 64-bit physical id；迁屏 API 需要逻辑 displayId（通常 1）。
+                    long raw = Long.parseLong(t);
+                    if (raw > 0 && raw < 32) {
+                        int id = (int) raw;
                         return id;
                     }
                 }
             }
+        } catch (NumberFormatException ignored) {
+            // 非法或超范围 display 标识，回退默认副屏 id=1
         } catch (Exception e) {
             LogHelper.w(TAG, "resolveRearDisplayIdForMove: " + e.getMessage());
         }
@@ -773,19 +877,6 @@ public class ChargingService extends Service {
             }
         } catch (Throwable t) {
             LogHelper.w(TAG, "WakeLock: " + t.getMessage());
-        }
-    }
-
-    private void acquireWakeLockDebug() {
-        try {
-            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-            if (pm != null) {
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MiRoot:ChargingDebug");
-                wakeLock.setReferenceCounted(false);
-                wakeLock.acquire(30_000);
-            }
-        } catch (Exception e) {
-            LogHelper.w(TAG, "WakeLock debug: " + e.getMessage());
         }
     }
 
