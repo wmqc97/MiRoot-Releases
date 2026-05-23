@@ -573,6 +573,16 @@
     <string name="update_check_failed">检查更新失败</string>
     <string name="update_install_hint">下载完成，点击安装新版本</string>
     <string name="update_release_notes">更新内容</string>
+    <string name="update_available">发现新版本 %1$s</string>
+    <string name="update_cancel">取消下载</string>
+    <string name="update_cancelled">已取消下载</string>
+    <string name="update_error_network">网络错误，请检查网络连接</string>
+    <string name="update_error_rate_limited">API 访问频率受限，请稍后再试</string>
+    <string name="update_error_not_found">未找到版本信息</string>
+    <string name="update_error_no_release">暂无正式版本</string>
+    <string name="update_error_no_apk">最新版本未包含 APK 文件</string>
+    <string name="update_error_parse">解析版本信息失败</string>
+    <string name="update_error_disk_full">存储空间不足，下载失败</string>
     <string name="settings_about_title">关于 MiRoot</string>
     <!-- 仅作布局预览占位，运行时在代码中拼接 -->
     <string name="settings_about_body_placeholder" translatable="false">…</string>

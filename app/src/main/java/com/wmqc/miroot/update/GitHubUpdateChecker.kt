@@ -4,13 +4,16 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 data class GitHubRelease(
@@ -20,11 +23,44 @@ data class GitHubRelease(
     val body: String,
 )
 
+/** Result of checking for a latest release on GitHub. */
+sealed class UpdateCheckResult {
+    data class Success(val release: GitHubRelease) : UpdateCheckResult()
+    data class Error(val reason: ErrorReason) : UpdateCheckResult()
+}
+
+enum class ErrorReason {
+    NETWORK_ERROR,
+    RATE_LIMITED,
+    NOT_FOUND,
+    NO_RELEASE,
+    NO_APK_ASSET,
+    PARSE_ERROR,
+    UNKNOWN,
+}
+
+/** Result of downloading an APK. */
+sealed class DownloadResult {
+    data class Success(val file: File) : DownloadResult()
+    data object Cancelled : DownloadResult()
+    data class Error(val reason: DownloadErrorReason) : DownloadResult()
+}
+
+enum class DownloadErrorReason {
+    NETWORK_ERROR,
+    HTTP_ERROR,
+    NO_CONTENT,
+    FILE_WRITE_ERROR,
+    DISK_FULL,
+    UNKNOWN,
+}
+
 object GitHubUpdateChecker {
 
     private const val OWNER = "wmqc97"
     private const val REPO = "MiRoot"
     private const val API_URL = "https://api.github.com/repos/$OWNER/$REPO/releases/latest"
+    private const val USER_AGENT = "MiRoot-Android/1.0"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -33,29 +69,40 @@ object GitHubUpdateChecker {
 
     /**
      * Fetch latest release info from GitHub API.
-     * Returns null on failure (network, parse, or no release).
+     * Returns [UpdateCheckResult.Success] on success,
+     * or [UpdateCheckResult.Error] with a specific reason on failure.
      */
-    suspend fun fetchLatestRelease(): GitHubRelease? = withContext(Dispatchers.IO) {
+    suspend fun fetchLatestRelease(): UpdateCheckResult = withContext(Dispatchers.IO) {
         try {
             val req = Request.Builder()
                 .url(API_URL)
                 .header("Accept", "application/vnd.github.v3+json")
+                .header("User-Agent", USER_AGENT)
                 .build()
 
             client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext null
-                val body = resp.body?.string() ?: return@withContext null
-                parseReleaseJson(body)
+                val code = resp.code
+                when {
+                    code in 200..299 -> {
+                        val body = resp.body?.string() ?: return@withContext ErrorReason.NETWORK_ERROR.toResult()
+                        parseReleaseJson(body)
+                    }
+                    code == 403 || code == 429 -> ErrorReason.RATE_LIMITED.toResult()
+                    code == 404 -> ErrorReason.NOT_FOUND.toResult()
+                    else -> ErrorReason.NETWORK_ERROR.toResult()
+                }
             }
         } catch (_: Exception) {
-            null
+            ErrorReason.NETWORK_ERROR.toResult()
         }
     }
 
-    private fun parseReleaseJson(json: String): GitHubRelease? {
+    private fun parseReleaseJson(json: String): UpdateCheckResult {
         return try {
             val root = JSONObject(json)
             val tagName = root.optString("tag_name", "").trim()
+            if (tagName.isEmpty()) return ErrorReason.NO_RELEASE.toResult()
+
             val versionName = tagName.removePrefix("v")
             val body = root.optString("body", "")
             val assets = root.optJSONArray("assets")
@@ -72,16 +119,18 @@ object GitHubUpdateChecker {
                 }
             }
 
-            if (tagName.isEmpty() || downloadUrl.isEmpty()) return null
+            if (downloadUrl.isEmpty()) return ErrorReason.NO_APK_ASSET.toResult()
 
-            GitHubRelease(
-                tagName = tagName,
-                versionName = versionName,
-                downloadUrl = downloadUrl,
-                body = body,
+            UpdateCheckResult.Success(
+                GitHubRelease(
+                    tagName = tagName,
+                    versionName = versionName,
+                    downloadUrl = downloadUrl,
+                    body = body,
+                )
             )
         } catch (_: Exception) {
-            null
+            ErrorReason.PARSE_ERROR.toResult()
         }
     }
 
@@ -104,29 +153,55 @@ object GitHubUpdateChecker {
     }
 
     /**
+     * Return the cached APK file for [versionName] if it exists.
+     */
+    fun getCachedApk(context: Context, versionName: String): File? {
+        val f = File(context.cacheDir, "MiRoot-${versionName}.apk")
+        return f.takeIf { it.exists() }
+    }
+
+    /**
      * Download APK from [url] to app cache directory, reporting progress via [onProgress].
+     *
+     * Uses versioned filenames so re-checking the same version skips the download.
+     * Writes to a `.tmp` file first, then renames on success.
+     * Supports cancellation via parent coroutine [Job.cancel].
+     *
      * [onProgress] receives (bytesRead, totalBytes).
      */
     suspend fun downloadApk(
         context: Context,
         url: String,
+        versionName: String,
         onProgress: (Long, Long) -> Unit,
-    ): File? = withContext(Dispatchers.IO) {
+    ): DownloadResult = withContext(Dispatchers.IO) {
+        // Return cached file if already downloaded
+        val cached = getCachedApk(context, versionName)
+        if (cached != null) return@withContext DownloadResult.Success(cached)
+
+        val targetFile = File(context.cacheDir, "MiRoot-${versionName}.apk")
+        val tempFile = File(context.cacheDir, "MiRoot-${versionName}.apk.tmp")
+
         try {
             val req = Request.Builder().url(url).build()
             client.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return@withContext null
-                val body = resp.body ?: return@withContext null
+                if (!resp.isSuccessful) {
+                    tempFile.delete()
+                    return@withContext DownloadResult.Error(DownloadErrorReason.HTTP_ERROR)
+                }
+                val body = resp.body ?: run {
+                    tempFile.delete()
+                    return@withContext DownloadResult.Error(DownloadErrorReason.NO_CONTENT)
+                }
                 val totalBytes = body.contentLength()
-                val fileName = "MiRoot-Update.apk"
-                val targetFile = File(context.cacheDir, fileName)
 
                 body.byteStream().use { input ->
-                    FileOutputStream(targetFile).use { output ->
+                    FileOutputStream(tempFile).use { output ->
                         val buffer = ByteArray(8192)
                         var bytesRead: Long = 0
                         var read: Int
                         while (input.read(buffer).also { read = it } != -1) {
+                            ensureActive() // support cancellation
                             output.write(buffer, 0, read)
                             bytesRead += read
                             if (totalBytes > 0) {
@@ -135,10 +210,23 @@ object GitHubUpdateChecker {
                         }
                     }
                 }
-                targetFile
+
+                // Rename .tmp to final filename
+                if (!tempFile.renameTo(targetFile)) {
+                    tempFile.delete()
+                    return@withContext DownloadResult.Error(DownloadErrorReason.FILE_WRITE_ERROR)
+                }
+                DownloadResult.Success(targetFile)
             }
+        } catch (e: CancellationException) {
+            tempFile.delete()
+            DownloadResult.Cancelled
+        } catch (e: IOException) {
+            tempFile.delete()
+            DownloadResult.Error(DownloadErrorReason.FILE_WRITE_ERROR)
         } catch (_: Exception) {
-            null
+            tempFile.delete()
+            DownloadResult.Error(DownloadErrorReason.NETWORK_ERROR)
         }
     }
 
@@ -163,4 +251,8 @@ object GitHubUpdateChecker {
             false
         }
     }
+
+    // ---- internal helpers ----
+
+    private fun ErrorReason.toResult(): UpdateCheckResult = UpdateCheckResult.Error(this)
 }

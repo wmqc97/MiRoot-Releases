@@ -635,11 +635,28 @@
                 android:orientation="vertical"
                 android:padding="16dp">
 
-                <TextView
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/update_title"
-                    android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/update_title"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                    <View
+                        android:id="@+id/badge_update_dot"
+                        android:layout_width="8dp"
+                        android:layout_height="8dp"
+                        android:layout_marginStart="6dp"
+                        android:layout_marginBottom="2dp"
+                        android:background="@drawable/shape_badge_dot"
+                        android:visibility="gone"
+                        tools:visibility="visible" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/text_update_version"
@@ -659,6 +676,16 @@
                     android:textSize="14sp"
                     android:visibility="gone"
                     tools:text="发现新版本 1.9.0"
+                    tools:visibility="visible" />
+
+                <com.google.android.material.progressindicator.LinearProgressIndicator
+                    android:id="@+id/progress_update"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:indeterminate="false"
+                    android:visibility="gone"
+                    tools:progress="42"
                     tools:visibility="visible" />
 
                 <com.google.android.material.button.MaterialButton

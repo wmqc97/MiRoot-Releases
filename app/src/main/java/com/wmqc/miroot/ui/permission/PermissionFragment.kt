@@ -36,8 +36,13 @@ import com.wmqc.miroot.ui.common.showSectionHelp
 import com.wmqc.miroot.databinding.FragmentPermissionBinding
 import com.wmqc.miroot.update.GitHubUpdateChecker
 import com.wmqc.miroot.update.GitHubRelease
+import com.wmqc.miroot.update.UpdateCheckResult
+import com.wmqc.miroot.update.DownloadResult
+import com.wmqc.miroot.update.DownloadErrorReason
+import com.wmqc.miroot.update.ErrorReason
 import com.wmqc.miroot.viewmodel.MainPermissionViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -47,6 +52,9 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
     private val binding get() = _binding!!
 
     private val viewModel: MainPermissionViewModel by activityViewModels()
+
+    private var downloadJob: Job? = null
+    private var isDownloading = false
 
     private val postNotificationsPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
@@ -133,8 +141,16 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
                 .show()
         }
 
-        binding.buttonCheckUpdate.setOnClickListener { checkForUpdate() }
+        binding.buttonCheckUpdate.setOnClickListener {
+            if (isDownloading) {
+                downloadJob?.cancel()
+                downloadJob = null
+            } else {
+                checkForUpdate()
+            }
+        }
         bindUpdateVersion()
+        checkForUpdateSilently()
 
         binding.rowStorage.setOnClickListener {
             val ctx = requireContext()
@@ -531,7 +547,7 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         binding.textUpdateStatus.visibility = View.GONE
 
         viewLifecycleOwner.lifecycleScope.launch {
-            val release = withContext(Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 GitHubUpdateChecker.fetchLatestRelease()
             }
             if (!isAdded || _binding == null) return@launch
@@ -539,18 +555,27 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
             btn.isEnabled = true
             btn.text = getString(R.string.update_check_button)
 
-            if (release == null) {
-                MainDisplayUi.showToast(requireContext(), R.string.update_check_failed, Toast.LENGTH_SHORT)
-                return@launch
+            when (result) {
+                is UpdateCheckResult.Success -> {
+                    val currentVer = readMiRootVersion()
+                    if (!GitHubUpdateChecker.hasUpdate(currentVer, result.release.versionName)) {
+                        MainDisplayUi.showToast(requireContext(), R.string.update_no_update, Toast.LENGTH_SHORT)
+                        return@launch
+                    }
+                    showUpdateDialog(result.release)
+                }
+                is UpdateCheckResult.Error -> {
+                    val msg = when (result.reason) {
+                        ErrorReason.RATE_LIMITED -> R.string.update_error_rate_limited
+                        ErrorReason.NOT_FOUND -> R.string.update_error_not_found
+                        ErrorReason.NO_RELEASE -> R.string.update_error_no_release
+                        ErrorReason.NO_APK_ASSET -> R.string.update_error_no_apk
+                        ErrorReason.PARSE_ERROR -> R.string.update_error_parse
+                        ErrorReason.NETWORK_ERROR, ErrorReason.UNKNOWN -> R.string.update_check_failed
+                    }
+                    MainDisplayUi.showToast(requireContext(), msg, Toast.LENGTH_SHORT)
+                }
             }
-
-            val currentVer = readMiRootVersion()
-            if (!GitHubUpdateChecker.hasUpdate(currentVer, release.versionName)) {
-                MainDisplayUi.showToast(requireContext(), R.string.update_no_update, Toast.LENGTH_SHORT)
-                return@launch
-            }
-
-            showUpdateDialog(release)
         }
     }
 
@@ -577,47 +602,116 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
     }
 
     private fun downloadAndInstall(release: GitHubRelease) {
-        val statusText = binding.textUpdateStatus
-        statusText.visibility = View.VISIBLE
-        statusText.text = getString(R.string.update_downloading, 0)
+        // Skip download if already cached
+        val cached = GitHubUpdateChecker.getCachedApk(requireContext(), release.versionName)
+        if (cached != null) {
+            GitHubUpdateChecker.installApk(requireContext(), cached)
+            return
+        }
 
-        val btn = binding.buttonCheckUpdate
-        btn.isEnabled = false
-        btn.text = getString(R.string.update_downloading, 0)
+        isDownloading = true
+        binding.progressUpdate.visibility = View.VISIBLE
+        binding.progressUpdate.progress = 0
+        binding.textUpdateStatus.apply {
+            visibility = View.VISIBLE
+            text = getString(R.string.update_downloading, 0)
+        }
+        binding.buttonCheckUpdate.apply {
+            isEnabled = true
+            text = getString(R.string.update_cancel)
+        }
 
-        viewLifecycleOwner.lifecycleScope.launch {
-            val apkFile = withContext(Dispatchers.IO) {
+        downloadJob = viewLifecycleOwner.lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
                 GitHubUpdateChecker.downloadApk(
                     context = requireContext(),
                     url = release.downloadUrl,
+                    versionName = release.versionName,
                     onProgress = { bytesRead, totalBytes ->
                         val percent = ((bytesRead * 100) / totalBytes).toInt()
                         viewLifecycleOwner.lifecycleScope.launch {
                             if (!isAdded || _binding == null) return@launch
-                            val pctText = getString(R.string.update_downloading, percent)
-                            statusText.text = pctText
-                            btn.text = pctText
+                            binding.progressUpdate.progress = percent
+                            binding.textUpdateStatus.text = getString(R.string.update_downloading, percent)
                         }
                     },
                 )
             }
-
             if (!isAdded || _binding == null) return@launch
-            btn.isEnabled = true
+            handleDownloadResult(result, release)
+        }
+    }
 
-            if (apkFile == null) {
-                statusText.text = getString(R.string.update_download_failed)
-                btn.text = getString(R.string.update_check_button)
-                return@launch
+    private fun handleDownloadResult(result: DownloadResult, release: GitHubRelease) {
+        when (result) {
+            is DownloadResult.Success -> {
+                binding.progressUpdate.progress = 100
+                binding.textUpdateStatus.text = getString(R.string.update_install_hint)
+                binding.buttonCheckUpdate.text = getString(R.string.update_install_hint)
+                val installed = GitHubUpdateChecker.installApk(requireContext(), result.file)
+                if (!installed) {
+                    MainDisplayUi.showToast(requireContext(), R.string.update_download_failed, Toast.LENGTH_SHORT)
+                }
+                resetUpdateUi()
             }
-
-            statusText.text = getString(R.string.update_install_hint)
-            btn.text = getString(R.string.update_install_hint)
-
-            val installed = GitHubUpdateChecker.installApk(requireContext(), apkFile)
-            if (!installed) {
-                MainDisplayUi.showToast(requireContext(), R.string.update_download_failed, Toast.LENGTH_SHORT)
+            is DownloadResult.Cancelled -> {
+                MainDisplayUi.showToast(requireContext(), R.string.update_cancelled, Toast.LENGTH_SHORT)
+                resetUpdateUi()
             }
+            is DownloadResult.Error -> {
+                val msg = when (result.reason) {
+                    DownloadErrorReason.HTTP_ERROR,
+                    DownloadErrorReason.NETWORK_ERROR -> R.string.update_error_network
+                    DownloadErrorReason.NO_CONTENT,
+                    DownloadErrorReason.FILE_WRITE_ERROR,
+                    DownloadErrorReason.UNKNOWN -> R.string.update_download_failed
+                    DownloadErrorReason.DISK_FULL -> R.string.update_error_disk_full
+                }
+                MainDisplayUi.showToast(requireContext(), msg, Toast.LENGTH_SHORT)
+                resetUpdateUi()
+            }
+        }
+    }
+
+    private fun resetUpdateUi() {
+        binding.progressUpdate.visibility = View.GONE
+        binding.progressUpdate.progress = 0
+        binding.textUpdateStatus.visibility = View.GONE
+        binding.buttonCheckUpdate.apply {
+            isEnabled = true
+            text = getString(R.string.update_check_button)
+        }
+        isDownloading = false
+        downloadJob = null
+    }
+
+    private fun checkForUpdateSilently() {
+        if (autoCheckPerformed) return
+        autoCheckPerformed = true
+
+        // Clean leftover .tmp files from a previous process death
+        try {
+            requireContext().cacheDir.listFiles { f -> f.name.endsWith(".apk.tmp") }
+                ?.forEach { it.delete() }
+        } catch (_: Exception) { }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                GitHubUpdateChecker.fetchLatestRelease()
+            }
+            if (!isAdded || _binding == null) return@launch
+
+            if (result is UpdateCheckResult.Success) {
+                val currentVer = readMiRootVersion()
+                if (GitHubUpdateChecker.hasUpdate(currentVer, result.release.versionName)) {
+                    binding.textUpdateStatus.apply {
+                        text = getString(R.string.update_available, result.release.versionName)
+                        visibility = View.VISIBLE
+                    }
+                    binding.badgeUpdateDot.visibility = View.VISIBLE
+                }
+            }
+            // Errors during silent check are intentionally ignored
         }
     }
 
@@ -672,6 +766,9 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
     }
 
     override fun onDestroyView() {
+        downloadJob?.cancel()
+        downloadJob = null
+        isDownloading = false
         _binding?.root?.removeCallbacks(bindRuntimeAuthRowsRunnable)
         _binding?.root?.removeCallbacks(deferredPrivilegeRefreshRunnable)
         _binding?.root?.viewTreeObserver?.removeOnWindowFocusChangeListener(windowFocusRefreshListener)
@@ -682,6 +779,7 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
 
     private companion object {
         private const val SUBSCREEN_PACKAGE = "com.xiaomi.subscreencenter"
+        private var autoCheckPerformed = false
 
         /** 从系统设置返回后分批重读运行时权限（含 HyperOS 省电策略落库延迟）。 */
         private val RUNTIME_AUTH_REFRESH_DELAYS_MS = longArrayOf(0L, 120L, 350L, 900L, 1500L, 2500L)
