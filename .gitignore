@@ -1,23 +1,42 @@
-*.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
-.DS_Store
-# 任意模块的 Gradle 输出（含 app/build/），避免误提交与 status 噪音
+# Gradle files
+.gradle/
 build/
 **/build/
 dist/
-**/build/intermediates/
-app/build/
-/captures
-.externalNativeBuild
-.cxx
+
+# Local configuration file (sdk path, etc)
 local.properties
+
+# Log/OS Files
+*.log
+_tmp_logcat*.txt
+latest_logcat*.txt
+_gradle_release_build.log
+
+# Android Studio generated files and folders
+captures/
+.externalNativeBuild/
+.cxx/
+*.aab
+*.apk
+output-metadata.json
+
+# IntelliJ
+*.iml
+.idea/
+misc.xml
+deploymentTargetDropDown.xml
+render.experimental.xml
+
+# Keystore files
+*.jks
+*.keystore
+
+# Google Services (e.g. APIs or Firebase)
+google-services.json
+
+# Android Profiling
+*.hprof
 
 # JVM crash dumps
 hs_err_pid*.log
@@ -28,13 +47,6 @@ replay_pid*.log
 
 # Local app database
 ai_database.db
-
-# Logcat dumps & temporary debug files
-_tmp_logcat*.txt
-latest_logcat*.txt
-
-# Gradle release build log
-_gradle_release_build.log
 
 # Old backup snapshots
 _tmp_old*
