@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/mi_page_bg"
+    android:orientation="vertical">
+
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/nested_scroll_rear_desktop_settings"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:fillViewport="true"
+        android:scrollbars="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="24dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/rear_desktop_settings_title"
+                android:textAppearance="@style/TextAppearance.MiRoot.PageTitle" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.MiRoot.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/rear_desktop_editor_title"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/mi_card_section_title_to_hint"
+                        android:text="@string/rear_desktop_editor_mode_title"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionSubtitle" />
+
+                    <RadioGroup
+                        android:id="@+id/radio_rear_desktop_list_mode"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.radiobutton.MaterialRadioButton
+                            android:id="@+id/radio_mode_manual"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/rear_desktop_mode_manual" />
+
+                        <com.google.android.material.radiobutton.MaterialRadioButton
+                            android:id="@+id/radio_mode_all"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp"
+                            android:text="@string/rear_desktop_mode_all_freq" />
+                    </RadioGroup>
+
+                    <TextView
+                        android:id="@+id/text_manual_hint_apps_tab"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/rear_desktop_settings_hint_apps_tab"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary"
+                        android:visibility="gone"
+                        tools:visibility="visible" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_open_rear_desktop"
+                        style="@style/Widget.MiRoot.Button.Tonal"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/rear_desktop_open_on_rear_button" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_honeycomb_test"
+                        style="@style/Widget.MiRoot.Button.Outlined"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/rear_desktop_honeycomb_test_button" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="@string/rear_desktop_honeycomb_test_hint"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_blacklist"
+                        style="@style/Widget.MiRoot.Button.Outlined"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/rear_desktop_blacklist_manage"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/text_all_mode_hint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/rear_desktop_all_mode_hint"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.MiRoot.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/apps_projection_settings_title"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                    <TextView
+                        android:id="@+id/text_projection_settings_master_hint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/mi_card_section_title_to_hint"
+                        android:text="@string/apps_official_gesture_master_hint"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/apps_official_gesture_scope_title"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionSubtitle" />
+
+                    <RadioGroup
+                        android:id="@+id/radio_group_projection_official_scope"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp">
+
+                        <RadioButton
+                            android:id="@+id/radio_projection_official_all"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/apps_official_gesture_scope_all"
+                            android:textAppearance="?attr/textAppearanceBodyMedium" />
+
+                        <RadioButton
+                            android:id="@+id/radio_projection_official_selected"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="@string/apps_official_gesture_scope_selected"
+                            android:textAppearance="?attr/textAppearanceBodyMedium" />
+                    </RadioGroup>
+
+                    <TextView
+                        android:id="@+id/text_projection_settings_selected_hint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="@string/apps_official_gesture_selected_hint"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+</LinearLayout>

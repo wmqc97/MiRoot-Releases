@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<WidgetConfig version="1" des="说明-可变的变量修改">
+  <BackgroudMode name="bgmode" displayTitle="背景" value="2" uriName="imageUri" uri="" videoName="videoUri" videoUri="" resType="0">
+    <Language displayTitle="རྒྱབ་ལྗོངས།" locale="bo_CN"/>
+    <Language displayTitle="Background" locale="en_US"/>
+    <Language displayTitle=" ئارقا كۆرۈنۈش" locale="ug_CN"/>
+    <Language displayTitle="背景" locale="zh_CN"/>
+    <Language displayTitle="背景" locale="zh_HK"/>
+    <Language displayTitle="背景" locale="zh_TW"/>
+  </BackgroudMode>
+  <AnimatVar name="aniVar" x="0" y="0" scaleX="0" scaleY="0" displayScale="1"/>
+  <OnOff name="showTime" displayTitle="时间" default="0">
+    <Language displayTitle="དུས་ཚོད།" locale="bo_CN"/>
+    <Language displayTitle="Clock" locale="en_US"/>
+    <Language displayTitle="ۋاقىت" locale="ug_CN"/>
+    <Language displayTitle="时间" locale="zh_CN"/>
+    <Language displayTitle="時間" locale="zh_HK"/>
+    <Language displayTitle="時間" locale="zh_TW"/>
+  </OnOff>
+  <Text name="signatureText" displayTitle="个性签名" editable="true" maxLength="999" minLength="0">
+    <Language displayTitle="མཆན།" locale="bo_CN"/>
+    <Language displayTitle="Signature" locale="en_US"/>
+    <Language displayTitle="ئىمزاسى" locale="ug_CN"/>
+    <Language displayTitle="个性签名" locale="zh_CN"/>
+    <Language displayTitle="個性簽名" locale="zh_HK"/>
+    <Language displayTitle="個性簽名" locale="zh_TW"/>
+    <item/>
+  </Text>
+  <Align name="signatureAlign" displayTitle="文字排版" default="1" from="0" to="2">
+    <Language displayTitle="文字排版" locale="zh_CN"/>
+  </Align>
+  <CustomColor name="textColor" displayTitle="颜色" default="" index="0">
+    <Language displayTitle="ཁ་མདོག" locale="bo_CN"/>
+    <Language displayTitle="Color" locale="en_US"/>
+    <Language displayTitle="رەڭ" locale="ug_CN"/>
+    <Language displayTitle="颜色" locale="zh_CN"/>
+    <Language displayTitle="顏色" locale="zh_HK"/>
+    <Language displayTitle="顏色" locale="zh_TW"/>
+    <item>auto</item>
+    <item>#ffffff</item>
+    <item>#b2b2b2,#000000</item>
+    <item>#fdc3c0,#fa382e</item>
+    <item>#ffd2b4,#ff6a05</item>
+    <item>#ffe2b4,#ff9f05</item>
+    <item>#fff4b2,#ffd900</item>
+    <item>#dff6b3,#94e203</item>
+    <item>#bbf0c4,#1dcd3a</item>
+    <item>#b7efef,#0fcaca</item>
+    <item>#c2d9ff,#3482ff</item>
+    <item>#d6d1fd,#7767f9</item>
+    <item>#f8c6df,#e74095</item>
+    <item>custom</item>
+  </CustomColor>
+  <MultiImageSelect name="fontFamily" displayTitle="字体" height="0" width="0" uiType="0" shapeType="1" single="true" default="1,0,0,0">
+    <Language displayTitle="ཡིག་གཟུགས།" locale="bo_CN"/>
+    <Language displayTitle="Fonts" locale="en_US"/>
+    <Language displayTitle="خەت نۇسخىسى" locale="ug_CN"/>
+    <Language displayTitle="字体" locale="zh_CN"/>
+    <Language displayTitle="字體" locale="zh_HK"/>
+    <Language displayTitle="字體" locale="zh_TW"/>
+    <item value="assets/fontconf/misans-light.png" valueDark="assets/fontconf/misans-dark.png"/>
+    <item value="assets/fontconf/qinghe-light.png" valueDark="assets/fontconf/qinghe-dark.png"/>
+    <item value="assets/fontconf/coca-light.png" valueDark="assets/fontconf/coca-dark.png"/>
+    <item value="assets/fontconf/fangzheng-light.png" valueDark="assets/fontconf/fangzheng-dark.png"/>
+  </MultiImageSelect>
+  <SeekBar name="signatureSize" displayTitle="字号" default="24" from="12" to="128" uiType="1">
+    <Language displayTitle="ཡིག་ཨང་།" locale="bo_CN"/>
+    <Language displayTitle="Text size" locale="en_US"/>
+    <Language displayTitle="خەت نومۇرى" locale="ug_CN"/>
+    <Language displayTitle="字号" locale="zh_CN"/>
+    <Language displayTitle="字號" locale="zh_HK"/>
+    <Language displayTitle="字號" locale="zh_TW"/>
+  </SeekBar>
+  <SeekBar name="signatureBold" displayTitle="粗细" default="450" from="150" to="700" uiType="2">
+    <Language displayTitle="སྦོམ་ཕྲ།" locale="bo_CN"/>
+    <Language displayTitle="Thickness" locale="en_US"/>
+    <Language displayTitle="چوڭلۇقى" locale="ug_CN"/>
+    <Language displayTitle="粗细" locale="zh_CN"/>
+    <Language displayTitle="粗細" locale="zh_HK"/>
+    <Language displayTitle="粗細" locale="zh_TW"/>
+  </SeekBar>
+  <OnOff name="isDisplayDefaultBg" displayTitle="显示默认背景" default="1"/>
+  <OnOff name="isDeep" displayTitle="是否深色背景" default="1"/>
+  <OnOff name="miroot_bottom_swipe_up_on" displayTitle="底部上滑" default="1">
+    <Language displayTitle="Bottom swipe up" locale="bo_CN"/>
+    <Language displayTitle="Bottom swipe up" locale="en_US"/>
+    <Language displayTitle="Bottom swipe up" locale="ug_CN"/>
+    <Language displayTitle="底部上滑" locale="zh_CN"/>
+    <Language displayTitle="底部上滑" locale="zh_HK"/>
+    <Language displayTitle="底部上滑" locale="zh_TW"/>
+  </OnOff>
+  <OnOff name="miroot_bottom_swipe_left_on" displayTitle="底部左滑" default="1">
+    <Language displayTitle="Bottom swipe left" locale="bo_CN"/>
+    <Language displayTitle="Bottom swipe left" locale="en_US"/>
+    <Language displayTitle="Bottom swipe left" locale="ug_CN"/>
+    <Language displayTitle="底部左滑" locale="zh_CN"/>
+    <Language displayTitle="底部左滑" locale="zh_HK"/>
+    <Language displayTitle="底部左滑" locale="zh_TW"/>
+  </OnOff>
+  <OnOff name="miroot_bottom_swipe_right_on" displayTitle="底部右滑" default="1">
+    <Language displayTitle="Bottom swipe right" locale="bo_CN"/>
+    <Language displayTitle="Bottom swipe right" locale="en_US"/>
+    <Language displayTitle="Bottom swipe right" locale="ug_CN"/>
+    <Language displayTitle="底部右滑" locale="zh_CN"/>
+    <Language displayTitle="底部右滑" locale="zh_HK"/>
+    <Language displayTitle="底部右滑" locale="zh_TW"/>
+  </OnOff>
+</WidgetConfig>

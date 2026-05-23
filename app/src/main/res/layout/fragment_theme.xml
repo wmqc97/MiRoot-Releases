@@ -1,0 +1,333 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/mi_page_bg"
+    android:clipToPadding="false"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="@dimen/mi_page_scroll_padding"
+        android:paddingTop="@dimen/mi_page_scroll_padding"
+        android:paddingEnd="@dimen/mi_page_scroll_padding"
+        android:paddingBottom="@dimen/mi_page_scroll_padding">
+
+        <TextView
+            android:id="@+id/text_theme_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/theme_title"
+            android:textAppearance="@style/TextAppearance.MiRoot.PageTitle" />
+
+        <TextView
+            android:id="@+id/text_theme_privilege"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/theme_need_privilege"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textColor="@color/miuix_primary"
+            android:visibility="gone"
+            tools:visibility="visible" />
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/mi_page_scroll_padding">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:id="@+id/text_section_theme_video"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:text="@string/theme_section_video"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_video_loop"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/theme_video_loop"
+                    android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_video_sound"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/theme_video_sound"
+                    android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+
+                <androidx.compose.ui.platform.ComposeView
+                    android:id="@+id/compose_video_volume"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:minHeight="56dp" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_auto_theme_manager"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/theme_auto_open_manager"
+                    android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/mi_page_scroll_padding">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/text_section_theme_directories"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:text="@string/theme_section_directories"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_refresh_dirs"
+                        style="@style/Widget.MiRoot.Button.Text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:text="@string/theme_refresh" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/text_selected_dir"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_card_section_title_to_hint"
+                    android:text="@string/theme_no_dir_selected"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="@color/mi_text_secondary" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recycler_directories"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:nestedScrollingEnabled="false"
+                    android:overScrollMode="never"
+                    tools:itemCount="2"
+                    tools:listitem="@layout/item_theme_directory" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_card_hint_paragraph_gap"
+                    android:text="@string/theme_long_press_hint"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="@color/mi_text_secondary" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/mi_page_scroll_padding">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <LinearLayout
+                    android:id="@+id/header_applied_themes"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/text_section_theme_applied"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:text="@string/theme_section_applied"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                    <androidx.appcompat.widget.AppCompatImageView
+                        android:id="@+id/image_applied_themes_expand"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="?attr/selectableItemBackground"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:contentDescription="@string/theme_applied_expand_toggle"
+                        android:padding="4dp"
+                        app:srcCompat="@drawable/ic_expand_more"
+                        app:tint="?attr/colorOnSurfaceVariant" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/layout_applied_themes_body"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="visible"
+                    tools:visibility="visible">
+
+                    <TextView
+                        android:id="@+id/text_applied_hint"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/mi_card_section_title_to_hint"
+                        android:text="@string/theme_applied_hint"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary"
+                        tools:text="@string/theme_applied_hint" />
+
+                    <TextView
+                        android:id="@+id/text_applied_themes_empty"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/theme_applied_empty"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary"
+                        android:visibility="gone"
+                        tools:visibility="visible" />
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/recycler_applied_themes"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:nestedScrollingEnabled="false"
+                        android:overScrollMode="never"
+                        tools:itemCount="1"
+                        tools:listitem="@layout/item_applied_rear_theme" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/mi_page_scroll_padding">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:id="@+id/text_section_theme_meta_edit"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:text="@string/theme_section_meta_edit"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_card_section_title_to_hint"
+                    android:text="@string/theme_meta_section_hint"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="@color/mi_text_secondary" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_edit_theme_meta"
+                    style="@style/Widget.MiRoot.Button.Tonal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/theme_meta_edit_pick" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_inject_gesture_zip"
+                    style="@style/Widget.MiRoot.Button.Tonal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="@string/theme_gesture_inject_one_tap" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            style="@style/Widget.MiRoot.Card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/mi_page_scroll_padding">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:id="@+id/text_section_theme_cache"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:text="@string/theme_section_cache"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_card_section_title_to_hint"
+                    android:text="@string/theme_cache_hint"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="@color/mi_text_secondary" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_clean_workspace_cache"
+                    style="@style/Widget.MiRoot.Button.Tonal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/theme_clean_cache" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

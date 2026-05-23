@@ -1,12 +1,17 @@
 # Gradle files
 .gradle/
 build/
+**/build/
+dist/
 
 # Local configuration file (sdk path, etc)
 local.properties
 
 # Log/OS Files
 *.log
+_tmp_logcat*.txt
+latest_logcat*.txt
+_gradle_release_build.log
 
 # Android Studio generated files and folders
 captures/
@@ -32,3 +37,23 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# JVM crash dumps
+hs_err_pid*.log
+replay_pid*.log
+
+# Kotlin compiler / IDE cache
+.kotlin/
+
+# Local app database
+ai_database.db
+
+# Old backup snapshots
+_tmp_old*
+
+# Tool / IDE config directories
+.agents/
+.claude/
+
+# Generated skill lock file
+skills-lock.json

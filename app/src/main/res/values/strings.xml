@@ -1,0 +1,811 @@
+<resources>
+    <string name="app_name">MiRoot</string>
+
+    <string name="welcome_dialog_confirm">知道了</string>
+
+    <!-- 欢迎与使用说明正文：首次激活成功、versionCode 升级后、以及「状态」页版本行查看；发版时请同步 app/build.gradle.kts 的 versionName/versionCode。%1$s 为磁贴列表（多行） -->
+    <string name="post_activation_welcome_title">欢迎使用 MiRoot</string>
+    <string name="post_activation_welcome_message">MiRoot 已准备就绪，建议按以下顺序快速上手。
+
+【授权】进入「状态」页完成 Root 或 Shizuku 授权，投屏与系统功能依赖此权限。
+
+【可点击入口】各页分区标题可点击查看模块说明；「状态」页版本号可查看更新日志；「应用」页点击卡片配置投屏参数，长按直投背屏。
+
+【功能概览】
+• 「功能」页：录屏/截图、充电动画、常亮与遮挡、背屏桌面与手势配置。
+• 「音乐」页：开始/结束歌词投屏，调节显示与效果。
+• 「主题」页：替换 AI 壁纸视频、管理主题目录与封面、注入手势。
+
+【建议添加快捷磁贴】
+在系统通知栏编辑中添加以下磁贴快速使用：
+%1$s
+
+【结束投屏】
+• MiRoot 背屏界面（歌词、车控等）：底部窄条左右滑动。
+• 第三方应用投屏：背屏系统边缘返回手势。</string>
+    <string name="update_log_v15_title">MiRoot V1.5 正式版更新</string>
+    <string name="update_log_v15_message">【简短说明】\nMiRoot 已更新至 V1.5。\n本次重点新增歌词特效，并补充歌词来源切换、系统磁贴图标更新、Pro 机型半屏底图适配，同时修复多项已知问题。\n\n【详细更新日志】\n\n1）新增歌词特效（本次重点）\n• 新增呼吸效果，可控制呼吸频率、缩放浮动与位移强度。\n• 新增颜色变化节奏控制，歌词可随节奏动态变色。\n• 新增分词动态参数（倾斜角度、大小浮动、重建节流）。\n• 新增分词低功耗保护，兼顾特效表现与发热/耗电控制。\n\n2）歌词来源与播放联动优化\n• 新增歌词来源切换能力，支持按场景切换来源策略。\n• 优化不同来源间的衔接与回退，减少无歌词与闪烁场景。\n• 分词显示链路进一步优化，切歌衔接更平滑。\n\n3）系统磁贴与界面资源更新\n• 更新系统快捷设置磁贴图标，识别性与一致性更好。\n• 同步优化部分界面显示细节，视觉风格更统一。\n\n4）机型资源适配更新\n• 更新 Pro 机型半屏底图资源，显示比例与贴合度更准确。\n• 优化相关带壳显示细节，减少偏移与观感不一致。\n\n5）稳定性与兼容性修复\n• 修复其他已知 bug，提升日常使用稳定性。\n• 持续优化 Root / Shizuku 调用稳定性与异常兜底。\n• 细化异常日志与恢复策略，降低偶发中断风险。</string>
+    <string name="update_log_v16_title">MiRoot V1.6 正式版更新</string>
+    <string name="update_log_v16_message">【简短说明】\nMiRoot 已更新至 V1.6 正式版。\n本版包含背屏桌面、主题一键注入启动手势、背屏歌词问题修复，以及背屏手势返回结束投屏与第三方投屏退出体验优化等。\n\n【详细更新日志】\n\n1）背屏桌面\n• 背屏应用桌面与转盘/蜂窝等入口，便于在背屏快速启动应用并配合投屏参数使用。\n\n2）主题与手势\n• 支持对本地背屏主题包一键注入启动手势层，减少与系统手势、全屏内容争用时的操作冲突（详见「主题」相关说明）。\n• 新增：AI 目录长按执行「手势启动（增量补丁）」成功后，直接弹出后续动作弹窗，可一键跳转主题壁纸，或继续替换已应用背屏主题（与“替换视频成功后”流程一致）。\n\n3）背屏歌词\n• 修复背屏歌词展示与联动中的若干问题，提升稳定性与兼容性。\n\n4）投屏与退出（本次重点）\n• 新增：支持在背屏使用系统手势返回结束第三方应用投屏（与应用列表迁屏、通知等路径一致的收尾逻辑）。\n• 优化结束投屏后的恢复速度与一致性：更快恢复背屏默认 DPI 与旋转、停止投屏常亮相关行为，并在需要时同步恢复官方背屏手势服务。\n• 缩短投屏任务监控的首轮检测间隔，在背屏短暂回到官方中心或前台信息暂不可用等场景下加快收口判断，减少等待感；退出顺序统一，降低偶发遗漏恢复项的概率。\n\n5）应用与体验\n• 应用列表、投屏参数、官方背屏手势策略等持续整合优化。\n\n6）稳定性\n• 持续改进 Root / Shizuku 调用链路与异常兜底。</string>
+    <string name="update_log_v17_title">MiRoot V1.7 正式版更新</string>
+    <string name="update_log_v17_message">【简短说明】\nMiRoot 已更新至 V1.7 正式版。\n本版重点优化背屏歌词配色与圆角策略，并完善音乐调试项与显示一致性。\n\n【详细更新日志】\n\n1）背屏歌词配色\n• 「背屏歌词调试参数」新增随机颜色切换开关：开启按节奏变色，关闭为固定高可读浅色方案。\n• 关闭随机颜色时，逐字进度以白色与「未唱歌词透明度」区分，边框/跑马灯不再跟随逐字主色突变。\n\n2）圆角与贴边\n• 背屏广播/锁屏等场景下跑马灯与深渊镜圆角使用统一固定值（与主屏系统检测圆角区分）。\n\n3）体验与稳定性\n• 相关逻辑与注释整理，持续改进兼容性。</string>
+    <string name="update_log_v18_title">MiRoot V1.8 正式版更新</string>
+    <string name="update_log_v18_message">【简短说明】\nMiRoot 已更新至 V1.8 正式版。\n本版完善欢迎与上手指引、背屏手势说明，并持续改进体验与稳定性。\n\n【详细更新日志】\n\n1）欢迎与说明\n• 欢迎弹窗与使用说明更新：补充背屏手势配置、主题注入手势、背屏桌面、应用页「背屏桌面设置」及第三方投屏用手势返回结束等说明。\n\n2）背屏手势\n• 「背屏手势配置」页引导文案精简，便于阅读。\n\n3）体验与稳定性\n• 持续改进 Root / Shizuku 与背屏相关逻辑，修复已知问题。</string>
+    <string name="update_log_v183_title">MiRoot V1.8.3 更新</string>
+    <string name="update_log_v183_message">【简短说明】\nMiRoot 已更新至 V1.8.3：充电动画与歌词体验优化，并修复已知问题。\n\n【更新内容】\n• 充电动画迁屏与恢复更稳。\n• 歌词分词与显示优化；欢迎/关于说明已更新。\n• 背屏投屏与 Root / Shizuku 相关修复。</string>
+    <string name="update_log_v188_title">MiRoot V1.8.8 更新</string>
+    <string name="update_log_v188_message">【简短说明】\nMiRoot 已更新至 V1.8.8：修复智能切换前期逐字高亮与换行异常，并持续优化体验。\n\n【更新内容】\n• 歌词「智能切换」：修正歌曲前段融合逐字轴被误判为句内相对时间的问题，前几行逐字高亮与换行更稳定，减少跳到上一行再跳回。\n• 汽水单句升级完整歌词时，开头不再误锚到后部行。\n• 背屏歌词显示、切歌衔接与投屏体验持续优化。\n• 修复若干已知问题。</string>
+    <string name="update_log_v187_title">MiRoot V1.8.7 更新</string>
+    <string name="update_log_v187_message">【简短说明】\nMiRoot 已更新至 V1.8.7：歌词智能切换逐字融合更稳，并修复已知问题。\n\n【更新内容】\n• 歌词「智能切换」：优化 SuperLyric 逐字与网络歌词的行级融合判定，当前播放行优先使用模块逐字轴；换行与行边界附近减少逐字高亮与 LRC 行时间戳模拟之间来回跳。\n• 背屏歌词显示、切歌衔接与投屏体验持续优化。\n• 修复若干已知问题。</string>
+    <string name="update_log_v186_title">MiRoot V1.8.6 更新</string>
+    <string name="update_log_v186_message">MiRoot 已更新至 V1.8.6。\n\n【更新内容】\n• 背屏投屏、车控与歌词体验持续优化。\n• 修复若干已知问题。</string>
+    <string name="update_log_v185_title">MiRoot V1.8.5 更新</string>
+    <string name="update_log_v185_message">MiRoot 已更新至 V1.8.5。\n\n【更新内容】\n• 分词：接入 Jieba 本地分词，内置歌词场景词库并支持导入自定义词条，分词显示更贴近歌词语义；异常时自动回落内置规则分词。\n• 智能切换：网络 API 多行结构与 SuperLyric 逐字时间轴行级比对融合持续优化，减少错句与秒跳。\n• 酷我车载（cn.kuwo.kwmusiccar）仍优先 AUDIO_LYRIC 专用解析。\n• 背屏歌词显示、切歌衔接与分词特效链路优化；修复若干歌词相关已知问题。</string>
+    <string name="update_log_v184_title">MiRoot V1.8.4 更新</string>
+    <string name="update_log_v184_message">MiRoot 已更新至 V1.8.4。\n\n【更新内容】\n• 充电动画迁屏与恢复更稳。\n• 歌词分词与显示优化；欢迎/关于说明已更新。\n• 歌词「智能切换」：网络 API 提供多行结构，SuperLyric 补充逐字时间轴，行级比对通过后才融合，减少错句与秒跳；酷我车载（cn.kuwo.kwmusiccar）仍优先 AUDIO_LYRIC 专用解析。\n• 精简：移除背屏 MV 播放器、酷我 SuperLyric 歌词转载、汽水进程内 Hook（汽水/网易等仍走网络歌词 API）。\n• 背屏投屏与 Root / Shizuku 相关修复与体验整理。</string>
+
+    <string name="nav_status">状态</string>
+    <string name="nav_features">功能</string>
+    <string name="nav_apps">应用</string>
+    <string name="nav_music">音乐</string>
+    <string name="nav_theme">主题</string>
+    <string name="nav_more">更多</string>
+
+    <string name="apps_title">应用</string>
+    <string name="apps_subtitle">正在读取应用列表…</string>
+    <string name="apps_subtitle_count">共 %1$d 个可启动应用</string>
+    <string name="apps_subtitle_filtered">已筛选 %1$d / %2$d 个应用</string>
+    <string name="apps_search_hint">搜索应用名称或包名</string>
+    <string name="apps_empty">没有匹配的应用，换个关键词试试</string>
+    <string name="apps_launch_failed">无法启动该应用</string>
+    <string name="apps_launch_root_denied">Root 通道不可用：su 未授权或被拒绝</string>
+    <string name="apps_launch_shizuku_unauthorized">Shizuku 未授权，请在 Shizuku 内授权 MiRoot</string>
+    <string name="apps_launch_failed_root_channel">Root 通道启动失败，请检查 su 授权状态</string>
+    <string name="apps_launch_failed_shizuku_channel">Shizuku 通道启动失败，请检查服务与授权状态</string>
+    <string name="apps_projection_dialog_title">%1$s 的投屏参数</string>
+    <string name="apps_projection_dpi_hint">投屏 DPI</string>
+    <string name="apps_projection_rotation_title">背屏旋转方向</string>
+    <string name="apps_projection_dialog_tip">保存后，系统磁贴「切换至背屏」会按该应用参数设置 DPI 与旋转。禁用官方手势的范围在「应用」页右上角「背屏桌面设置」中配置。</string>
+    <string name="apps_projection_save">保存参数</string>
+    <string name="apps_projection_clear">清除参数</string>
+    <string name="apps_projection_launch">主屏幕启动</string>
+    <string name="apps_projection_invalid_dpi">请输入有效的 DPI（正整数）</string>
+    <string name="apps_projection_invalid_rotation">请选择背屏旋转方向</string>
+    <string name="apps_projection_saved">已保存该应用的投屏参数</string>
+    <string name="apps_projection_cleared">已清除该应用的投屏参数</string>
+    <string name="apps_projection_apply_failed">应用投屏参数失败，已继续使用默认背屏参数</string>
+    <string name="apps_projection_settings_title">应用投屏设置</string>
+    <string name="apps_projection_dialog_official_section">官方背屏手势</string>
+    <string name="apps_projection_dialog_official_switch">迁屏时禁用官方背屏手势服务</string>
+    <string name="apps_projection_dialog_official_hint_scope_selected">仅在全局策略为「仅选定应用」时，对「应用列表」直开背屏的第三方应用生效；磁贴迁屏等不受此弹窗项约束。</string>
+    <string name="apps_official_gesture_master_hint">「全部 / 仅选定」仅影响应用列表将第三方应用直开背屏；磁贴迁屏、充电动画、背屏桌面、音乐与车控投屏默认禁用官方背屏服务。</string>
+    <string name="apps_official_gesture_scope_title">应用列表直开背屏时，是否禁用官方背屏手势</string>
+    <string name="apps_official_gesture_scope_all">全部第三方应用（应用列表路径）</string>
+    <string name="apps_official_gesture_scope_selected">仅对在投屏参数中开启的应用禁用</string>
+    <string name="apps_official_gesture_selected_hint">返回应用列表，点击应用打开「投屏参数」，在弹窗内开启「迁屏时禁用官方背屏手势服务」。仅在选择「仅选定应用」全局策略时，应用列表直开背屏会按此项执行。</string>
+    <string name="apps_official_gesture_pill_short">禁用官方手势</string>
+
+    <!-- 各页卡片大标题点击后弹出的使用说明 -->
+    <string name="help_theme_video">在 AI 壁纸目录中替换视频；可开关循环播放、声音与音量。完成后可自动跳转主题壁纸。需要 Root 或已授权 Shizuku。</string>
+    <string name="help_theme_directories">列出 AI 壁纸 maml 目录。点选目录进入替换流程；「刷新」更新列表。长按可删除目录、替换主题包或绑定封面。</string>
+    <string name="help_theme_applied">列出已应用的背屏主题（widget.json）。长按删除并重启背屏中心。右侧箭头展开或折叠列表。</string>
+    <string name="help_theme_meta_edit">选择主题包（.zip），编辑作者、名称、描述与预览图，保存后写回包内。</string>
+    <string name="help_theme_cache">清理主题注入与视频替换产生的临时目录（MiRoot/theme_temp、video_replace 等）。有进行中的任务时请先结束再清理。</string>
+    <string name="help_features_record_screenshot">背屏录屏悬浮窗：开始/停止录制、内录/带壳/贴图三开关；带壳截图、外框颜色、贴图与叠放坐标。依赖 Root/Shizuku 与悬浮窗权限。</string>
+    <string name="help_features_charging">背屏充电动画总开关、充满全屏时间（毫秒）。数值越小动画越快，越大越慢。实机效果因机型与系统可能略有差异。</string>
+    <string name="help_features_rear_assist">含「禁用官方背屏服务」、合盖/遮挡检测、常亮服务、始终常亮与唤醒间隔。常亮服务仅在投屏（截图/录屏/音乐/车控/桌面/应用）运行时保持屏幕常亮，退出后自动关闭。若修改官方服务相关项后异常，可先关闭对应开关或恢复系统默认。</string>
+    <string name="help_features_rear_dpi">调整背屏显示密度并锁定方向。密度改变后背屏图标与界面会整体缩放。需要 Root 或已授权 Shizuku。</string>
+    <string name="features_section_rear_dpi">背屏 DPI</string>
+    <string name="features_rear_dpi_current_fmt">当前 DPI：%d</string>
+    <string name="features_rear_dpi_unknown">无法读取当前 DPI</string>
+    <string name="features_rear_dpi_new_hint">新 DPI</string>
+    <string name="features_rear_dpi_apply">应用</string>
+    <string name="features_rear_dpi_reset">恢复默认</string>
+    <string name="features_rear_dpi_toast_set">背屏 DPI 已设为 %d</string>
+    <string name="features_rear_dpi_toast_reset">已恢复背屏默认 DPI</string>
+    <string name="features_rear_dpi_invalid">请输入有效的 DPI（正整数）</string>
+    <string name="features_rear_dpi_service_waiting">正在连接服务，请稍后重试</string>
+    <string name="features_rear_dpi_fail">操作失败</string>
+    <string name="features_rear_rotation_title">背屏旋转</string>
+    <string name="features_rear_rotation_deg_0">0°</string>
+    <string name="features_rear_rotation_deg_90">90°</string>
+    <string name="features_rear_rotation_deg_180">180°</string>
+    <string name="features_rear_rotation_deg_270">270°</string>
+    <string name="features_rear_rotation_toast_ok">背屏已锁定为 %d°</string>
+    <string name="features_rear_rotation_fail">背屏旋转设置失败</string>
+    <string name="help_perm_status_card">展示 Root/Shizuku 状态与版本号。点击卡片查看授权说明，点击版本号查看使用说明。</string>
+    <string name="help_runtime_auth">列出文件访问、悬浮窗、省电策略、通知等运行时权限状态。点击跳转系统设置，已授权项无需操作。</string>
+    <string name="help_sys_info">展示系统版本与背屏组件信息，便于排查兼容性。</string>
+    <string name="help_more_xposed">展示本机是否检测到 Xposed/LSPosed 框架，仅供环境参考。</string>
+    <string name="help_music_controls">开始或结束背屏歌词投屏。需要 Root/Shizuku 与通知使用权，请先播放音乐再点「开始投屏」。酷我车载自动从 AUDIO_LYRIC 获取歌词，其他应用走会话/通知与 API 回退。「自动投屏」随播放自动开关投屏。</string>
+    <string name="help_music_display">调节歌词字号、字体、来源与显示模式。逐行模式可设置逐字显示、未唱歌词透明度、时间偏移及底图。专辑图背景请在「效果」卡片设置。部分选项与深渊镜等互斥。</string>
+    <string name="help_music_effects">省电模式、专辑图背景、边框、跑马灯及呼吸、随机配色等微调参数。互斥项自动关闭。</string>
+    <string name="help_music_advanced">导入自定义拆词词库，格式与兼容性见下方说明。</string>
+
+    <string name="theme_title">主题</string>
+    <string name="theme_need_privilege">需要 Root 或已授权的 Shizuku 才能读写主题目录</string>
+    <string name="theme_section_video">视频替换</string>
+    <string name="theme_video_loop">循环播放</string>
+    <string name="theme_video_sound">视频声音</string>
+    <string name="theme_video_volume">音量</string>
+    <string name="theme_auto_open_manager">主题替换成功后自动跳转主题壁纸</string>
+    <string name="theme_section_applied">已应用背屏主题</string>
+    <string name="theme_applied_expand_toggle">展开或折叠已应用背屏主题</string>
+    <string name="theme_applied_hint">长按删除并重启背屏中心。</string>
+    <string name="theme_applied_empty">未读取到条目：无 widget.json、文件不可读或列表为空。</string>
+    <string name="theme_applied_mrc_missing">该条目的 .mrc 文件不存在，无法替换。</string>
+    <string name="theme_applied_delete">删除主题</string>
+    <string name="theme_applied_delete_confirm">确定删除已应用背屏主题「%1$s」？将从 widget.json 移除、删除 theme_magic/rearScreen 下对应目录及系统 theme 目录下的 .mrc，不可恢复。</string>
+    <string name="theme_applied_delete_ok">已删除该背屏主题条目及相关文件</string>
+    <string name="theme_applied_delete_fail">删除失败（无权限、未找到对应条目或写入 widget.json 失败）</string>
+    <string name="theme_applied_replace_ok">已替换 .mrc 并更新缩略图</string>
+    <string name="theme_applied_replace_ok_mrc_only">已替换 .mrc（缩略图未写入或主题包无 effect.png）</string>
+    <string name="theme_applied_confirm_title">确认替换已应用主题</string>
+    <string name="theme_applied_confirm_message">「%1$s」\n\n目标：%2$s\n\n将覆盖系统 .mrc（保留 .backup），并尝试用新包内 effect.png 更新缩略图。</string>
+    <string name="theme_applied_subtitle_fmt">ID %1$s · 分类 %2$s · %3$s</string>
+    <string name="theme_applied_source_precust">预置</string>
+    <string name="theme_applied_source_user">用户</string>
+    <string name="theme_applied_cat_signature">个性签名</string>
+    <string name="theme_applied_cat_nature">自然</string>
+    <string name="theme_applied_cat_watch">表盘/动态</string>
+    <string name="theme_applied_cat_other">未标注</string>
+    <string name="theme_applied_badge_current">当前</string>
+    <string name="theme_applied_menu_title">已应用主题操作</string>
+    <string name="theme_applied_menu_inject_gesture">注入手势</string>
+    <string name="theme_applied_menu_remove_gesture">删除已注入手势</string>
+    <string name="theme_applied_menu_edit_config">编辑主题配置</string>
+    <string name="theme_applied_gesture_ok">手势已写入该主题</string>
+    <string name="theme_applied_gesture_fail">手势写入失败</string>
+    <string name="theme_applied_gesture_removed_ok">已删除该主题内的手势注入</string>
+    <string name="theme_applied_gesture_removed_fail">删除手势失败</string>
+    <string name="theme_applied_config_title">编辑主题配置（one_config）</string>
+    <string name="theme_applied_config_json_hint">one_config.json 内容</string>
+    <string name="theme_applied_config_json_tip">注意：该配置存放于系统 theme_magic 目录。写入失败通常是权限不足或路径不可写。</string>
+    <string name="theme_applied_config_saved">已写入配置并重启背屏中心</string>
+    <string name="theme_applied_config_save_fail">写入配置失败</string>
+
+    <string name="theme_section_directories">AI 目录</string>
+    <string name="theme_refresh">刷新</string>
+    <string name="theme_no_dir_selected">未选择目录：点选下方卡片开始替换视频</string>
+    <string name="theme_long_press_hint">点选目录：替换视频。长按目录：删除目录或替换主题包。</string>
+    <string name="theme_selected_dir_fmt">已选目录：%1$s</string>
+    <string name="theme_current_applied_fmt">当前应用主题：%1$s</string>
+    <string name="theme_current_applied_unknown">当前应用主题：未读取到</string>
+    <string name="theme_dir_current_applied_fmt">当前主题：%1$s</string>
+    <string name="theme_no_video">未选择视频</string>
+    <string name="theme_replace_ok">视频替换已完成</string>
+    <string name="theme_after_video_title">视频替换完成</string>
+    <string name="theme_after_video_message">请选择：跳转主题壁纸，在系统界面中应用当前 AI 目录；或替换已应用背屏主题（仅列出分类为「个性签名」的条目，无需再进主题壁纸）。</string>
+    <string name="theme_after_video_jump_wallpaper">跳转主题壁纸</string>
+    <string name="theme_after_video_replace_applied">替换主题</string>
+    <string name="theme_after_video_pick_applied_title">选择要替换的背屏主题</string>
+    <string name="theme_after_video_no_signature">没有分类为个性签名的已应用背屏主题</string>
+    <string name="theme_applied_replace_ok_preview_thumb">替换成功，已更新缩略图</string>
+    <string name="theme_applied_replace_ok_video_mrc">替换成功，缩略图未更新</string>
+    <string name="theme_replace_fail">替换失败</string>
+    <string name="theme_menu_delete">删除目录</string>
+    <string name="theme_menu_replace_theme">替换主题</string>
+    <string name="theme_menu_bind_cover">绑定封面</string>
+    <string name="theme_menu_inject_lyrics_gesture">手势启动（注入手势）</string>
+    <string name="theme_menu_remove_lyrics_gesture">删除已注入手势</string>
+    <string name="theme_menu_cover_unbind">已绑定封面（点击解除）</string>
+    <string name="theme_menu_clear_cover">清除封面绑定</string>
+    <string name="theme_delete_confirm">确定删除目录「%1$s」？不可恢复。</string>
+    <string name="theme_bind_pick_title">绑定封面</string>
+    <string name="theme_bind_pick_message">点选Ai生成的图片作为绑定封面。</string>
+    <string name="theme_bind_none">暂无可选封面</string>
+    <string name="theme_bind_none_filtered">当前没有可用的封面图：其余图片已被其它主题绑定占用，或位于已绑定封面的主题文件夹内。可先解除其它主题的封面绑定，或将新的 PNG 放到主题管理器 .ai_wallpaper 目录根下再试。</string>
+    <string name="theme_bind_saved">已绑定封面</string>
+    <string name="theme_cover_bind_intro_title">主题与列表封面</string>
+    <string name="theme_cover_bind_intro_message">将背屏预览图同步到 AI 壁纸列表缩略图。\n\n操作步骤：\n1. 在「AI 壁纸目录」长按主题文件夹；\n2. 点选「绑定封面」；\n3. 选一张 PNG 作为封面；\n4. 之后替换该主题背屏视频时，自动更新缩略图。</string>
+    <string name="theme_cover_cleared">已清除封面绑定</string>
+    <string name="theme_apply_theme_title">应用主题</string>
+    <string name="theme_apply_confirm">将主题包写入该目录的 rearscreen 文件（保留 .backup 供视频替换）。确定？</string>
+    <string name="theme_apply">应用</string>
+    <string name="theme_preparing">正在准备临时文件…</string>
+    <string name="theme_preparing_gesture_incremental">正在注入 rearscreen 手势…</string>
+    <string name="theme_inject_gesture_ok">手势注入成功</string>
+    <string name="theme_author_fmt">作者：%1$s</string>
+    <string name="theme_desc_fmt">描述：%1$s</string>
+
+    <string name="theme_section_meta_edit">编辑主题信息</string>
+    <string name="theme_meta_section_hint">点下方「选择主题包」选取文件，在弹窗中编辑作者、主题名称、描述；需要时点「更换预览图」，最后点保存。</string>
+    <string name="theme_meta_edit_pick">选择主题包</string>
+    <string name="theme_meta_pick_theme">选择主题包</string>
+    <string name="theme_meta_no_theme_selected">未选择文件</string>
+    <string name="theme_meta_selected_fmt">已选：%1$s</string>
+    <string name="theme_meta_open_editor">保存…</string>
+    <string name="theme_meta_dialog_title">编辑主题信息</string>
+    <string name="theme_meta_author">作者</string>
+    <string name="theme_meta_name">主题名称</string>
+    <string name="theme_meta_description">描述</string>
+    <string name="theme_meta_pick_effect">选择预览图</string>
+    <string name="theme_meta_update_effect">更换预览图</string>
+    <string name="theme_meta_reuse_effect">未选新图时保留包内预览</string>
+    <string name="theme_meta_effect_new">使用新预览图</string>
+    <string name="theme_meta_effect_reuse">使用包内预览图</string>
+    <string name="theme_meta_write">保存</string>
+    <string name="theme_meta_ok_overwrite">已保存</string>
+    <string name="theme_meta_ok_new_fmt">已另存为：%1$s</string>
+    <string name="theme_meta_ok_uri_copy_fmt">无法写回原文件，已另存为：%1$s</string>
+    <string name="theme_meta_fail">保存失败</string>
+    <string name="theme_gesture_inject_one_tap">一键注入手势</string>
+    <string name="theme_gesture_inject_working">处理中…</string>
+    <string name="theme_gesture_inject_ok_fmt">已保存：%1$s</string>
+    <string name="theme_gesture_inject_fail">注入失败（需为主题 zip 且含 manifest.xml）</string>
+
+    <string name="theme_section_cache">工作区缓存</string>
+    <string name="theme_cache_hint">清理主题注入与视频替换临时文件，不涉及系统 AI 壁纸目录。需要 Root/Shizuku。</string>
+    <string name="theme_clean_cache">清理缓存</string>
+    <string name="theme_clean_cache_confirm">将删除主题注入与视频替换产生的临时文件（不含系统 AI 壁纸目录）。正在进行的替换若用到这些目录，请先完成后再清理。确定？</string>
+    <string name="theme_clean_cache_ok">缓存已清理</string>
+    <string name="theme_clean_cache_need_privilege">需要 Root 或已授权 Shizuku 才能清理</string>
+    <string name="theme_clean_cache_fail">清理未完成，请检查权限后重试</string>
+
+    <string name="toast_screenshot_saved">截图已保存</string>
+
+    <string name="music_title">音乐投屏</string>
+    <string name="music_start">开始投屏</string>
+    <string name="music_projection_direct_rear_failed">背屏直启失败，请确认 Shizuku 已授权且背屏可用</string>
+    <string name="music_stop">结束投屏</string>
+    <string name="music_projecting">正在投屏</string>
+    <string name="music_need_privilege">需要 Root 或已授权的 Shizuku</string>
+    <string name="music_need_notification_listener">需要通知使用权以读取媒体会话</string>
+    <string name="music_open_notification_settings">打开通知使用权设置</string>
+    <!-- 音乐页「投屏控制」标题右侧状态，与「正在投屏」同位置，宜短 -->
+    <string name="music_no_active_player">未在播放</string>
+    <string name="music_not_playing">未播放音乐</string>
+    <string name="music_section_controls">投屏控制</string>
+    <string name="music_section_display">显示</string>
+    <string name="music_section_effects">效果</string>
+    <string name="music_section_advanced">高级</string>
+    <string name="music_lyrics_text_size">歌词字号</string>
+    <string name="music_font_projection">歌词字体</string>
+    <string name="music_font_abyssal">深渊镜歌词字体</string>
+    <string name="music_font_system">系统</string>
+    <string name="music_font_mfgehei">MFGeHei</string>
+    <string name="music_font_import">导入</string>
+    <string name="music_font_import_failed">字体导入失败</string>
+    <string name="music_normal_alpha">未唱歌词透明度</string>
+    <string name="music_texture_toggle">歌词底图</string>
+    <string name="music_album_art_background">专辑图背景</string>
+    <string name="music_album_art_alpha">专辑图透明度</string>
+    <string name="music_album_art_blur_radius">专辑图模糊度</string>
+    <string name="music_texture_scale">底图缩放</string>
+    <string name="music_texture_alpha">底图透明度</string>
+    <string name="music_word_by_word">逐字显示</string>
+    <string name="music_shuffle_split_mode">分词显示模式</string>
+    <string name="music_marquee">跑马灯</string>
+    <string name="music_marquee_width">跑马灯线宽</string>
+    <string name="music_neon_display">霓虹效果</string>
+    <string name="music_border_display">边框显示</string>
+    <string name="music_border_display_hint">歌词区域边缘描边</string>
+    <string name="music_power_saving">省电模式</string>
+    <string name="music_power_saving_hint">降低动效与重绘，仅保留逐行歌词</string>
+    <string name="music_gesture">可滑动歌词</string>
+    <string name="music_abyssal">深渊镜模式</string>
+    <string name="music_abyssal_gyro">陀螺仪倍数</string>
+    <string name="music_abyssal_range">可移动范围</string>
+    <string name="music_gesture_abyssal">手势切歌</string>
+    <string name="music_projection_sync_offset">歌词时间偏移</string>
+    <string name="music_lyrics_display_mode">歌词模式</string>
+    <string name="music_lyrics_display_mode_line">逐行显示</string>
+    <string name="music_lyrics_display_mode_split">分词显示</string>
+    <string name="music_lyrics_display_mode_abyssal">深渊镜模式</string>
+    <string name="music_lyrics_source">歌词来源</string>
+    <string name="music_lyrics_source_tips_title">歌词来源说明</string>
+    <string name="music_lyrics_source_tips_desc">网络 API：仅用内置 API 取完整歌词。非酷我播放器按应用依次尝试在线源（汽水、网易云、酷狗、酷我、QQ 等）。\n\n智能切换：完整歌词来自网络 API，当前播放行逐字高亮优先用 SuperLyric 时间轴，无逐字时按 LRC 时间戳模拟高亮。均失败时显示「暂无歌词」。\n\n酷我车载：任意来源设置均优先 AUDIO_LYRIC 专用解析，失败后按所选来源兜底。\n\n仅 SuperLyric（非酷我）：只使用 SuperLyric 模块。</string>
+    <string name="music_lyrics_source_network_only">网络 API</string>
+    <string name="music_lyrics_source_super_only">SuperLyric</string>
+    <string name="music_lyrics_source_mixed">智能切换</string>
+    <string name="music_lyrics_runtime_source_debug">当前歌词来源（调试）</string>
+    <string name="music_lyrics_runtime_source_not_projecting">未投屏</string>
+    <string name="music_auto_projection">自动投屏</string>
+    <string name="music_auto_projection_hint">随播放自动开关背屏投屏</string>
+    <string name="music_rear_debug_entry">背屏歌词调试参数</string>
+    <string name="music_rear_debug_title">背屏音乐调试界面</string>
+    <string name="music_rear_debug_desc">呼吸、随机色等微调参数，修改后立即应用到背屏歌词投屏。</string>
+    <string name="music_no_lyrics">暂无歌词</string>
+    <string name="music_loading_lyrics">正在获取歌词…</string>
+    <string name="music_rear_debug_breathing_enabled">呼吸效果</string>
+    <string name="music_rear_debug_breathing_enabled_hint">关闭后隐藏呼吸参数</string>
+    <string name="music_rear_debug_breathing_rhythm">呼吸频率（次/分钟）</string>
+    <string name="music_rear_debug_breathing_scale_variance">呼吸缩放浮动大小</string>
+    <string name="music_rear_debug_breathing_displacement_strength">呼吸位移强度</string>
+    <string name="music_rear_debug_random_color_switch">随机颜色切换</string>
+    <string name="music_rear_debug_random_color_switch_hint">开：随机配色并平滑过渡；关：固定浅色高对比</string>
+    <string name="music_rear_debug_color_change_interval">随机配色过渡时长</string>
+    <!-- 参数为整秒，与滑块 1s 步进一致；数值表示单色渐变到下一目标色的耗时 -->
+    <string name="music_color_change_interval_value_fmt">渐变 %1$d 秒</string>
+    <string name="music_rear_debug_marquee_speed">跑马灯速度（每圈时长）</string>
+    <string name="music_shuffle_split_multicolor">分词多色</string>
+    <string name="music_rear_debug_shuffle_effect">分词显示（调试）</string>
+    <string name="music_rear_debug_only_current_line">仅当前行分词</string>
+    <string name="music_rear_debug_split_mode">分词模式</string>
+    <string name="music_rear_debug_tilt_angle">分词倾斜角度</string>
+    <string name="music_rear_debug_scale_variance">分词大小浮动</string>
+    <string name="music_rear_debug_performance_guard">分词低功耗保护</string>
+    <string name="music_auto_projection_channel_name">音乐自动投屏</string>
+    <string name="music_auto_projection_notif_title">MiRoot · 音乐自动投屏</string>
+    <string name="music_auto_projection_notif_text">正在根据播放状态切换背屏歌词投屏</string>
+    <string name="music_lyrics_dict_import_button">导入拆词词库</string>
+    <string name="music_lyrics_dict_pick_file_button">选择本地词库文件</string>
+    <string name="music_lyrics_dict_import_success">词库导入成功：新增 %1$d 条，当前运行时词库 %2$d 条</string>
+    <string name="music_lyrics_dict_import_failed">词库导入失败：%1$s</string>
+    <string name="music_lyrics_dict_template_title">词库格式说明</string>
+    <string name="music_lyrics_dict_template_desc">支持两种格式：\n1. 词语\n2. 词语 词频 词性\n\n规则：# 开头为注释；空行忽略；只取每行第一个字段作为分词；建议词条长度 >= 2。</string>
+    <string name="music_lyrics_dict_copy_template">复制格式注释</string>
+    <string name="music_lyrics_dict_close">关闭</string>
+    <string name="music_lyrics_dict_template_text"># ========== 歌词专用分词词库 ==========
+# 格式：词语 词频 词性
+# 词性说明：n-名词 v-动词 a-形容词 l-短语 nz-专有名词
+# 规则：
+# - # 开头为注释，自动忽略
+# - 空行忽略
+# - 只取每行第一个字段作为分词
+# - 优先匹配词组，不拆单字
+# - 词条长度 >=2，避免误切
+# - 纯本地离线使用，不联网
+
+周杰伦 15000 nz
+告白气球 12000 nz
+舍不得 9000 l
+放不下 9000 l</string>
+    <!-- RearScreenWakeService / ProjectionOnlyNotificationHelper：音乐、车控投屏统一文案 -->
+    <string name="projection_wake_channel_name">背屏投屏</string>
+    <string name="projection_wake_channel_desc">音乐或车控投屏时的状态与操作入口</string>
+    <string name="projection_display_channel_business">背屏投屏</string>
+    <string name="projection_notify_music_title">MiRoot・音乐投屏</string>
+    <string name="projection_notify_car_title">MiRoot・车控投屏</string>
+    <string name="projection_notify_multi_title">MiRoot・投屏中</string>
+    <string name="projection_notify_stop_summary">点击结束投屏</string>
+    <string name="projection_notify_music_big">背屏显示歌词\n点击结束投屏</string>
+    <string name="projection_notify_car_big">背屏显示车控\n点击结束投屏</string>
+    <string name="projection_notify_multi_big">背屏投屏中\n点击结束当前投屏</string>
+    <!-- 磁贴迁屏通知仍用下列行文案 -->
+    <string name="projection_combined_line_display">背屏显示中</string>
+    <string name="projection_combined_line_wake_on">投屏常亮运行中（定时唤醒副屏）</string>
+    <string name="projection_combined_line_wake_off">未开启投屏常亮</string>
+    <string name="projection_combined_collapsed_wake_on">显示中 · 投屏常亮开</string>
+    <string name="projection_combined_collapsed_wake_off">显示中 · 投屏常亮关</string>
+    <string name="projection_display_channel_music">正在音乐投屏</string>
+    <string name="projection_display_channel_car">正在车控投屏</string>
+    <!-- 快捷设置磁贴迁屏：点按通知 = 将当前应用迁回主屏幕并结束本前台服务 -->
+    <string name="projection_tile_notif_summary">点按将应用迁回主屏幕</string>
+    <string name="projection_tile_notif_big_fmt">背屏显示中：%1$s\n%2$s\n点按本通知将该应用窗口迁回主屏幕，并结束本服务。</string>
+    <string name="projection_tile_notif_title_fmt">MiRoot・%1$s%2$s</string>
+    <string name="projection_tile_notif_title_keep_suffix">・常亮服务</string>
+    <string name="projection_tile_notif_title_keep_empty"></string>
+
+    <string name="perm_title_work_root">MiRoot · Root</string>
+    <string name="perm_title_work_shizuku">MiRoot · Shizuku</string>
+    <string name="perm_title_channels">MiRoot · Root / Shizuku</string>
+    <string name="perm_version_fmt">版本 %1$s</string>
+    <string name="sys_os_value_fmt">Android %1$s（API %2$d）</string>
+    <string name="perm_short_root">Root</string>
+    <string name="perm_short_shizuku">Shizuku</string>
+
+    <string name="runtime_auth_section">权限授权状态</string>
+    <string name="runtime_auth_storage">内存读写</string>
+    <string name="runtime_auth_overlay">悬浮窗权限</string>
+    <string name="runtime_auth_battery">省电策略</string>
+    <string name="runtime_auth_post_notifications">通知权限（发送）</string>
+    <string name="runtime_auth_app_list">获取应用列表权限</string>
+    <string name="runtime_auth_notification">通知读取与控制</string>
+    <string name="runtime_auth_granted">已授权</string>
+    <string name="runtime_auth_denied">未授权</string>
+    <string name="runtime_auth_open_settings_failed">无法打开系统设置</string>
+    <string name="runtime_auth_hint_overlay_find_app">请在列表中找到「MiRoot」，开启「显示悬浮窗」或「在其他应用上层显示」。</string>
+    <string name="runtime_auth_hint_post_notifications">请在设置中允许 MiRoot 发送通知。</string>
+    <string name="runtime_auth_hint_app_list">请在应用权限里允许 MiRoot 访问应用列表。</string>
+    <string name="runtime_auth_hint_notification">请在通知使用权列表中开启「MiRoot」。</string>
+    <string name="runtime_auth_nls_miui_guide_title">通知使用权（MIUI 可能仍会拒绝绑定）</string>
+    <string name="runtime_auth_nls_miui_guide_message">已开启「通知使用权」后，MIUI/HyperOS 仍可能因「自启动 / 后台限制 / 省电策略」拒绝绑定通知监听，导致音乐投屏/歌词等功能不稳定。\n\n建议依次检查：\n1. 开启本应用的「通知使用权」\n2. 在 MIUI 权限/安全中心里允许「自启动」，并把省电策略设为「无限制」或允许后台运行\n3. 关闭对本应用的后台限制（如有）\n\n完成后返回本页，状态会自动刷新。</string>
+    <string name="runtime_auth_nls_miui_guide_open_nls">去开启通知使用权</string>
+    <string name="runtime_auth_nls_miui_guide_open_miui">MIUI 自启动/后台设置</string>
+
+    <string name="sys_info_section">系统信息</string>
+    <string name="sys_info_os_title">系统版本</string>
+    <string name="sys_info_app_title">背屏版本</string>
+    <string name="subscreen_pkg_not_installed">未安装</string>
+
+    <string name="perm_channel_root">Root（优先）</string>
+    <string name="perm_channel_shizuku">Shizuku</string>
+    <string name="perm_channel_none">未就绪</string>
+    <string name="status_ok">可用</string>
+    <string name="status_no_root">未检测到 su 或拒绝授权</string>
+    <string name="status_shizuku_off">Shizuku 服务未运行</string>
+    <string name="status_shizuku_need_perm">需要 Shizuku 应用内授权</string>
+    <string name="status_xposed_on">检测到 Xposed 框架</string>
+    <string name="status_xposed_off">未检测到 Xposed 运行时</string>
+    <string name="action_refresh">重新检测</string>
+    <string name="action_force_stop_title">强制结束 MiRoot</string>
+    <string name="action_force_stop_message">将立即终止 MiRoot 进程（含后台服务）。确定继续？</string>
+    <string name="action_force_stop_confirm">结束</string>
+    <string name="action_force_stop_restart_official_subscreen">重启官方背屏服务</string>
+    <string name="action_force_stop_restart_official_subscreen_ok">已请求重启官方背屏服务</string>
+    <string name="action_force_stop_restart_official_subscreen_fail">重启官方背屏服务失败</string>
+    <string name="content_desc_force_stop">强制结束应用</string>
+
+    <string name="root_manage_title">Root 权限</string>
+    <string name="root_manage_desc">请在 Magisk / KernelSU 等管理器中为本应用授予 Root。点击下方检测当前 su 是否可用。</string>
+    <string name="root_manage_probe">检测 Root</string>
+    <string name="root_manage_result_ok">当前已检测到 Root 权限。</string>
+    <string name="root_manage_result_no">当前未检测到 Root 权限。</string>
+
+    <string name="shizuku_manage_title">Shizuku 权限</string>
+    <string name="shizuku_manage_desc">请先通过「无线调试」或电脑 ADB 启动 Shizuku 服务，再为本应用授权。</string>
+    <string name="shizuku_manage_request">请求应用授权</string>
+    <string name="shizuku_manage_open">打开 Shizuku</string>
+    <string name="shizuku_manage_no_app">未安装 Shizuku 或无法打开。</string>
+
+    <string name="features_title">功能</string>
+    <string name="features_section_subscreen">背屏服务</string>
+    <!-- 功能页入口与录屏悬浮窗顶栏标题共用 -->
+    <string name="record_float_window_title">录屏窗口</string>
+    <string name="features_open_record">@string/record_float_window_title</string>
+    <string name="features_section_record_screenshot">录屏·截图</string>
+    <string name="features_section_rear_desktop">背屏桌面</string>
+    <string name="features_rear_desktop_hint">圆形图标盘与自选应用 / 全部应用两种列表；内容区固定从左侧 277px 起绘，避让背屏摄像头。底部边缘左右滑可退出。</string>
+    <string name="features_rear_desktop_open">在背屏打开</string>
+    <string name="features_rear_desktop_edit">编辑布局</string>
+    <string name="help_features_rear_desktop">在背屏提供圆形应用盘：水平滑动旋转，图标随角度缩放与透明度过渡；点击图标启动应用。支持自选应用与全部应用两种列表。与歌词、车控等页面共享底部窄条左右滑退出手势。</string>
+
+    <string name="rear_desktop_empty_hint">没有可用的启动项。请在「应用 › 右上角设置 › 背屏桌面」中勾选自选应用，或切换到全部应用列表模式。</string>
+    <string name="rear_desktop_need_api26">背屏启动需要 Android 8.0（API 26）及以上</string>
+    <string name="rear_desktop_display_unavailable">未检测到可用的副屏（display 1），无法启动背屏桌面</string>
+    <string name="rear_desktop_start_failed">无法在背屏启动桌面</string>
+    <string name="rear_desktop_settings_title">背屏桌面设置</string>
+    <string name="apps_rear_desktop_settings_cd">背屏桌面设置</string>
+    <string name="apps_rear_desktop_projection_settings_cd">背屏桌面与应用投屏设置</string>
+    <string name="apps_rear_desktop_status_manual">自选应用·右侧勾选列表</string>
+    <string name="apps_rear_desktop_status_all">全部应用·蜂窝环形·黑名单在设置页</string>
+
+    <string name="apps_rear_desktop_checkbox_cd">加入或移出自选背屏应用列表</string>
+    <string name="apps_rear_desktop_in_layout_short">背屏桌面</string>
+    <string name="rear_desktop_settings_hint_apps_tab">自选应用模式下，请到「应用」标签的应用列表中，在右侧勾选「背屏」将应用加入背屏自选列表。</string>
+    <string name="rear_desktop_editor_title">背屏桌面</string>
+    <string name="rear_desktop_editor_mode_title">列表模式</string>
+    <string name="rear_desktop_mode_manual">自选应用</string>
+    <string name="rear_desktop_mode_all_freq">全部应用</string>
+    <string name="rear_desktop_all_mode_hint">背屏以蜂窝环形应用网格展示（环形流动缩放滚动，类 Apple Watch「主屏幕 · 网格视图」）；图标按本应用内启动次数排序。可在下方黑名单中隐藏不需要的应用。</string>
+    <string name="rear_desktop_blacklist_manage">黑名单…</string>
+    <string name="rear_desktop_blacklist_title">隐藏的应用（全部模式）</string>
+    <string name="rear_desktop_open_on_rear_button">在背屏打开桌面</string>
+    <string name="rear_desktop_honeycomb_test_button">打开蜂窝列表调试（主屏）</string>
+    <string name="rear_desktop_honeycomb_test_title">蜂窝列表调试</string>
+    <string name="rear_desktop_honeycomb_test_hint">在当前主屏打开，固定展示「全部应用」蜂窝布局，用于对比布局与手势；背屏滑动问题请仍用「在背屏打开桌面」在 display 1 上验证。</string>
+    <string name="rear_desktop_save">保存</string>
+
+    <string name="features_device_model_pro">Pro</string>
+    <string name="features_device_model_promax">ProMax</string>
+    <string name="features_shell_title">外框色</string>
+    <string name="features_adjust_composite_xy">坐标</string>
+    <string name="features_sticker_overlay_button">贴图</string>
+    <string name="features_sticker_overlay_dialog_title">带壳贴图</string>
+    <string name="features_sticker_enable">启用贴图</string>
+    <string name="features_sticker_pick_image">选择图片</string>
+    <string name="features_sticker_pick_image_selected">已选择图片</string>
+    <string name="features_sticker_preview_fullscreen">全屏查看</string>
+    <string name="features_sticker_clear_image">清除</string>
+    <string name="features_sticker_rounded">贴图圆角</string>
+    <string name="features_sticker_corner_dp_hint">圆角半径 (dp，0–128)</string>
+    <string name="features_sticker_corner_dp_invalid">圆角半径请输入 0–128 的整数</string>
+    <string name="features_sticker_preview_content_desc">带壳贴图比例预览，点击查看彩色原图</string>
+    <string name="features_sticker_export_preview">导出预览图</string>
+    <string name="features_sticker_export_ok">已导出预览图（PNG）</string>
+    <string name="features_sticker_export_fail">无法生成或保存预览图</string>
+    <string name="features_sticker_preview_fullscreen_cd">贴图彩色完整预览，点击关闭</string>
+    <string name="features_sticker_reset">恢复贴图默认</string>
+    <string name="features_sticker_center_horizontal">贴图水平居中</string>
+    <string name="features_sticker_center_vertical">贴图垂直居中</string>
+    <string name="features_sticker_scale_section">缩放方式</string>
+    <string name="features_sticker_scale_stretch">拉伸</string>
+    <string name="features_sticker_scale_fit">适应</string>
+    <string name="features_sticker_scale_crop">裁剪</string>
+    <string name="features_sticker_width">宽度 W</string>
+    <string name="features_sticker_height">高度 H</string>
+    <string name="features_sticker_w_placeholder" translatable="false">1080</string>
+    <string name="features_sticker_wh_invalid">宽高须均为 0（原始尺寸）或均为 1–4096</string>
+    <string name="features_sticker_save">保存</string>
+    <string name="features_sticker_saved">已保存</string>
+    <string name="features_sticker_copy_fail">无法保存所选图片</string>
+    <string name="features_sticker_picked">贴图已更新</string>
+    <string name="features_sticker_cleared">已清除贴图文件</string>
+    <string name="features_composite_xy_dialog_title">带壳叠放坐标</string>
+    <string name="features_composite_xy_half">半屏底图</string>
+    <string name="features_composite_xy_full">全壳底图</string>
+    <string name="shell_color_green">绿色</string>
+    <string name="shell_color_white">白色</string>
+    <string name="shell_color_gray">灰色</string>
+    <string name="shell_color_purple">紫色</string>
+    <string name="shell_color_label_checked">%1$s ✓</string>
+    <string name="features_shell_full">全壳</string>
+    <string name="features_screenshot_shell_switch">带壳截图</string>
+    <string name="features_record_screenshot_keep_screen_on">常亮服务</string>
+    <string name="features_screenshot_capture">截图</string>
+    <string name="features_shell_persist_fail">底图写入失败，请确认 APK 内 assets/shell 资源完整</string>
+    <string name="screenshot_busy">已有截图任务在执行</string>
+    <string name="screenshot_fail_cap">截图失败（screencap）</string>
+    <string name="screenshot_fail_save">保存到相册失败</string>
+    <string name="screenshot_fail_composite">带壳合成失败</string>
+    <string name="screenshot_fail_no_shell_asset">未找到底图，请先选择外框颜色</string>
+    <string name="screenshot_ok_saved">已保存到图片/RearDisplay</string>
+
+
+    <string name="features_section_charging_animation">充电动画</string>
+    <string name="features_charging_animation_switch">启用</string>
+    <string name="features_charging_fill_speed_fmt">充满全屏约 %1$.1f 秒（越小越快，越大越慢）</string>
+    <!-- 仅系统「通知类别」里显示；前台服务必需，IMPORTANCE_NONE 下一般不弹出状态栏 -->
+    <string name="charging_service_channel_name">充电动画</string>
+    <!-- 与标题 app_name「MiRoot」配对的前台服务摘要（避免副标题也显示成 MiRoot） -->
+    <string name="charging_service_notif_subtitle">内核服务 · 充电动画监听，保持后台活跃</string>
+
+    <string name="settings_version">版本 %1$s</string>
+    <string name="settings_version_cd_readme">查看更新说明与使用说明</string>
+    <string name="settings_sponsor_title">赞助支持</string>
+    <string name="settings_sponsor_subtitle">爱发电</string>
+    <string name="settings_sponsor_cd">打开爱发电赞助页面</string>
+
+    <string name="settings_coolapk_title">酷安主页</string>
+    <string name="settings_coolapk_subtitle">在酷安关注我</string>
+    <string name="settings_coolapk_cd">打开酷安个人主页</string>
+    <string name="settings_coolapk_open_failed">无法打开链接</string>
+
+    <string name="settings_about">关于</string>
+    <string name="settings_about_row_subtitle">版本信息与应用声明</string>
+    <string name="settings_disable_official_subscreen_service">禁用官方背屏服务</string>
+    <string name="settings_about_title">关于 MiRoot</string>
+    <!-- 仅作布局预览占位，运行时在代码中拼接 -->
+    <string name="settings_about_body_placeholder" translatable="false">…</string>
+    <string name="settings_about_section_intro">应用简介</string>
+    <string name="settings_about_app_desc">MiRoot 是一款面向具备背屏（副屏）小米手机的辅助工具，提供主题与 AI 壁纸替换、背屏桌面、歌词投屏、车控投屏、录屏与带壳截图、充电动画及背屏辅助等功能。\n\n主题支持注入手势，可配置背屏三方向手势打开桌面、歌词、车控或应用。\n\n多数深度能力需要 Root 或 Shizuku 授权。功能与机型及 HyperOS 版本相关，请以实机为准。</string>
+    <string name="settings_about_section_software">软件声明</string>
+    <string name="settings_about_software">本软件按「现状」提供，开发者不对其正确性、稳定性、持续可用性或适用于某一特定目的作任何明示或默示的保证。\n\n您自愿在本人设备上使用本软件，并理解其中可能涉及修改系统设置、主题资源或与其他应用协同等行为；由此产生的设备异常、数据风险，以及任何直接或间接损失，均由您自行评估并承担。\n\nMiRoot 与小米公司及 Xiaomi HyperOS 无隶属、合作或授权关系；产品名称与商标归各自权利人所有。背屏与系统相关行为以官方系统实现为准，并可能随系统更新而调整。若您不接受上述说明，请勿安装或使用本软件。</string>
+    <string name="settings_overlay_x">叠放 X</string>
+    <string name="settings_overlay_y">叠放 Y</string>
+    <string name="settings_save_overlay">保存坐标</string>
+    <string name="settings_reset_overlay">恢复默认坐标</string>
+    <string name="settings_overlay_invalid">请输入有效整数坐标（0–4096）</string>
+    <string name="settings_overlay_saved">已保存</string>
+    <string name="settings_overlay_reset_ok">已恢复内置默认</string>
+
+    <string name="more_title">更多</string>
+    <string name="more_xposed_title">Xposed / LSPosed</string>
+    <string name="more_xposed_body">框架类能力需在 LSPosed 中启用对应模块。本页仅作环境说明，具体 Hook 请在模块内配置。</string>
+    <string name="xposed_module_desc">小米17pro系列背屏工具</string>
+    <string name="more_afdian_title">爱发电解锁</string>
+    <string name="more_afdian_body">在爱发电完成赞助后，将订单号粘贴到下方并验证，即可解锁相关功能（需联网）。</string>
+    <string name="more_afdian_order_hint">订单号（out_trade_no）</string>
+    <string name="more_afdian_verify">验证订单</string>
+    <string name="more_afdian_status_unlocked">已解锁（订单：%1$s）</string>
+    <string name="more_afdian_status_idle">尚未解锁</string>
+    <string name="more_afdian_toast_ok">验证成功，已解锁</string>
+    <string name="more_afdian_toast_verifying">正在验证…</string>
+    <string name="more_afdian_config_missing">未配置爱发电密钥：请在项目 local.properties 中设置 AFDIAN_USER_ID 与 AFDIAN_TOKEN 后重新编译</string>
+
+    <!-- 离线激活（硬件码 + 激活码） -->
+    <string name="more_offline_title">离线激活</string>
+    <string name="more_offline_body">显示设备硬件码，输入激活码解锁（离线校验）</string>
+    <string name="more_offline_order_hint">激活码</string>
+    <string name="more_offline_verify">激活</string>
+    <string name="more_offline_activated">已激活</string>
+    <string name="more_offline_status_unlocked">已解锁（设备码：%1$s）</string>
+    <string name="more_offline_status_idle">未激活（设备码：%1$s）</string>
+    <string name="more_offline_toast_ok">激活成功，已解锁</string>
+    <string name="more_offline_toast_verifying">正在校验激活码…</string>
+
+    <!-- 弹窗：离线激活 -->
+    <string name="offline_activation_dialog_title">离线激活</string>
+    <string name="offline_activation_device_code_title">设备硬件码</string>
+    <string name="offline_activation_support_hint">激活码建议通过正规渠道获取，便于作者持续维护，也能更稳妥地获得功能与更新；若来源难以核实，使用上可能不够稳定。</string>
+    <string name="offline_activation_dm_author_hint">请复制下方硬件码，私聊作者获取激活码。</string>
+    <string name="offline_activation_copy_device_code">复制硬件码</string>
+    <string name="offline_activation_copy_device_toast_ok">硬件码已复制</string>
+    <string name="offline_activation_activation_code_hint">请输入激活码</string>
+    <string name="offline_activation_input_helper">支持粘贴更长激活码，自动忽略空格与分隔符。</string>
+    <string name="offline_activation_generate_activation_code">生成本机永久激活码</string>
+    <string name="offline_activation_generated_activation_code_title">本机永久激活码</string>
+    <string name="offline_activation_copy_activation_code">复制激活码</string>
+    <string name="offline_activation_copy_activation_toast_ok">激活码已复制</string>
+    <string name="offline_activation_code_empty">激活码不能为空</string>
+    <string name="offline_activation_code_too_short">激活码长度不足，请检查后重试</string>
+    <string name="offline_activation_toast_verifying">正在校验激活码…</string>
+    <string name="offline_activation_toast_ok">激活成功，已解锁</string>
+    <string name="offline_activation_toast_fail">激活失败</string>
+    <string name="offline_activation_activate_button">立即激活</string>
+    <string name="offline_activation_exit_button">退出软件</string>
+
+    <string name="activation_required_to_use">请先在“更多”页完成激活</string>
+    <string name="tab_guide_status">状态页：点击 Root、Shizuku 查看授权引导，点击版本号查看更新日志。</string>
+    <string name="tab_guide_features">功能页：录屏截图、充电动画、常亮与遮盖、背屏桌面及手势配置。分区标题可点开说明。</string>
+    <string name="tab_guide_apps">应用页：点击卡片配置投屏参数，长按直投背屏。右上角可设置背屏桌面应用列表。</string>
+    <string name="tab_guide_music">音乐页：开始/结束歌词投屏，调节显示与效果。若未生效请检查通知使用权与权限。</string>
+    <string name="tab_guide_theme">主题页：替换 AI 壁纸视频、管理目录与封面绑定，长按目录查看更多操作。</string>
+
+    <string name="tile_record_label">背屏录制</string>
+    <string name="tile_record_subtitle">悬浮窗</string>
+    <string name="tile_screenshot_label">背屏截图</string>
+    <string name="tile_screenshot_subtitle_shell">带壳 · 相册</string>
+    <string name="tile_screenshot_subtitle_plain">无壳 · 相册</string>
+    <string name="tile_music_label">主屏音乐</string>
+    <string name="tile_music_subtitle">主屏横屏歌词</string>
+    <string name="tile_switch_rear_label">切换至背屏</string>
+    <string name="tile_switch_subtitle_switching">切换中…</string>
+    <string name="tile_switch_feedback_ok">✓ 已切换</string>
+    <string name="tile_switch_feedback_fail">✗ 失败</string>
+    <string name="tile_switch_feedback_no_app">✗ 未找到应用</string>
+    <string name="tile_switch_feedback_error">✗ 操作失败</string>
+    <string name="tile_switch_feedback_rear_busy">✗ 背屏已占用</string>
+    <string name="tile_switch_feedback_service_waiting">服务未就绪</string>
+    <string name="tile_switch_toast_open_app_auth">请先打开 MiRoot 完成 Root / Shizuku 授权</string>
+    <string name="toast_cast_to_rear">%1$s 已投放到背屏</string>
+    <string name="toast_switch_failed">切换失败</string>
+    <string name="toast_please_switch_back">请先将「%1$s」切回主屏</string>
+    <string name="toast_task_returned_main">%1$s 已返回主屏</string>
+    <string name="rear_switch_keeper_channel">背屏投屏</string>
+    <string name="rear_switch_keeper_channel_desc">前台应用投至背屏时的任务与通知</string>
+    <string name="rear_switch_keeper_kernel_title">MiRoot 后台服务</string>
+    <string name="rear_switch_keeper_kernel_text">点击打开应用</string>
+    <string name="miroot_main_service_notif_title">MiRoot 后台服务</string>
+    <!-- 与 miroot_main_service_notif_title 拼接：开启自动投屏前台服务时的大标题后缀 -->
+    <string name="miroot_main_service_notif_title_suffix_auto_music_projection"> · 自动音乐投屏</string>
+    <string name="miroot_main_service_notif_text">点击打开应用</string>
+    <string name="rear_switch_keeper_notif_title">%1$s · 背屏运行中</string>
+    <string name="rear_switch_keeper_notif_text">点击迁回主屏 · %1$s</string>
+    <string name="record_channel_name">背屏录制</string>
+    <string name="record_notif_title">MiRoot 背屏录制</string>
+    <string name="record_notif_text">悬浮窗控制录制中</string>
+    <string name="record_stop_first">请先停止录制再关闭</string>
+    <string name="record_float_fail">无法显示悬浮窗：%1$s</string>
+    <string name="record_switch_audio">录音</string>
+    <string name="record_switch_composite">带壳</string>
+    <string name="record_switch_sticker">贴图</string>
+    <string name="record_busy">正在处理，请稍候</string>
+    <string name="privilege_shell_required">需要 Root（优先）或已授权的 Shizuku</string>
+    <string name="record_no_screenrecord">系统无 screenrecord 命令</string>
+    <string name="record_cmd_fail">启动 screenrecord 失败</string>
+    <string name="record_proc_fail">录屏进程未启动</string>
+    <string name="record_stopping">正在停止录制并保存…</string>
+    <string name="record_starting">正在启动视频录制…</string>
+    <string name="record_started">视频录制已开始</string>
+    <string name="record_synthesis_start">正在合成处理…</string>
+    <string name="record_saved_missing">未找到输出文件</string>
+    <string name="record_saved_movies">已保存到 Movies</string>
+    <string name="record_process_fail">后期处理失败：%1$s</string>
+    <string name="record_process_fail_unknown">原因未知，请查看 Logcat 标签 MiRoot-RecordSynth</string>
+    <string name="record_done_process">合成完成，已刷新相册</string>
+    <string name="record_need_overlay">请先授予悬浮窗权限</string>
+    <string name="record_need_post_notifications">录屏前台服务需要「通知」权限，请在设置中允许 MiRoot 发送通知</string>
+    <string name="record_need_record_audio">背屏内录需要「麦克风」权限（系统对内录统一走该权限），请在应用信息中允许录音</string>
+    <string name="record_shell_audio_missing">录屏文件未包含音轨。请确认系统 screenrecord 支持 --audio，或本机策略限制内录</string>
+    <string name="record_audio_shell_unsupported">系统 screenrecord 不支持内录音轨，已改为仅录制画面</string>
+    <string name="record_audio_builtin_unavailable">系统内录不可用，已切换为 MediaProjection 兼容模式</string>
+    <string name="record_no_internal_audio">未开启内录（未授权录屏或内录启动失败），仅保存画面</string>
+    <string name="record_projection_cancelled">已取消：未授予录屏权限，未开始录制</string>
+    <string name="record_projection_failed">已取消：无法获取录屏授权，未开始录制</string>
+
+    <string name="features_section_rear_assist">常亮与遮盖</string>
+    <string name="features_section_rear_gesture">背屏手势</string>
+    <string name="features_rear_gesture_config_button">背屏手势配置</string>
+    <string name="features_rear_cover_detection">背屏遮盖检测</string>
+    <string name="features_rear_keep_screen_on">常亮服务</string>
+    <string name="features_rear_keep_screen_on_hint_short">仅投屏时生效</string>
+    <string name="features_rear_always_wakeup">始终常亮</string>
+    <string name="features_rear_always_wakeup_hint_short">注意烧屏与耗电</string>
+    <string name="features_rear_wake_interval">唤醒间隔</string>
+    <string name="features_rear_wake_interval_fmt">%1$d ms（100 ms – 10 s）</string>
+    <string name="features_rear_burn_in_hint">可能增加耗电与烧屏风险，请谨慎使用。</string>
+    <string name="rear_assist_channel_name">背屏辅助</string>
+    <string name="rear_assist_notif_title">MiRoot · 背屏辅助</string>
+    <string name="rear_assist_notif_text">功能已开启（详见展开说明）</string>
+    <string name="rear_assist_notif_part_always">始终常亮</string>
+    <string name="rear_assist_notif_part_keep">常亮服务</string>
+    <string name="rear_assist_notif_part_proximity">遮盖拉回主屏</string>
+    <string name="rear_assist_need_post_notifications">背屏辅助前台服务需要「通知」权限，请在设置中允许 MiRoot 发送通知</string>
+    <string name="rear_assist_returned_main_ok">已尝试将背屏任务移回主屏</string>
+    <string name="rear_assist_returned_main_fail">移回主屏失败，请检查 Root / Shizuku</string>
+    <string name="rear_always_wake_channel_name">始终常亮</string>
+    <string name="rear_always_wake_notif_title">MiRoot 始终常亮服务</string>
+    <string name="rear_always_wake_notif_summary">点击关闭常亮服务</string>
+    <string name="rear_always_wake_notif_big_line">已开启「始终常亮」，将按设置间隔向背屏发送唤醒。</string>
+    <string name="rear_always_wake_notif_tap">点击本通知将关闭常亮服务并注销通知。</string>
+
+    <string name="rear_test_screen_message">背屏测试文字</string>
+
+    <string name="rear_gesture_config_title">背屏手势配置</string>
+    <string name="rear_gesture_config_card_title">三卡槽动作</string>
+    <string name="rear_gesture_config_intro">上滑、左滑、右滑对应槽位 1～3。桌面、歌词、车控、切换至背屏四种互斥（每种最多一槽），指定应用可多槽。主题广播由「主题 → 注入手势」决定，本页仅改动作映射。</string>
+    <string name="rear_gesture_slot_up">底部上滑（槽位 1）</string>
+    <string name="rear_gesture_slot_left">底部左滑（槽位 2）</string>
+    <string name="rear_gesture_slot_right">底部右滑（槽位 3）</string>
+    <string name="rear_gesture_action_none">无动作</string>
+    <string name="rear_gesture_action_desktop">唤起背屏桌面</string>
+    <string name="rear_gesture_action_music">唤起背屏音乐歌词</string>
+    <string name="rear_gesture_action_car">唤起车控界面</string>
+    <string name="rear_gesture_action_app">唤起指定应用</string>
+    <string name="rear_gesture_action_foreground_to_rear">切换至背屏</string>
+    <string name="rear_gesture_pick_app">选择应用</string>
+    <string name="rear_gesture_app_unknown">未安装或无法读取</string>
+    <string name="pick_launcher_app_search_hint">搜索应用名或包名</string>
+    <string name="pick_launcher_app_no_match">无匹配应用</string>
+    <string name="rear_gesture_save">保存配置</string>
+    <string name="rear_gesture_saved">已保存</string>
+    <string name="rear_gesture_save_note_mutual">同一互斥动作（桌面 / 音乐 / 车控 / 切换至背屏）不可占用多个槽位，已按上滑 → 左滑 → 右滑保留一处。</string>
+    <string name="rear_gesture_save_note_launch">「指定应用」未选择应用，已改为无动作。</string>
+    <string name="features_car_control">车控（吉利）</string>
+    <string name="car_control_login_title">车控登录</string>
+    <string name="car_control_login_subtitle">使用小控账号登录后可使用背屏车控与远程指令</string>
+    <string name="car_control_username">账号</string>
+    <string name="car_control_password">密码</string>
+    <string name="car_control_login_button">登录</string>
+    <string name="car_control_save_credentials_title">保存账号密码</string>
+    <string name="car_control_save_credentials_desc">关闭后仅保存账号与登录态，不保留密码</string>
+    <string name="car_control_logging_in">正在登录…</string>
+    <string name="car_control_need_username">请输入账号</string>
+    <string name="car_control_need_password">请输入密码</string>
+    <string name="car_control_login_failed">登录失败</string>
+    <string name="car_control_settings_title">车控设置</string>
+    <string name="car_control_settings_subtitle">背屏投屏、手势与吉利数字钥匙联动</string>
+    <string name="car_control_actions_title">操作</string>
+    <string name="car_control_rear_buttons_title">背屏按钮</string>
+    <string name="car_control_rear_buttons_desc">当前背屏车控按钮排列与旧版设置同步</string>
+    <string name="car_control_rear_buttons_edit">编辑背屏按钮</string>
+    <string name="car_rear_btn_dialog_title">配置背屏按钮（最多8个，长按上移排序）</string>
+    <string name="car_rear_btn_dialog_selected_title">已选按钮（长按上移，点击删除）</string>
+    <string name="car_rear_btn_dialog_available_title">可用功能（点击添加）</string>
+    <string name="car_rear_btn_dialog_confirm">确定</string>
+    <string name="car_rear_btn_dialog_cancel">取消</string>
+    <string name="car_rear_btn_dialog_moved_up">已上移</string>
+    <string name="car_rear_btn_dialog_already_top">已在顶部</string>
+    <string name="car_rear_btn_dialog_keep_one">至少需要保留1个按钮</string>
+    <string name="car_rear_btn_dialog_max_eight">最多只能选择8个功能</string>
+    <string name="car_rear_btn_dialog_need_one">请至少选择1个功能</string>
+    <string name="car_rear_btn_dialog_saved_toast">按钮配置已保存</string>
+    <string name="car_control_rear_gesture_title">背屏官方手势</string>
+    <string name="car_control_rear_gesture_switch_title">车控投屏时禁用官方 Launcher</string>
+    <string name="car_control_rear_gesture_switch_desc">开启后，启动背屏车控时会禁用小米背屏官方手势入口</string>
+    <string name="car_control_ac_title">空调设置</string>
+    <string name="car_control_ac_duration">空调时长</string>
+    <string name="car_control_ac_temp">空调温度</string>
+    <string name="car_control_seat_heating_title">座椅加热设置</string>
+    <string name="car_control_seat_heating_duration">加热时长</string>
+    <string name="car_control_seat_heating_level">加热等级</string>
+    <string name="car_control_start_projection">启动车辆投屏</string>
+    <string name="car_control_pick_car_model">更换车模图片</string>
+    <string name="car_control_reset_car_model">恢复默认车模</string>
+    <string name="car_control_logout">退出登录</string>
+    <string name="car_control_car_model_saved">车模已保存，重启车控投屏后生效</string>
+    <string name="car_control_car_model_failed">保存车模失败</string>
+    <string name="car_control_car_model_reset">已恢复默认车模，重启车控投屏后生效</string>
+    <string name="car_control_projection_started">已请求启动车辆投屏</string>
+    <string name="car_control_projection_failed">启动失败：%1$s</string>
+
+    <string name="car_control_vehicle_section_title">车辆数据</string>
+    <string name="car_control_vehicle_refresh">刷新</string>
+    <string name="car_control_vehicle_loading">正在加载车辆数据…</string>
+    <string name="car_control_vehicle_need_bind">请先完成登录并确保车辆已绑定（0.json 有效）</string>
+    <string name="car_control_vehicle_login_expired">登录已失效，请重新登录</string>
+    <string name="car_control_vehicle_relogin">重新登录</string>
+    <string name="car_control_vehicle_dash">—</string>
+    <string name="car_control_vehicle_plate">车牌</string>
+    <string name="car_control_vehicle_series_model">车型</string>
+    <string name="car_control_vehicle_color">颜色</string>
+    <string name="car_control_vehicle_vin">VIN</string>
+    <string name="car_control_vehicle_range">续航</string>
+    <string name="car_control_vehicle_fuel_pct">油量</string>
+    <string name="car_control_vehicle_updated">数据更新</string>
+    <string name="car_control_vehicle_subsection_status">车辆状态</string>
+    <string name="car_control_vehicle_subsection_mileage">里程能源</string>
+    <string name="car_control_vehicle_item_count_fmt">共 %1$d 项</string>
+    <string name="car_control_vehicle_expand">展开</string>
+    <string name="car_control_vehicle_collapse">收起</string>
+    <string name="car_control_vehicle_temp_interior_fmt">车内 %1$s℃</string>
+    <string name="car_control_vehicle_temp_exterior_fmt">车外 %1$s℃</string>
+    <string name="more_lyrics_dict_title">歌词分词词库热更新</string>
+    <string name="more_lyrics_dict_body">从本地导入 txt 到应用私有词库并立即生效（离线）。支持“词语”或“词语 词频 词性”格式，一行一个词。</string>
+    <string name="more_lyrics_dict_import_button">导入本地词库 txt</string>
+    <string name="more_lyrics_dict_import_success">导入成功：新增 %1$d 条，当前运行时词库 %2$d 条</string>
+    <string name="more_lyrics_dict_import_failed">导入失败：%1$s</string>
+    <string name="more_lyrics_dict_runtime_path">运行时词库文件：%1$s</string>
+</resources>

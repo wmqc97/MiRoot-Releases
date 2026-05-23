@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="mi_corner_radius">20dp</dimen>
+    <dimen name="mi_card_stroke">0dp</dimen>
+    <!-- 各页可滚动内容与音乐页一致的边距；改此处即可全局同步 -->
+    <dimen name="mi_page_scroll_padding">16dp</dimen>
+    <!-- 功能页等与音乐页 Miuix title3 对齐的顶栏主标题字号 -->
+    <dimen name="mi_page_title_text_size">22sp</dimen>
+    <!-- 各卡片首行区块标题（大于 TitleMedium / 二级说明） -->
+    <dimen name="mi_card_section_title_text_size">19sp</dimen>
+    <!-- 卡片内：区块标题与下方灰色说明、开关与下方说明等，收紧纵向间距 -->
+    <dimen name="mi_card_section_title_to_hint">4dp</dimen>
+    <dimen name="mi_card_hint_after_control">2dp</dimen>
+    <dimen name="mi_card_hint_paragraph_gap">8dp</dimen>
+    <!-- 音乐页 Compose：略收紧边距与卡片内行距以缩短可滚动高度（功能不变） -->
+    <dimen name="mi_music_page_padding_horizontal">14dp</dimen>
+    <dimen name="mi_music_page_padding_vertical">12dp</dimen>
+    <dimen name="mi_music_card_spacing">10dp</dimen>
+    <dimen name="mi_music_card_inner_padding">12dp</dimen>
+    <dimen name="mi_music_card_row_spacing">8dp</dimen>
+    <dimen name="mi_music_font_choice_gap">4dp</dimen>
+    <dimen name="mi_music_card_corner_radius">16dp</dimen>
+    <!-- 功能页：垂直外边距与卡片间距略小于音乐页，卡片内边距略收紧，缩短可滚动高度 -->
+    <dimen name="mi_features_page_padding_vertical">8dp</dimen>
+    <dimen name="mi_features_card_spacing">8dp</dimen>
+    <dimen name="mi_features_card_inner_padding">10dp</dimen>
+    <dimen name="mi_features_section_gap">8dp</dimen>
+    <dimen name="mi_features_switch_group_gap">5dp</dimen>
+    <dimen name="mi_features_switch_gap_medium">10dp</dimen>
+    <dimen name="mi_features_chips_padding_top">0dp</dimen>
+    <dimen name="mi_features_compose_slider_top">0dp</dimen>
+    <dimen name="mi_features_compose_slider_min_height">36dp</dimen>
+    <!-- 同一行两个开关/按钮之间的水平间距 -->
+    <dimen name="mi_features_switch_row_gap">6dp</dimen>
+    <!-- 仅「录屏·截图」卡片：内边距与行间距再收紧，降低该区块总高度 -->
+    <dimen name="mi_features_record_screenshot_card_padding">8dp</dimen>
+    <dimen name="mi_features_record_screenshot_row_gap">5dp</dimen>
+    <dimen name="mi_features_record_screenshot_switch_min_height">38dp</dimen>
+    <dimen name="mi_features_record_screenshot_button_min_height">40dp</dimen>
+    <!-- 已应用背屏主题列表与「选择要替换的背屏主题」弹窗共用 item，宽:高 = 2:1 -->
+    <dimen name="theme_applied_rear_thumb_width">176dp</dimen>
+    <dimen name="theme_applied_rear_thumb_height">88dp</dimen>
+    <dimen name="pick_launcher_app_list_height">360dp</dimen>
+</resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Honeycomb AndroidView：避免每次重组 submitList 打断连续拖动手势 -->
+    <item name="tag_honeycomb_pkg_signature" type="id" />
+</resources>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 爱发电风格：圆角底 + 双爱心叠加（类似应用图标） -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+
+    <!-- 圆角方形底（较大圆角，接近应用图标） -->
+    <path
+        android:fillColor="#FCE4EC"
+        android:pathData="M12,0h24c6.6,0,12,5.4,12,12v24c0,6.6,-5.4,12,-12,12H12C5.4,48,0,42.6,0,36V12C0,5.4,5.4,0,12,0z" />
+
+    <!-- 右侧心（先画，在下层；深色；偏上） -->
+    <group
+        android:pivotX="12"
+        android:pivotY="12"
+        android:scaleX="0.82"
+        android:scaleY="0.82"
+        android:translateX="17"
+        android:translateY="7">
+        <path
+            android:fillColor="#E91E63"
+            android:pathData="M12,21.35l-1.45,-1.32C5.4,15.36,2,12.28,2,8.5 2,5.42 4.42,3 7.5,3c1.74,0 3.41,0.81 4.5,2.09C13.09,3.81 14.76,3 16.5,3 19.58,3 22,5.42 22,8.5c0,3.78,-3.4,6.86,-8.55,11.54L12,21.35z" />
+    </group>
+
+    <!-- 左侧心（后画，最上层；浅色；y 低于右侧心，整体居中） -->
+    <group
+        android:pivotX="12"
+        android:pivotY="12"
+        android:scaleX="0.92"
+        android:scaleY="0.92"
+        android:translateX="5"
+        android:translateY="14">
+        <path
+            android:fillColor="#F48FB1"
+            android:pathData="M12,21.35l-1.45,-1.32C5.4,15.36,2,12.28,2,8.5 2,5.42 4.42,3 7.5,3c1.74,0 3.41,0.81 4.5,2.09C13.09,3.81 14.76,3 16.5,3 19.58,3 22,5.42 22,8.5c0,3.78,-3.4,6.86,-8.55,11.54L12,21.35z" />
+    </group>
+</vector>

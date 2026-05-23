@@ -1,0 +1,142 @@
+package com.wmqc.miroot.rear.desktop
+import com.wmqc.miroot.display.MainDisplayUi
+
+import android.app.ActivityOptions
+import android.content.Context
+import android.content.Intent
+import android.hardware.display.DisplayManager
+import android.os.Build
+import android.view.Display
+import android.widget.Toast
+import com.wmqc.miroot.R
+import com.wmqc.miroot.lyrics.DisplayInfoCache
+import com.wmqc.miroot.lyrics.ITaskService
+import com.wmqc.miroot.lyrics.LogHelper
+import com.wmqc.miroot.rear.OfficialSubscreenMiRootProjectionSession
+import com.wmqc.miroot.rear.RearProjectionLaunchSequence
+import kotlin.jvm.JvmStatic
+
+object RearDesktopLaunchHelper {
+
+    /** 与投屏/应用列表约定一致，副屏多为 displayId=1。 */
+    const val REAR_DISPLAY_ID: Int = 1
+
+    /**
+     * 背屏直启优先，失败主屏占位迁屏（3.4，与充电动画 / 音乐 / 车控一致）。
+     */
+    @JvmStatic
+    fun startDesktopOnRearDisplayWithTaskService(taskService: ITaskService, context: Context): Boolean {
+        val app = context.applicationContext
+        return try {
+            try {
+                if (!DisplayInfoCache.getInstance().isInitialized) {
+                    DisplayInfoCache.getInstance().initialize(taskService)
+                }
+            } catch (e: Exception) {
+                LogHelper.w(TAG, "DisplayInfoCache init (ignore): ${e.message}")
+            }
+
+            val component = "${app.packageName}/${RearScreenDesktopActivity::class.java.name}"
+            val fromService = context is android.app.Service
+            val spec =
+                RearProjectionLaunchSequence.mirootProjectionLaunchSpec(
+                    "RearScreenDesktopActivity",
+                    component,
+                    fromService,
+                    REAR_DISPLAY_ID,
+                )
+            val ok =
+                RearProjectionLaunchSequence.runPreferDirectRearLaunchWithPlaceholderFallback(
+                    context,
+                    taskService,
+                    spec,
+                    null,
+                )
+            LogHelper.d(TAG, "rear desktop launch ok=$ok")
+            ok
+        } catch (e: Exception) {
+            LogHelper.d(TAG, "startDesktopOnRearDisplayWithTaskService failed", e)
+            OfficialSubscreenMiRootProjectionSession.release(app, taskService)
+            false
+        }
+    }
+
+    /**
+     * 在背屏启动背屏桌面。优先 [ActivityOptions.setLaunchDisplayId]；失败时提示用户。
+     */
+    fun startDesktopOnRearDisplay(context: Context): Boolean {
+        val app = context.applicationContext
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            LogHelper.d(TAG, "startDesktopOnRearDisplay abort api=${Build.VERSION.SDK_INT}")
+            MainDisplayUi.showToast(app, R.string.rear_desktop_need_api26, Toast.LENGTH_SHORT)
+            return false
+        }
+        val dm = app.getSystemService(DisplayManager::class.java)
+        if (dm == null) {
+            LogHelper.d(TAG, "startDesktopOnRearDisplay abort DisplayManager=null")
+            return false
+        }
+        val rear = dm.getDisplay(REAR_DISPLAY_ID)
+        if (rear == null) {
+            LogHelper.d(TAG, "startDesktopOnRearDisplay abort no display id=$REAR_DISPLAY_ID")
+            MainDisplayUi.showToast(app, R.string.rear_desktop_display_unavailable, Toast.LENGTH_SHORT)
+            return false
+        }
+        // 与仅依赖 DisplayManager 的路径：除 STATE_ON 外允许 ON_SUSPEND（部分 ROM 背屏亮但非严格 ON）
+        if (rear.state != Display.STATE_ON && rear.state != Display.STATE_ON_SUSPEND) {
+            LogHelper.d(
+                TAG,
+                "startDesktopOnRearDisplay abort displayId=${rear.displayId} state=${displayStateLabel(rear.state)}",
+            )
+            MainDisplayUi.showToast(app, R.string.rear_desktop_display_unavailable, Toast.LENGTH_SHORT)
+            return false
+        }
+        return try {
+            val opts = ActivityOptions.makeBasic().setLaunchDisplayId(rear.displayId)
+            val intent =
+                Intent(app, RearScreenDesktopActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            app.startActivity(intent, opts.toBundle())
+            LogHelper.d(TAG, "startDesktopOnRearDisplay ok displayId=${rear.displayId}")
+            true
+        } catch (e: Exception) {
+            LogHelper.d(TAG, "startDesktopOnRearDisplay startActivity failed", e)
+            MainDisplayUi.showToast(app, R.string.rear_desktop_start_failed, Toast.LENGTH_SHORT)
+            false
+        }
+    }
+
+    /** 从已在前台的 [android.app.Activity] 启动，以便不使用 NEW_TASK 标记（可选）。 */
+    fun startDesktopOnRearDisplay(activity: android.app.Activity): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            MainDisplayUi.showToast(activity, R.string.rear_desktop_need_api26, Toast.LENGTH_SHORT)
+            return false
+        }
+        val dm = activity.getSystemService(DisplayManager::class.java) ?: return false
+        val rear = dm.getDisplay(REAR_DISPLAY_ID) ?: run {
+            MainDisplayUi.showToast(activity, R.string.rear_desktop_display_unavailable, Toast.LENGTH_SHORT)
+            return false
+        }
+        return try {
+            val opts = ActivityOptions.makeBasic().setLaunchDisplayId(rear.displayId)
+            activity.startActivity(Intent(activity, RearScreenDesktopActivity::class.java), opts.toBundle())
+            true
+        } catch (_: Exception) {
+            MainDisplayUi.showToast(activity, R.string.rear_desktop_start_failed, Toast.LENGTH_SHORT)
+            false
+        }
+    }
+
+    private fun displayStateLabel(state: Int): String =
+        when (state) {
+            Display.STATE_OFF -> "OFF"
+            Display.STATE_ON -> "ON"
+            Display.STATE_DOZE -> "DOZE"
+            Display.STATE_DOZE_SUSPEND -> "DOZE_SUSPEND"
+            Display.STATE_ON_SUSPEND -> "ON_SUSPEND"
+            else -> "UNKNOWN($state)"
+        }
+
+    private const val TAG = "RearDesktopLaunch"
+}

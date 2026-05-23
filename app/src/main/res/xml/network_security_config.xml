@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  防抓包：仅信任系统 CA（不信任用户安装的抓包根证书）。
+  不限制明文 HTTP，第三方歌词/曲库等 HTTP 接口可直接访问。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <!-- 仅信任系统 CA，不信任用户 CA（抓包工具常靠安装用户证书做 MITM） -->
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
+

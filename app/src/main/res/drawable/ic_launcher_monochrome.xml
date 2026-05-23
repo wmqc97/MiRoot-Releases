@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 与双色叠层图标轮廓相近，供 Android 13+ 主题图标使用 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M22,50L50,50Q64,50 64,64L64,92Q64,106 50,106L22,106Q8,106 8,92L8,64Q8,50 22,50Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M58,14L86,14Q100,14 100,28L100,56Q100,70 86,70L58,70Q44,70 44,56L44,28Q44,14 58,14Z" />
+</vector>

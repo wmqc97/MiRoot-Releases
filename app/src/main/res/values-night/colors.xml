@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="miuix_primary">#FF5B9FFF</color>
+    <color name="miuix_on_primary">#FF0A1E3F</color>
+    <color name="miuix_primary_container">#FF2A3F5C</color>
+    <color name="miuix_on_primary_container">#FFD6E6FF</color>
+    <color name="miuix_surface">#FF1C1C1E</color>
+    <color name="miuix_surface_container">#FF121316</color>
+
+    <color name="perm_green_container">#FF1B2E24</color>
+    <color name="perm_red_container">#FF3E2528</color>
+
+    <color name="mi_page_bg">#FF0D0E10</color>
+    <color name="mi_card_surface">#FF1E1F22</color>
+    <color name="mi_text_primary">#FFE8EAED</color>
+    <color name="mi_text_secondary">#FF9AA0A6</color>
+    <color name="mi_divider">#22FFFFFF</color>
+
+    <color name="shell_chip_white">#FFB0BEC5</color>
+    <color name="shell_chip_gray">#FF9E9E9E</color>
+
+    <color name="wechat_nav_muted">#99FFFFFF</color>
+    <color name="wechat_page_bg">@color/mi_page_bg</color>
+    <color name="wechat_card_bg">@color/mi_card_surface</color>
+</resources>
