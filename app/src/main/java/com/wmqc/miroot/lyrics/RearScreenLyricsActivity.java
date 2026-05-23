@@ -2316,6 +2316,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private static final String KEY_PROJECTION_LYRICS_CUSTOM_PATH = "projectionLyricsCustomPath";
     private static final float DEFAULT_ABYSSAL_GYRO_SENSITIVITY = 1.0f;
     private static final float DEFAULT_ABYSSAL_MOVABLE_RANGE = 2.5f;
+    /** 深渊镜歌词换行预提前量（ms），补偿 MediaController 位置读取管道延迟，使换行与听感同步。 */
+    private static final long ABYSSAL_LINE_PRE_ADVANCE_MS = 150L;
     private static final float DEFAULT_TEXT_SIZE = 65f;  // 默认歌词文本大小65px
     private static final float DEFAULT_BACKGROUND_TEXTURE_SIZE = 1.3f;
     private static final int DEFAULT_NORMAL_LYRICS_ALPHA = 30;  // 30%透明度
@@ -6534,8 +6536,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             }
             if (abyssalMirrorEnabled && abyssalMirrorLyricsViewGroup != null) {
                 // 新的ViewGroup版本：根据播放位置更新当前显示的歌词文本
+                // 加入预提前量补偿 MediaController 位置读取与音频输出的管道延迟，使换行与听感同步
                 if (enhancedLyricLines != null && !enhancedLyricLines.isEmpty()) {
-                    int currentIndex = findCurrentLineIndexForAbyssal(enhancedLyricLines, adjustedPosition);
+                    int currentIndex = findCurrentLineIndexForAbyssal(
+                        enhancedLyricLines, adjustedPosition + ABYSSAL_LINE_PRE_ADVANCE_MS);
                     if (currentIndex >= 0
                         && currentIndex < enhancedLyricLines.size()
                         && currentIndex != lastAbyssalRenderedLineIndex) {
@@ -6547,7 +6551,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             } else if (abyssalMirrorEnabled && abyssalMirrorLyricsView != null) {
                 // 旧版3D旋转版本（兼容）
                 if (enhancedLyricLines != null && !enhancedLyricLines.isEmpty()) {
-                    int currentIndex = findCurrentLineIndexForAbyssal(enhancedLyricLines, adjustedPosition);
+                    int currentIndex = findCurrentLineIndexForAbyssal(
+                        enhancedLyricLines, adjustedPosition + ABYSSAL_LINE_PRE_ADVANCE_MS);
                     if (currentIndex != lastAbyssalRenderedLineIndex) {
                         lastAbyssalRenderedLineIndex = currentIndex;
                         abyssalMirrorLyricsView.setCurrentLineIndex(currentIndex);
