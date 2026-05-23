@@ -369,7 +369,7 @@ class RearScreenRecordService : Service() {
                         mainHandler.post {
                             if (audioOk) {
                                 startRecordingInternal(
-                                    this@RearScreenRecordService, close, null,
+                                    close, close, null,
                                     audioWantedByUser = true,
                                 )
                             } else {
