@@ -516,9 +516,10 @@ final class SuperLyricWordTimestamps {
             return aligned;
         }
         ArrayList<EnhancedLRCParser.WordTimestamp> mapped = mapToLineText(lineText, aligned);
-        if (!moduleTimeline) {
-            stretchWordTimelineTowardNextLine(mapped, lineTimeMs, nextLineTimeMs);
-        }
+        // V3.17+: 无论是否信任模块原始时间轴，逐字跨度过短时均等比拉伸至 LRC 行间隙的 76%，
+        // 避免模块逐字短于歌词演唱时间导致高亮一下跑完。stretchWordTimelineTowardNextLine
+        // 内置 sungSpan ≥ lrcSpan×0.58 时不拉伸的安全门。
+        stretchWordTimelineTowardNextLine(mapped, lineTimeMs, nextLineTimeMs);
         padLastMeaningfulCharEnd(mapped, nextLineTimeMs);
         ensureMonotonicWordEnds(mapped);
         return mapped;

@@ -1940,10 +1940,55 @@ public class RearScreenLyricsActivity extends ComponentActivity {
 
     /** 与 {@link #prepareStructuredLyricLines(List, boolean)} 配套：网络 API 多行保留 LRC 内嵌逐字轴。 */
     private void prepareNetworkApiLyricLines(List<EnhancedLRCParser.EnhancedLyricLine> lines) {
-        // V3.17+: 保留LRC内嵌逐字轴作为初始逐字数据，让逐字显示在模块就绪前即可用LRC时间戳工作。
-        // 模块逐字就绪后会通过 commitSuperLyricWordFusion 覆盖对应行，无需在入口清空。
+        // 智能切换：保留 LRC 内嵌逐字轴作为模块就绪前的逐字数据，
+        // 但需对其做等分拉伸，避免 LRC 每字时长过短导致逐字高亮一下跑完。
         prepareStructuredLyricLines(lines, false);
+        normalizeLrcWordTimestamps(lines);
         sanitizeNetworkLyricLines(lines);
+    }
+
+    /**
+     * 将 LRC 逐字时间戳等分拉伸到行时间区间内。LRC 的 {@code <start,end>word} 每字时长
+     * 通常仅 50-200ms，直接使用会导致逐字进度在 1 秒内跑完。此函数将行可用时长均匀分配
+     * 到每个字，使逐字进度与实际演唱时间匹配。
+     */
+    private static void normalizeLrcWordTimestamps(List<EnhancedLRCParser.EnhancedLyricLine> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < lines.size(); i++) {
+            EnhancedLRCParser.EnhancedLyricLine line = lines.get(i);
+            if (line == null || line.wordTimestamps == null || line.wordTimestamps.size() < 2) {
+                continue;
+            }
+            // 行可用时长：当前行到下一行的时间间隔
+            long lineStart = Math.max(0L, line.time);
+            long lineEnd = lineStart + 5000L; // 默认 5 秒
+            if (i + 1 < lines.size()) {
+                EnhancedLRCParser.EnhancedLyricLine next = lines.get(i + 1);
+                if (next != null && next.time > lineStart) {
+                    lineEnd = next.time;
+                }
+            }
+            long lineDuration = Math.max(1000L, lineEnd - lineStart); // 至少 1 秒
+            int wordCount = line.wordTimestamps.size();
+            long perWordDuration = lineDuration / wordCount;
+
+            long currentStart = lineStart;
+            for (int j = 0; j < wordCount; j++) {
+                EnhancedLRCParser.WordTimestamp word = line.wordTimestamps.get(j);
+                if (word == null) continue;
+                word.startTime = currentStart;
+                // 最后一个字使用剩余全部时长
+                if (j == wordCount - 1) {
+                    long remaining = lineStart + lineDuration - currentStart;
+                    word.endTime = currentStart + Math.max(perWordDuration, remaining);
+                } else {
+                    word.endTime = currentStart + perWordDuration;
+                }
+                currentStart = word.endTime;
+            }
+        }
     }
 
     /**
@@ -6233,9 +6278,13 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return;
         }
         targetLine.wordTimestamps = pending.fusedWords;
-        // V3.17+: 智能切换融合逐字使用模块轴加权进度，按字时长计算高亮，不按字计数等分。
-        // 仅 SuperLyric 整曲模式保持旧路径（模块时间轴可能为句内相对值）。
-        targetLine.moduleWordTimeline = isMixedLyricsSourceMode();
+        // V3.17+: 逐字轴为整曲绝对毫秒时走模块加权路径（computeFusedWordHighlightTarget），
+        // 句内相对轴时走 legacy 等分路径（computeLegacyWordTimestampProgress），
+        // 避免 absolute positionMs 比对 relative timestamps 导致进度瞬间跑完。
+        boolean fusedTimestampsAbsolute = pending.fusedWords != null
+            && !SuperLyricWordTimestamps.usesSentenceRelativeTimeline(
+                pending.fusedWords, targetLine.time);
+        targetLine.moduleWordTimeline = fusedTimestampsAbsolute && isMixedLyricsSourceMode();
         lastWordFusionLineIndex = safeIndex;
         cancelPendingNoLyrics();
         superLyricFallbackModeActive = false;
@@ -7072,6 +7121,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 String artist = stableArtist != null ? stableArtist : "";
                 currentTrackKey = "";
                 inflightApiTrackKey = "";
+                apiAttemptedTrackKey = "";
                 lastLoadLyricsTrackKey = "";
                 lastLoadLyricsTime = 0L;
                 loadLyrics(title, artist);

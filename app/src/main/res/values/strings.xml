@@ -35,6 +35,8 @@
     <string name="update_log_v183_message">【简短说明】\nMiRoot 已更新至 V1.8.3：充电动画与歌词体验优化，并修复已知问题。\n\n【更新内容】\n• 充电动画迁屏与恢复更稳。\n• 歌词分词与显示优化；欢迎/关于说明已更新。\n• 背屏投屏与 Root / Shizuku 相关修复。</string>
     <string name="update_log_v188_title">MiRoot V1.8.8 更新</string>
     <string name="update_log_v188_message">【简短说明】\nMiRoot 已更新至 V1.8.8：修复智能切换前期逐字高亮与换行异常，并持续优化体验。\n\n【更新内容】\n• 歌词「智能切换」：修正歌曲前段融合逐字轴被误判为句内相对时间的问题，前几行逐字高亮与换行更稳定，减少跳到上一行再跳回。\n• 汽水单句升级完整歌词时，开头不再误锚到后部行。\n• 背屏歌词显示、切歌衔接与投屏体验持续优化。\n• 修复若干已知问题。</string>
+    <string name="update_log_v189_title">MiRoot V1.8.9 更新</string>
+    <string name="update_log_v189_message">【简短说明】\nMiRoot 已更新至 V1.8.9：新增在线版本更新检查、逐字高亮进度准确性与切歌清旧歌词优化。\n\n【更新内容】\n• 新增「版本更新」：状态页支持检查 GitHub 新版本，一键下载与安装更新。\n• 歌词逐字高亮：修复逐字进度虚高问题（首字唱到一半显示 80%），预计算总权重后字时长加权更准确。\n• LRC 逐字等分拉伸：网络歌词内嵌逐字时间戳不均匀时自动等分到行时长，逐字高亮速度与演唱匹配。\n• 切歌清歌词：切换歌曲后立即清空旧歌词视图，减少残留与错句。\n• 背屏歌词投屏、显示体验持续优化。\n• 修复若干已知问题。</string>
     <string name="update_log_v187_title">MiRoot V1.8.7 更新</string>
     <string name="update_log_v187_message">【简短说明】\nMiRoot 已更新至 V1.8.7：歌词智能切换逐字融合更稳，并修复已知问题。\n\n【更新内容】\n• 歌词「智能切换」：优化 SuperLyric 逐字与网络歌词的行级融合判定，当前播放行优先使用模块逐字轴；换行与行边界附近减少逐字高亮与 LRC 行时间戳模拟之间来回跳。\n• 背屏歌词显示、切歌衔接与投屏体验持续优化。\n• 修复若干已知问题。</string>
     <string name="update_log_v186_title">MiRoot V1.8.6 更新</string>
@@ -306,7 +308,7 @@
     <string name="music_rear_debug_title">背屏音乐调试界面</string>
     <string name="music_rear_debug_desc">呼吸、随机色等微调参数，修改后立即应用到背屏歌词投屏。</string>
     <string name="music_no_lyrics">暂无歌词</string>
-    <string name="music_loading_lyrics">正在获取歌词…</string>
+    <string name="music_loading_lyrics">正在搜索匹配…</string>
     <string name="music_rear_debug_breathing_enabled">呼吸效果</string>
     <string name="music_rear_debug_breathing_enabled_hint">关闭后隐藏呼吸参数</string>
     <string name="music_rear_debug_breathing_rhythm">呼吸频率（次/分钟）</string>
@@ -555,6 +557,22 @@
     <string name="settings_about">关于</string>
     <string name="settings_about_row_subtitle">版本信息与应用声明</string>
     <string name="settings_disable_official_subscreen_service">禁用官方背屏服务</string>
+
+    <!-- 版本更新 -->
+    <string name="update_title">版本更新</string>
+    <string name="update_check_button">检查更新</string>
+    <string name="update_checking">正在检查更新…</string>
+    <string name="update_no_update">已是最新版本</string>
+    <string name="update_available_title">发现新版本 %1$s</string>
+    <string name="update_current_version">当前版本 %1$s</string>
+    <string name="update_latest_version">最新版本 %1$s</string>
+    <string name="update_download">下载更新</string>
+    <string name="update_later">稍后再说</string>
+    <string name="update_downloading">正在下载…%1$d%%</string>
+    <string name="update_download_failed">下载失败，请重试</string>
+    <string name="update_check_failed">检查更新失败</string>
+    <string name="update_install_hint">下载完成，点击安装新版本</string>
+    <string name="update_release_notes">更新内容</string>
     <string name="settings_about_title">关于 MiRoot</string>
     <!-- 仅作布局预览占位，运行时在代码中拼接 -->
     <string name="settings_about_body_placeholder" translatable="false">…</string>
@@ -674,7 +692,7 @@
     <string name="record_saved_movies">已保存到 Movies</string>
     <string name="record_process_fail">后期处理失败：%1$s</string>
     <string name="record_process_fail_unknown">原因未知，请查看 Logcat 标签 MiRoot-RecordSynth</string>
-    <string name="record_done_process">合成完成，已刷新相册</string>
+    <string name="record_done_process">已保存到相册</string>
     <string name="record_need_overlay">请先授予悬浮窗权限</string>
     <string name="record_need_post_notifications">录屏前台服务需要「通知」权限，请在设置中允许 MiRoot 发送通知</string>
     <string name="record_need_record_audio">背屏内录需要「麦克风」权限（系统对内录统一走该权限），请在应用信息中允许录音</string>

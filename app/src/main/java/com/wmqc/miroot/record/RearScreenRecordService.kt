@@ -982,8 +982,6 @@ class RearScreenRecordService : Service() {
                     "/storage/emulated/0/Movies/MiRoot_${tsToken ?: SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.mp4",
                 )
 
-                mainHandler.post { toastMain(getString(R.string.record_synthesis_start)) }
-
                 // 内嵌音频路径：直接走 compositeShellOverVideo 或直接拷贝
                 if (sessionAudioBuiltin) {
                     RecordSynthDebugLog.d("branch: --audio builtin, composite=$composite workLen=${workVideo.length()}")

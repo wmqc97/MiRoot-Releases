@@ -2467,7 +2467,10 @@ public class ModernLyricsView extends View {
     }
 
     /**
-     * 计算当前行高亮目标进度 [0,1]：有逐字时间轴时优先按字时间加权，否则按 LRC 行时间区间推算。
+     * 计算当前行高亮目标进度 [0,1]：
+     * 1. 模块逐字轴（绝对毫秒）→ computeFusedWordHighlightTarget，按字时长加权
+     * 2. 模块逐字轴（句内相对）/ LRC 时间戳 → computeLegacyWordTimestampProgress，按字计数等分
+     * 3. 无逐字数据 → calculateLineProgress，按行时间区间平滑过渡
      */
     private float computeLineProgressTarget(EnhancedLRCParser.EnhancedLyricLine line) {
         if (line == null) {
@@ -2587,7 +2590,18 @@ public class ModernLyricsView extends View {
             && lineText.length() == wordTimestamps.size()
             && !lineText.isEmpty();
 
+        // V3.17+: 先遍历全部字计算总权重，再算已唱权重。之前 totalWeight 在循环中累加
+        // 但 break 时后续未唱字未被计入分母，导致分母过小、进度虚高（首字唱到一半就显示 80%）。
         float totalWeight = 0f;
+        for (int i = 0; i < wordTimestamps.size(); i++) {
+            EnhancedLRCParser.WordTimestamp word = wordTimestamps.get(i);
+            if (word == null) continue;
+            totalWeight += resolveWordHighlightWeight(word, perCharTimeline ? lineText : null, i);
+        }
+        if (totalWeight <= 0f) {
+            return -1f;
+        }
+
         float sungWeight = 0f;
         long timelineStart = Long.MAX_VALUE;
         long timelineEnd = 0L;
@@ -2602,16 +2616,12 @@ public class ModernLyricsView extends View {
             timelineStart = Math.min(timelineStart, start);
             timelineEnd = Math.max(timelineEnd, end);
 
-            float weight = resolveWordHighlightWeight(word, perCharTimeline ? lineText : null, i);
-            if (weight <= 0f) {
-                continue;
-            }
-            totalWeight += weight;
             if (positionMs >= end) {
-                sungWeight += weight;
+                sungWeight += resolveWordHighlightWeight(word, perCharTimeline ? lineText : null, i);
             } else if (positionMs > start) {
                 float inWord = (float) (positionMs - start) / (float) (end - start);
-                sungWeight += weight * Math.max(0f, Math.min(1f, inWord));
+                sungWeight += resolveWordHighlightWeight(word, perCharTimeline ? lineText : null, i)
+                    * Math.max(0f, Math.min(1f, inWord));
                 break;
             } else {
                 break;

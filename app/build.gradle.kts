@@ -119,8 +119,8 @@ android {
         // Android 16 = API 36；minSdk 勿与 target 相同，否则仅 16+ 设备可安装
         minSdk = 28
         targetSdk = 36
-        versionCode = 21
-        versionName = "1.8.8"
+        versionCode = 22
+        versionName = "1.8.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
