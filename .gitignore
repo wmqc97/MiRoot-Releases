@@ -57,3 +57,12 @@ _tmp_old*
 
 # Generated skill lock file
 skills-lock.json
+
+# Car login & remote control (sensitive - contains account/password)
+app/src/main/java/com/wmqc/miroot/car/LoginService.java
+app/src/main/java/com/wmqc/miroot/car/CarControlLoginActivity.kt
+app/src/main/java/com/wmqc/miroot/car/VehicleControlService.java
+app/src/main/java/com/wmqc/miroot/car/VehicleStatusService.java
+app/src/main/java/com/wmqc/miroot/car/VehicleStatusQueryService.java
+app/src/main/java/com/wmqc/miroot/car/CarVehicleDisplayHelper.kt
+app/src/main/java/com/wmqc/miroot/car/GeelyDigitalKeyProximityUnlock.java

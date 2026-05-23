@@ -94,7 +94,7 @@ adb shell am broadcast -a com.wmqc.miroot.car.ACTION_OPEN_CAR_CONTROL_PROJECTION
 
 ## 2. 车控功能（广播调用，后台直接执行）
 
-用于 **不打开车控界面** 直接执行车控功能（内部走 `CarControlCommandService` → `VehicleControlService`），并通过**回执广播**返回结果。
+用于 **不打开车控界面** 直接执行车控功能（内部走 `CarControlCommandService`），并通过**回执广播**返回结果。
 
 ### 广播 Action（请求）
 
@@ -211,9 +211,9 @@ context.sendBroadcast(intent);
 
 ## 3. 车辆状态查询（广播调用，返回车辆信息 JSON）
 
-查询车辆**实时状态**，结果以 JSON 字符串写入回执的 `data` / `postStatus`。内容由 `VehicleStatusService.getVehicleStatus` 拉取接口后，经 **`VehicleStatusService.buildVehicleQueryBroadcastJson`** 组装，与 MiRoot **设置页「车辆状态」卡片**中「【车辆状态】」「【里程能源】」的展示规则一致（含未知项是否输出为空串）。
+查询车辆**实时状态**，结果以 JSON 字符串写入回执的 `data` / `postStatus`。内容由车控后端服务拉取接口后组装，与 MiRoot **设置页「车辆状态」卡片**中「【车辆状态】」「【里程能源】」的展示规则一致（含未知项是否输出为空串）。
 
-> 投屏 HUD 上的续航、油量%、总里程、温度、短格式更新时间等展示解析，与上述数据同源规则见源码 `VehicleStatusService` 中的 `parseDistanceToEmptyKm`、`parseFuelLevelPercent`、`formatOdometerKmDigitsOrNull` 等（仅供应用内 UI；**广播 JSON 仍为接口侧原始字段经翻译/拼接后的结构**，见下文）。
+> 投屏 HUD 上的续航、油量%、总里程、温度、短格式更新时间等展示解析，与上述数据同源（仅供应用内 UI；**广播 JSON 仍为接口侧原始字段经翻译/拼接后的结构**，见下文）。
 
 ### 广播 Action（请求）
 
@@ -320,7 +320,7 @@ adb shell am broadcast -a com.wmqc.miroot.car.ACTION_QUERY_VEHICLE_STATUS \
 1. **登录依赖**：需要有效登录态与车辆信息；未就绪时 `success` 为 `"false"`，`message` 约为 **「请先登录或车辆信息未绑定」**，`data` / `postStatus` 为空。
 2. **网络依赖**：需要联网访问车辆状态接口。
 3. **data 为 JSON 字符串**：调用方自行 `JSONObject` / 反序列化解析。
-4. **短期缓存**：`VehicleStatusQueryService` 在距上一次**成功**拉取结束不足 **5 秒**时，会直接复用缓存 JSON 回执，不再发起 HTTP，避免主题高频轮询压接口。缓存仅影响广播查询路径，应用内设置页等直接调用 `VehicleStatusService` 不受影响。
+4. **短期缓存**：车辆状态查询服务在距上一次**成功**拉取结束不足 **5 秒**时，会直接复用缓存 JSON 回执，不再发起 HTTP，避免主题高频轮询压接口。缓存仅影响广播查询路径，应用内设置页等直接调用不受影响。
 5. **回执不设包名**：与 §2 相同，回执 **不**调用 `setPackage("com.wmqc.miroot")`，以便其它进程中的 `BroadcastBinder` 接收。
 
 请求侧 Extra 键名与 `VehicleStatusQueryService` 常量一致：`requestId`、`replyAction`（对应源码 `EXTRA_REQUEST_ID`、`EXTRA_REPLY_ACTION`）。
@@ -331,4 +331,5 @@ adb shell am broadcast -a com.wmqc.miroot.car.ACTION_QUERY_VEHICLE_STATUS \
 
 - 总览（含音乐投屏等）：[外部调API文档.md](./外部调API文档.md)
 - 主题侧 MAML 发送时 Action 与 Extra 键名请以本文 §2 / §3 为准；若沿用历史 `com.tgwgroup…` 前缀的 Action 字符串，与本表左列及代码示例中的完整名等价。
-- 源码：`CarControlIntents`、`CarControlBroadcastReceiver`、`CarControlProjectionService`、`CarControlCommandService`、`VehicleStatusQueryService`、`VehicleControlService`、`VehicleStatusService`（`buildVehicleQueryBroadcastJson` 及展示用解析工具方法）。
+- 源码：`CarControlIntents`、`CarControlBroadcastReceiver`、`CarControlProjectionService`、`CarControlCommandService`（车控指令的广播接收与派发入口）。
+- 登录与车辆远程控制实现为本地私有模块，不包含在公开仓库中。
