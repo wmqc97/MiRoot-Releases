@@ -138,7 +138,11 @@ object GitHubUpdateChecker {
                     val asset = assets.optJSONObject(i) ?: continue
                     val name = asset.optString("name", "")
                     if (name.endsWith(".apk")) {
-                        downloadUrl = asset.optString("browser_download_url", "")
+                        // Use the API asset URL (not browser_download_url) — the browser URL
+                        // returns 404 for private repos even with auth. The API URL with
+                        // Accept: application/octet-stream works reliably for both public
+                        // and private repos.
+                        downloadUrl = asset.optString("url", "")
                         break
                     }
                 }
@@ -210,6 +214,7 @@ object GitHubUpdateChecker {
         try {
             val req = Request.Builder().url(url)
                 .apply { authHeaderValue()?.let { header("Authorization", it) } }
+                .header("Accept", "application/octet-stream")
                 .build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {
