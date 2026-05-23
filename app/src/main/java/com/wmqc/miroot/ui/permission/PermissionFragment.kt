@@ -541,6 +541,12 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
     }
 
     private fun checkForUpdate() {
+        // 手动检测节流：进程内 30 秒内不重复请求
+        if (GitHubUpdateChecker.isManualCheckThrottled()) {
+            MainDisplayUi.showToast(requireContext(), R.string.update_too_frequent, Toast.LENGTH_SHORT)
+            return
+        }
+
         val btn = binding.buttonCheckUpdate
         btn.isEnabled = false
         btn.text = getString(R.string.update_checking)
@@ -582,18 +588,14 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
     private fun showUpdateDialog(release: GitHubRelease) {
         val ctx = requireContext()
         val currentVer = readMiRootVersion()
-        val message = buildString {
-            appendLine(getString(R.string.update_current_version, currentVer))
-            appendLine(getString(R.string.update_latest_version, release.versionName))
-            appendLine()
-            appendLine(getString(R.string.update_release_notes))
-            appendLine("——————————")
-            append(release.body)
-        }
+        val view = LayoutInflater.from(ctx).inflate(R.layout.dialog_update, null)
+        view.findViewById<TextView>(R.id.dialog_update_current_version).text = currentVer
+        view.findViewById<TextView>(R.id.dialog_update_latest_version).text = release.versionName
+        view.findViewById<TextView>(R.id.dialog_update_release_notes).text = release.body
 
         MaterialAlertDialogBuilder(ctx)
             .setTitle(getString(R.string.update_available_title, release.versionName))
-            .setMessage(message)
+            .setView(view)
             .setNegativeButton(R.string.update_later, null)
             .setPositiveButton(R.string.update_download) { _, _ ->
                 downloadAndInstall(release)
@@ -689,6 +691,13 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         if (autoCheckPerformed) return
         autoCheckPerformed = true
 
+        // 持久化冷却：每小时最多静默检测一次
+        val prefs = requireContext().getSharedPreferences(PREFS_UPDATE, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val lastSilent = prefs.getLong(PREFS_LAST_SILENT_CHECK, 0L)
+        if (now - lastSilent < SILENT_COOLDOWN_MS) return
+        prefs.edit().putLong(PREFS_LAST_SILENT_CHECK, now).apply()
+
         // Clean leftover .tmp files from a previous process death
         try {
             requireContext().cacheDir.listFiles { f -> f.name.endsWith(".apk.tmp") }
@@ -780,6 +789,11 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
     private companion object {
         private const val SUBSCREEN_PACKAGE = "com.xiaomi.subscreencenter"
         private var autoCheckPerformed = false
+
+        /** 静默检测冷却时间：1 小时。 */
+        private const val SILENT_COOLDOWN_MS = 3600_000L
+        private const val PREFS_UPDATE = "miroot_update_prefs"
+        private const val PREFS_LAST_SILENT_CHECK = "last_silent_check_time"
 
         /** 从系统设置返回后分批重读运行时权限（含 HyperOS 省电策略落库延迟）。 */
         private val RUNTIME_AUTH_REFRESH_DELAYS_MS = longArrayOf(0L, 120L, 350L, 900L, 1500L, 2500L)

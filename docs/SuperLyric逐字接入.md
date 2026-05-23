@@ -88,6 +88,7 @@ sequenceDiagram
 | 同句只比首尾时间 | `hasMaterialWordTimingChange` 逐字比对 |
 | Matcher 线程池延迟 | 同句 `tryApplySuperLyricWordFusionFastPath` 在 UI 线程直接融合 |
 | 融合后整表 `setLyrics` 闪屏 | 仅 `notifyWordTimestampsChanged`，不重置 scrollY |
+| **`computeFusedWordHighlightTarget` 分母陷阱** | V3.17+：先遍历全部字算总权重，再算已唱权重。见 [智能歌词融合规则.md §3.5](./智能歌词融合规则.md#35-%E5%B7%B2%E7%9F%A5%E9%99%B7%E9%98%B1%E4%B8%8E%E6%B3%A8%E6%84%8F%E4%BA%8B%E9%A1%B9)
 
 ---
 

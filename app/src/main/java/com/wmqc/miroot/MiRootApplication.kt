@@ -12,6 +12,7 @@ import com.wmqc.miroot.BuildConfig
 import com.wmqc.miroot.lyrics.LyricsWordTokenizer
 import com.wmqc.miroot.lyrics.RootTaskServiceConnector
 import com.wmqc.miroot.lyrics.SuperLyricApi
+import com.wmqc.miroot.update.GitHubUpdateChecker
 import java.io.ByteArrayInputStream
 import java.security.MessageDigest
 import java.security.cert.CertificateFactory
@@ -25,6 +26,8 @@ class MiRootApplication : Application() {
         RootTaskServiceConnector.prewarm(this)
         // 与 HChenX/SuperLyricApi 接收端一致：进程启动即注册 Binder，减少首句逐字等待。
         SuperLyricApi.ensureReceiverRegistered()
+        // GitHub 私仓 Release 访问令牌注入（local.properties → BuildConfig → UpdateChecker）。
+        GitHubUpdateChecker.init(BuildConfig.GITHUB_TOKEN.takeIf { it.isNotBlank() })
         verifyReleaseSignatureOrExit()
         enforceNoProxyOrVpnOrExit()
     }

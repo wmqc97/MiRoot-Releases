@@ -37,6 +37,8 @@
     <string name="update_log_v188_message">【简短说明】\nMiRoot 已更新至 V1.8.8：修复智能切换前期逐字高亮与换行异常，并持续优化体验。\n\n【更新内容】\n• 歌词「智能切换」：修正歌曲前段融合逐字轴被误判为句内相对时间的问题，前几行逐字高亮与换行更稳定，减少跳到上一行再跳回。\n• 汽水单句升级完整歌词时，开头不再误锚到后部行。\n• 背屏歌词显示、切歌衔接与投屏体验持续优化。\n• 修复若干已知问题。</string>
     <string name="update_log_v189_title">MiRoot V1.8.9 更新</string>
     <string name="update_log_v189_message">【简短说明】\nMiRoot 已更新至 V1.8.9：新增在线版本更新检查、逐字高亮进度准确性与切歌清旧歌词优化。\n\n【更新内容】\n• 新增「版本更新」：状态页支持检查 GitHub 新版本，一键下载与安装更新。\n• 歌词逐字高亮：修复逐字进度虚高问题（首字唱到一半显示 80%），预计算总权重后字时长加权更准确。\n• LRC 逐字等分拉伸：网络歌词内嵌逐字时间戳不均匀时自动等分到行时长，逐字高亮速度与演唱匹配。\n• 切歌清歌词：切换歌曲后立即清空旧歌词视图，减少残留与错句。\n• 背屏歌词投屏、显示体验持续优化。\n• 修复若干已知问题。</string>
+    <string name="update_log_v190_title">MiRoot V1.9.0 更新</string>
+    <string name="update_log_v190_message">【简短说明】\nMiRoot 已更新至 V1.9.0：升级弹窗焕新，自定义背景开关新增，背屏体验与稳定性持续改进。\n\n【更新内容】\n• 版本更新弹窗全新改版：更清晰的版本对比布局，更新日志独立展示，下载交互更直观。\n• 自定义背景功能：背屏支持自定义背景图片/视频，提供更多个性化选择。\n• 背屏歌词显示、投屏稳定性与切歌衔接持续优化。\n• Root / Shizuku 调用链路与异常兜底持续改进。\n• 修复若干已知问题。</string>
     <string name="update_log_v187_title">MiRoot V1.8.7 更新</string>
     <string name="update_log_v187_message">【简短说明】\nMiRoot 已更新至 V1.8.7：歌词智能切换逐字融合更稳，并修复已知问题。\n\n【更新内容】\n• 歌词「智能切换」：优化 SuperLyric 逐字与网络歌词的行级融合判定，当前播放行优先使用模块逐字轴；换行与行边界附近减少逐字高亮与 LRC 行时间戳模拟之间来回跳。\n• 背屏歌词显示、切歌衔接与投屏体验持续优化。\n• 修复若干已知问题。</string>
     <string name="update_log_v186_title">MiRoot V1.8.6 更新</string>
@@ -583,6 +585,7 @@
     <string name="update_error_no_apk">最新版本未包含 APK 文件</string>
     <string name="update_error_parse">解析版本信息失败</string>
     <string name="update_error_disk_full">存储空间不足，下载失败</string>
+    <string name="update_too_frequent">请求过于频繁，请稍后再试</string>
     <string name="settings_about_title">关于 MiRoot</string>
     <!-- 仅作布局预览占位，运行时在代码中拼接 -->
     <string name="settings_about_body_placeholder" translatable="false">…</string>
