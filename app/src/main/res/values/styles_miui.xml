@@ -43,6 +43,12 @@
         <item name="android:textColor">@color/mi_text_primary</item>
     </style>
 
+    <!-- 功能页「录屏·截图」等需压缩纵向空间时使用，不影响音乐页等大开关区 -->
+    <style name="TextAppearance.MiRoot.SwitchLabelCompact" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textColor">@color/mi_text_primary</item>
+    </style>
+
     <!-- 与音乐页 SliderRow 左侧标题（footnote1 + 次要色）一致 -->
     <style name="TextAppearance.MiRoot.CardSliderLabel" parent="TextAppearance.Material3.BodySmall">
         <item name="android:textSize">12sp</item>
@@ -76,4 +82,5 @@
     <style name="Widget.MiRoot.Button.Text" parent="Widget.Material3.Button.TextButton">
         <item name="cornerRadius">@dimen/mi_corner_radius</item>
     </style>
+
 </resources>

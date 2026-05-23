@@ -8,7 +8,12 @@
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
 .DS_Store
-/build
+# 任意模块的 Gradle 输出（含 app/build/），避免误提交与 status 噪音
+build/
+**/build/
+dist/
+**/build/intermediates/
+app/build/
 /captures
 .externalNativeBuild
 .cxx
@@ -23,3 +28,20 @@ replay_pid*.log
 
 # Local app database
 ai_database.db
+
+# Logcat dumps & temporary debug files
+_tmp_logcat*.txt
+latest_logcat*.txt
+
+# Gradle release build log
+_gradle_release_build.log
+
+# Old backup snapshots
+_tmp_old*
+
+# Tool / IDE config directories
+.agents/
+.claude/
+
+# Generated skill lock file
+skills-lock.json

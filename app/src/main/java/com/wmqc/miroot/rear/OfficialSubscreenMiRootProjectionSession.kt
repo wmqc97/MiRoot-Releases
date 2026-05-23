@@ -53,7 +53,8 @@ object OfficialSubscreenMiRootProjectionSession {
         val shouldRestore: Boolean
         synchronized(lock) {
             if (refCount <= 0) {
-                LogHelper.w(TAG, "release: refCount already 0")
+                // Keeper 收口与「仅 disableSubScreenLauncherForAppProjection、未 acquire」等路径并存时会出现；不恢复、不打告警。
+                LogHelper.d(TAG, "release: refCount already 0 (idempotent skip)")
                 return
             }
             refCount--

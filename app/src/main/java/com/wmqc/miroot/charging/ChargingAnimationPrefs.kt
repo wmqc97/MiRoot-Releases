@@ -11,27 +11,44 @@ import kotlin.math.roundToInt
 object ChargingAnimationPrefs {
     const val PREFS_NAME: String = "MiRootCharging"
     const val KEY_ENABLED: String = "charging_animation_enabled"
-    /** 开启后插电时仅在主屏启动充电动画，不迁背屏、不操作副屏桌面，便于对照背屏异常 */
-    const val KEY_DEBUG_MAIN_SCREEN_ONLY: String = "charging_debug_main_screen_only"
 
-    /** SharedPreferences 键：充电动画常亮。 */
+    /** 插电期间充电动画常亮：周期性 KEYCODE_WAKEUP + 不自动 8s 结束（功能页已隐藏，偏好仍可迁移/调试）。 */
     const val KEY_ALWAYS_ON: String = "charging_always_on_enabled"
 
     /**
-     * 涨水动画相对速度（百分比）。100 = 内置基准（约 100% 电量时总时长约 3.2s），越大越快。
-     * 取值范围 [MIN_FILL_RISE_SPEED_PERCENT], [MAX_FILL_RISE_SPEED_PERCENT]。
+     * 涨水动画相对速度（百分比）。
+     * 当前功能页滑块映射为「充满全屏约 4~8 秒」：
+     * - 80% ≈ 4s（更快）
+     * - 40% ≈ 8s（更慢）
      */
     const val KEY_FILL_RISE_SPEED_PERCENT: String = "charging_fill_rise_speed_percent"
 
-    const val MIN_FILL_RISE_SPEED_PERCENT: Int = 25
-    const val MAX_FILL_RISE_SPEED_PERCENT: Int = 300
-    private const val DEFAULT_FILL_RISE_SPEED_PERCENT: Int = 100
+    const val MIN_FILL_RISE_SPEED_PERCENT: Int = 40
+    const val MAX_FILL_RISE_SPEED_PERCENT: Int = 80
+    private const val DEFAULT_FILL_RISE_SPEED_PERCENT: Int = 50
 
     /**
      * 与 [com.wmqc.miroot.charging.RearScreenChargingActivity] 中液面满幅刻度基准时长一致。
      * 实际动画：`duration ∝ targetLevel * FILL_MS_FOR_FULL_SCALE * 100 / speedPercent`。
      */
     const val FILL_MS_FOR_FULL_SCALE: Int = 3200
+
+    private fun prefs(context: Context) =
+        context.applicationContext
+            .createDeviceProtectedStorageContext()
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    private fun migrateFromCredentialProtectedIfNeeded(context: Context) {
+        try {
+            val app = context.applicationContext
+            val dp = app.createDeviceProtectedStorageContext()
+            if (dp.moveSharedPreferencesFrom(app, PREFS_NAME)) {
+                dp.deleteSharedPreferences(PREFS_NAME + ".bak")
+            }
+        } catch (_: Throwable) {
+            // 迁移失败不影响读取，继续走默认值/已有值。
+        }
+    }
 
     /**
      * 当前涨水「速度」参数下，电量满刻度（目标 100%）时液面涨满一段的近似时长（ms），与 Activity 内公式一致。
@@ -47,40 +64,27 @@ object ChargingAnimationPrefs {
     }
 
     /** 默认开启充电动画。 */
+    @JvmStatic
     fun isEnabled(context: Context): Boolean =
-        context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs(context)
             .getBoolean(KEY_ENABLED, true)
 
     fun setEnabled(context: Context, enabled: Boolean) {
-        context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        migrateFromCredentialProtectedIfNeeded(context)
+        prefs(context)
             .edit()
             .putBoolean(KEY_ENABLED, enabled)
             .apply()
     }
 
-    fun isDebugMainScreenOnly(context: Context): Boolean =
-        context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_DEBUG_MAIN_SCREEN_ONLY, false)
-
-    fun setDebugMainScreenOnly(context: Context, enabled: Boolean) {
-        context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_DEBUG_MAIN_SCREEN_ONLY, enabled)
-            .apply()
-    }
-
+    @JvmStatic
     fun isAlwaysOn(context: Context): Boolean =
-        context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_ALWAYS_ON, false)
+        prefs(context).getBoolean(KEY_ALWAYS_ON, false)
 
+    @JvmStatic
     fun setAlwaysOn(context: Context, enabled: Boolean) {
-        context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        migrateFromCredentialProtectedIfNeeded(context)
+        prefs(context)
             .edit()
             .putBoolean(KEY_ALWAYS_ON, enabled)
             .apply()
@@ -88,8 +92,7 @@ object ChargingAnimationPrefs {
 
     @JvmStatic
     fun getFillRiseSpeedPercent(context: Context): Int {
-        val raw = context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val raw = prefs(context)
             .getInt(KEY_FILL_RISE_SPEED_PERCENT, DEFAULT_FILL_RISE_SPEED_PERCENT)
         return raw.coerceIn(MIN_FILL_RISE_SPEED_PERCENT, MAX_FILL_RISE_SPEED_PERCENT)
     }
@@ -97,8 +100,8 @@ object ChargingAnimationPrefs {
     @JvmStatic
     fun setFillRiseSpeedPercent(context: Context, percent: Int) {
         val p = percent.coerceIn(MIN_FILL_RISE_SPEED_PERCENT, MAX_FILL_RISE_SPEED_PERCENT)
-        context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        migrateFromCredentialProtectedIfNeeded(context)
+        prefs(context)
             .edit()
             .putInt(KEY_FILL_RISE_SPEED_PERCENT, p)
             .apply()

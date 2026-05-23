@@ -15,16 +15,18 @@ import com.wmqc.miroot.R
  */
 object ProjectionOnlyNotificationHelper {
 
-    const val MUSIC_PROJECTION_ONLY_ID = 10026
-    const val CAR_PROJECTION_ONLY_ID = 10027
+    const val MUSIC_OR_CAR_PROJECTION_ONLY_ID = MiRootNotificationIds.MUSIC_OR_CAR_PROJECTION_NOTIFICATION_ID
 
-    private const val CH_MUSIC = "projection_display_music"
-    private const val CH_CAR = "projection_display_car"
+    private const val CH_PROJECTION = "projection_display_business"
 
-    private fun ensureChannel(ctx: Context, channelId: String, name: String) {
+    private fun ensureChannel(ctx: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
-        val ch = NotificationChannel(channelId, name, NotificationManager.IMPORTANCE_DEFAULT)
+        val ch = NotificationChannel(
+            CH_PROJECTION,
+            ctx.getString(R.string.projection_display_channel_business),
+            NotificationManager.IMPORTANCE_DEFAULT,
+        )
         ch.setShowBadge(false)
         ch.enableVibration(false)
         nm.createNotificationChannel(ch)
@@ -33,7 +35,7 @@ object ProjectionOnlyNotificationHelper {
     @JvmStatic
     fun showMusic(activity: Activity) {
         val ctx = activity.applicationContext
-        ensureChannel(ctx, CH_MUSIC, activity.getString(R.string.projection_display_channel_music))
+        ensureChannel(ctx)
         val intent = Intent(ctx, ProjectionNotificationStopReceiver::class.java).apply {
             action = ProjectionNotificationStopReceiver.ACTION_STOP_MUSIC_PROJECTION_FROM_NOTIFICATION
         }
@@ -43,10 +45,10 @@ object ProjectionOnlyNotificationHelper {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val title = activity.getString(R.string.projection_notify_music_only_title)
-        val summary = activity.getString(R.string.projection_notify_music_only_summary)
-        val bigText = activity.getString(R.string.projection_notify_music_only_big)
-        val builder = NotificationCompat.Builder(ctx, CH_MUSIC)
+        val title = activity.getString(R.string.projection_notify_music_title)
+        val summary = activity.getString(R.string.projection_notify_stop_summary)
+        val bigText = activity.getString(R.string.projection_notify_music_big)
+        val builder = NotificationCompat.Builder(ctx, CH_PROJECTION)
         val notification = builder
             .setContentTitle(title)
             .setContentText(summary)
@@ -60,13 +62,14 @@ object ProjectionOnlyNotificationHelper {
             .setAutoCancel(false)
             .build()
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(MUSIC_PROJECTION_ONLY_ID, notification)
+        nm.cancel(MiRootNotificationIds.APP_PROJECTION_NOTIFICATION_ID)
+        nm.notify(MUSIC_OR_CAR_PROJECTION_ONLY_ID, notification)
     }
 
     @JvmStatic
     fun showCar(activity: Activity) {
         val ctx = activity.applicationContext
-        ensureChannel(ctx, CH_CAR, activity.getString(R.string.projection_display_channel_car))
+        ensureChannel(ctx)
         val intent = Intent(ctx, ProjectionNotificationStopReceiver::class.java).apply {
             action = ProjectionNotificationStopReceiver.ACTION_STOP_CAR_PROJECTION_FROM_NOTIFICATION
         }
@@ -76,10 +79,10 @@ object ProjectionOnlyNotificationHelper {
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val title = activity.getString(R.string.projection_notify_car_only_title)
-        val summary = activity.getString(R.string.projection_notify_car_only_summary)
-        val bigText = activity.getString(R.string.projection_notify_car_only_big)
-        val builder = NotificationCompat.Builder(ctx, CH_CAR)
+        val title = activity.getString(R.string.projection_notify_car_title)
+        val summary = activity.getString(R.string.projection_notify_stop_summary)
+        val bigText = activity.getString(R.string.projection_notify_car_big)
+        val builder = NotificationCompat.Builder(ctx, CH_PROJECTION)
         val notification = builder
             .setContentTitle(title)
             .setContentText(summary)
@@ -93,20 +96,21 @@ object ProjectionOnlyNotificationHelper {
             .setAutoCancel(false)
             .build()
         val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(CAR_PROJECTION_ONLY_ID, notification)
+        nm.cancel(MiRootNotificationIds.APP_PROJECTION_NOTIFICATION_ID)
+        nm.notify(MUSIC_OR_CAR_PROJECTION_ONLY_ID, notification)
     }
 
     @JvmStatic
     fun cancelMusic(ctx: Context) {
         val nm = ctx.applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             ?: return
-        nm.cancel(MUSIC_PROJECTION_ONLY_ID)
+        nm.cancel(MUSIC_OR_CAR_PROJECTION_ONLY_ID)
     }
 
     @JvmStatic
     fun cancelCar(ctx: Context) {
         val nm = ctx.applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
             ?: return
-        nm.cancel(CAR_PROJECTION_ONLY_ID)
+        nm.cancel(MUSIC_OR_CAR_PROJECTION_ONLY_ID)
     }
 }

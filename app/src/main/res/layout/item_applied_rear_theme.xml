@@ -44,15 +44,38 @@
             android:layout_weight="1"
             android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/text_applied_title"
+            <RelativeLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="2"
-                android:textAppearance="?attr/textAppearanceTitleSmall"
-                android:textColor="@color/mi_text_primary"
-                tools:text="3D卡通" />
+                android:layout_height="wrap_content">
+
+                <TextView
+                    android:id="@+id/text_applied_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_toStartOf="@id/text_applied_badge"
+                    android:ellipsize="end"
+                    android:maxLines="2"
+                    android:textAppearance="?attr/textAppearanceTitleSmall"
+                    android:textColor="@color/mi_text_primary"
+                    tools:text="3D卡通" />
+
+                <TextView
+                    android:id="@+id/text_applied_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentEnd="true"
+                    android:layout_centerVertical="true"
+                    android:background="@drawable/bg_badge_current"
+                    android:paddingStart="8dp"
+                    android:paddingEnd="8dp"
+                    android:paddingTop="3dp"
+                    android:paddingBottom="3dp"
+                    android:text="@string/theme_applied_badge_current"
+                    android:textAppearance="?attr/textAppearanceLabelSmall"
+                    android:textColor="@color/miuix_primary"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+            </RelativeLayout>
 
             <TextView
                 android:id="@+id/text_applied_meta"

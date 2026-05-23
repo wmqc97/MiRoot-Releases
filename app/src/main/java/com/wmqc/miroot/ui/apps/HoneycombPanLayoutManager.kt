@@ -42,6 +42,19 @@ class HoneycombPanLayoutManager : RecyclerView.LayoutManager() {
     private var axialCacheCount: Int = -1
     private var hexSizeCachePx: Float = -1f
 
+    /** 缓存的 pan 边界，仅在布局/数据变化时重算，避免手势每帧全量遍历。 */
+    private var cachedPanLimits: PanLimits? = null
+    private var cachedPanLimitsGeneration: Int = -1
+    private var panLimitsGeneration: Int = 0
+        set(value) {
+            field = value
+            cachedPanLimits = null
+        }
+
+    fun invalidatePanLimits() {
+        panLimitsGeneration++
+    }
+
     override fun generateDefaultLayoutParams(): RecyclerView.LayoutParams =
         RecyclerView.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -61,6 +74,7 @@ class HoneycombPanLayoutManager : RecyclerView.LayoutManager() {
             return
         }
         detachAndScrapAttachedViews(recycler)
+        invalidatePanLimits()
         val pl = rv.paddingLeft
         val pt = rv.paddingTop
         val pr = rv.paddingRight
@@ -129,9 +143,15 @@ class HoneycombPanLayoutManager : RecyclerView.LayoutManager() {
     }
 
     fun computePanLimits(rv: RecyclerView): PanLimits {
+        if (cachedPanLimits != null && cachedPanLimitsGeneration == panLimitsGeneration) {
+            return cachedPanLimits!!
+        }
         val count = rv.adapter?.itemCount ?: 0
         if (count == 0 || axialCache.isEmpty()) {
-            return PanLimits(0f, 0f, 0f, 0f)
+            val lim = PanLimits(0f, 0f, 0f, 0f)
+            cachedPanLimits = lim
+            cachedPanLimitsGeneration = panLimitsGeneration
+            return lim
         }
         val iconPx = (ICON_DP * rv.resources.displayMetrics.density).roundToInt().coerceAtLeast(1)
         val hexSizePx = iconPx * HEX_REL
@@ -143,7 +163,10 @@ class HoneycombPanLayoutManager : RecyclerView.LayoutManager() {
         val boxW = (rv.width - pl - pr).toFloat().coerceAtLeast(1f)
         val boxH = (rv.height - pt - pb).toFloat().coerceAtLeast(1f)
         val iconHitR = iconPx / 2f + 6f * rv.resources.displayMetrics.density
-        return panLimitsFor(count, axialCache, hexSizePx, boxW, boxH, iconHitR)
+        val lim = panLimitsFor(count, axialCache, hexSizePx, boxW, boxH, iconHitR)
+        cachedPanLimits = lim
+        cachedPanLimitsGeneration = panLimitsGeneration
+        return lim
     }
 
     fun hitAdapterPosition(rv: RecyclerView, screenX: Float, screenY: Float): Int {

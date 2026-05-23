@@ -139,7 +139,7 @@ public class VehicleStatusService {
             // 从0.json文件中提取车辆基础信息
             File loginFile = LoginService.getLoginInfoFile(context);
             if (!loginFile.exists()) {
-                LogHelper.e(TAG, "❌ 登录文件不存在: " + loginFile.getAbsolutePath());
+                LogHelper.d(TAG, "登录文件不存在（未登录）: " + loginFile.getAbsolutePath());
                 return info;
             }
             

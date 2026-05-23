@@ -47,4 +47,10 @@
         <item name="cornerSizeBottomLeft">0dp</item>
         <item name="cornerSizeBottomRight">0dp</item>
     </style>
+
+    <!-- 应用图标圆角：替代 item_installed_app 中内层 MaterialCardView -->
+    <style name="ShapeAppearanceOverlay.MiRoot.AppIcon" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">12dp</item>
+    </style>
 </resources>

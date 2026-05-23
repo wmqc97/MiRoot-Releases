@@ -29,13 +29,17 @@ import android.content.pm.ServiceInfo;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import androidx.core.app.NotificationCompat;
 
 import com.wmqc.miroot.MainActivity;
 import com.wmqc.miroot.rear.ProjectionNotificationStopReceiver;
 import com.wmqc.miroot.R;
 import com.wmqc.miroot.car.RearScreenCarControlActivity;
+import com.wmqc.miroot.rear.MiRootNotificationIds;
 import com.wmqc.miroot.rear.RearAssistPrefs;
+import com.wmqc.miroot.rear.RearSwitchKeeperService;
+import com.wmqc.miroot.rear.desktop.RearScreenDesktopActivity;
 
 import java.util.Set;
 
@@ -47,6 +51,9 @@ import java.util.Set;
  */
 public class RearScreenWakeService extends Service {
     private static final String TAG = "RearScreenWakeService";
+
+    /** 与 [com.wmqc.miroot.rear.RearSwitchKeeperService] 同名，供功能页等统一下发「投屏常亮」开关。 */
+    public static final String ACTION_SET_KEEP_SCREEN_ON_ENABLED = "ACTION_SET_KEEP_SCREEN_ON_ENABLED";
     /**
      * 音乐投屏等场景下由本服务发送 KEYCODE_WAKEUP 时为 true；
      * 供 {@link com.wmqc.miroot.record.RearScreenRecordService} 避免与录制侧重复唤醒。
@@ -59,13 +66,15 @@ public class RearScreenWakeService extends Service {
     }
 
     /** 与 {@link com.wmqc.miroot.rear.ProjectionOngoingNotifications#WAKE_PROJECTION_COMBINED_NOTIF_ID} 一致 */
-    public static final int NOTIFICATION_ID = 10003;
+    public static final int NOTIFICATION_ID = MiRootNotificationIds.MUSIC_OR_CAR_PROJECTION_NOTIFICATION_ID;
     private static final String NOTIFICATION_CHANNEL_ID = "rear_screen_wake_channel";
 
     private ITaskService taskService;
     private Handler wakeupHandler;
     private Runnable wakeupRunnable;
+    private Runnable rebindRunnable;
     private boolean isRunning = false;
+    private boolean taskServiceBound = false;
     // ??????????????/??
     private long lastBindAttemptMs = 0L;
     private static final long BIND_THROTTLE_MS = 3000;
@@ -75,6 +84,18 @@ public class RearScreenWakeService extends Service {
     
     private int getWakeIntervalMs() {
         return RearAssistPrefs.INSTANCE.intervalMs(this);
+    }
+
+    private int getAdaptiveWakeIntervalMs() {
+        int base = Math.max(600, getWakeIntervalMs());
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null && !pm.isInteractive()) {
+                return Math.min(base * 2, 6000);
+            }
+        } catch (Throwable ignored) {
+        }
+        return base;
     }
 
     /** 与「始终常亮」一致：不以 Activity 反射轮询投屏是否存活，仅由注册表 + 生命周期启停服务。 */
@@ -90,6 +111,7 @@ public class RearScreenWakeService extends Service {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
             taskService = ITaskService.Stub.asInterface(service);
+            taskServiceBound = true;
             LogHelper.d(TAG, "? TaskService???");
             
             startWakeupLoop();
@@ -100,14 +122,23 @@ public class RearScreenWakeService extends Service {
         public void onServiceDisconnected(ComponentName name) {
             LogHelper.w(TAG, "?? TaskService????");
             taskService = null;
+            taskServiceBound = false;
             // ??????????????????
             lastBindAttemptMs = 0L;
             
             // ???????
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                LogHelper.d(TAG, "?? ??????TaskService...");
-                bindTaskService();
-            }, 1000);
+            if (rebindRunnable == null) {
+                rebindRunnable = () -> {
+                    LogHelper.d(TAG, "?? ??????TaskService...");
+                    bindTaskService();
+                };
+            }
+            if (wakeupHandler != null) {
+                wakeupHandler.removeCallbacks(rebindRunnable);
+                wakeupHandler.postDelayed(rebindRunnable, 1000);
+            } else {
+                new Handler(Looper.getMainLooper()).postDelayed(rebindRunnable, 1000);
+            }
         }
     };
     
@@ -238,7 +269,7 @@ public class RearScreenWakeService extends Service {
             
             LogHelper.d(TAG, "BIND: bind RootTaskService");
             Intent intent = new Intent(this, RootTaskService.class);
-            bindService(intent, taskServiceConnection, Context.BIND_AUTO_CREATE);
+            taskServiceBound = bindService(intent, taskServiceConnection, Context.BIND_AUTO_CREATE);
         } catch (Exception e) {
             LogHelper.e(TAG, "BIND: bind TaskService failed", e);
         }
@@ -281,6 +312,7 @@ public class RearScreenWakeService extends Service {
         Set<String> reg = RearScreenWakeManager.getInstance().getRegisteredActivities();
         boolean hasLyrics = reg.contains(RearScreenLyricsActivity.class.getName());
         boolean hasCar = reg.contains(RearScreenCarControlActivity.class.getName());
+        boolean hasDesktop = reg.contains(RearScreenDesktopActivity.class.getName());
         int piFlags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
         if (hasLyrics) {
             Intent i = new Intent(this, ProjectionNotificationStopReceiver.class);
@@ -291,6 +323,17 @@ public class RearScreenWakeService extends Service {
             Intent i = new Intent(this, ProjectionNotificationStopReceiver.class);
             i.setAction(ProjectionNotificationStopReceiver.ACTION_STOP_CAR_PROJECTION_FROM_NOTIFICATION);
             return PendingIntent.getBroadcast(this, 21, i, piFlags);
+        }
+        if (hasDesktop) {
+            Intent i = new Intent(this, RearSwitchKeeperService.class);
+            i.setAction(RearSwitchKeeperService.ACTION_RETURN_TO_MAIN);
+            return PendingIntent.getService(this, 23, i, piFlags);
+        }
+        // 背屏桌面→应用投屏：桌面已注销 Wake 注册，但 Wake 前台通知可能仍在；此时由 Keeper 接管
+        if (RearSwitchKeeperService.isRunning()) {
+            Intent i = new Intent(this, RearSwitchKeeperService.class);
+            i.setAction(RearSwitchKeeperService.ACTION_RETURN_TO_MAIN);
+            return PendingIntent.getService(this, 24, i, piFlags);
         }
         Intent fallback = new Intent(this, MainActivity.class);
         fallback.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -309,20 +352,17 @@ public class RearScreenWakeService extends Service {
             boolean hasCar = reg.contains(RearScreenCarControlActivity.class.getName());
 
             String title;
-            String summary;
+            String summary = getString(R.string.projection_notify_stop_summary);
             String bigText;
             if (hasLyrics && !hasCar) {
-                title = getString(R.string.projection_notify_music_wake_title);
-                summary = getString(R.string.projection_notify_music_wake_summary);
-                bigText = getString(R.string.projection_notify_music_wake_big);
+                title = getString(R.string.projection_notify_music_title);
+                bigText = getString(R.string.projection_notify_music_big);
             } else if (hasCar && !hasLyrics) {
-                title = getString(R.string.projection_notify_car_wake_title);
-                summary = getString(R.string.projection_notify_car_wake_summary);
-                bigText = getString(R.string.projection_notify_car_wake_big);
+                title = getString(R.string.projection_notify_car_title);
+                bigText = getString(R.string.projection_notify_car_big);
             } else {
-                title = getString(R.string.projection_notify_multi_wake_title);
-                summary = getString(R.string.projection_notify_multi_wake_summary);
-                bigText = getString(R.string.projection_notify_multi_wake_big);
+                title = getString(R.string.projection_notify_multi_title);
+                bigText = getString(R.string.projection_notify_multi_big);
             }
 
             PendingIntent stopPi = buildStopProjectionContentIntent();
@@ -339,6 +379,10 @@ public class RearScreenWakeService extends Service {
                     .setCategory(NotificationCompat.CATEGORY_SERVICE)
                     .setAutoCancel(false)
                     .build();
+            NotificationManager nm = getSystemService(NotificationManager.class);
+            if (nm != null) {
+                nm.cancel(MiRootNotificationIds.APP_PROJECTION_NOTIFICATION_ID);
+            }
 
             if (Build.VERSION.SDK_INT >= 34) {
                 startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
@@ -402,7 +446,7 @@ public class RearScreenWakeService extends Service {
                 }
                 
                 if (wakeupHandler != null && isRunning) {
-                    wakeupHandler.postDelayed(this, getWakeIntervalMs());
+                    wakeupHandler.postDelayed(this, getAdaptiveWakeIntervalMs());
                 }
             }
         };
@@ -410,7 +454,7 @@ public class RearScreenWakeService extends Service {
         // ?????????
         wakeupHandler.post(wakeupRunnable);
         sWakeupLoopActive = true;
-        LogHelper.d(TAG, "LOOP: started (intervalMs=" + getWakeIntervalMs() + ")");
+        LogHelper.d(TAG, "LOOP: started (intervalMs=" + getAdaptiveWakeIntervalMs() + ")");
     }
     
     /**
@@ -422,6 +466,9 @@ public class RearScreenWakeService extends Service {
         if (wakeupHandler != null && wakeupRunnable != null) {
             wakeupHandler.removeCallbacks(wakeupRunnable);
         }
+        if (wakeupHandler != null && rebindRunnable != null) {
+            wakeupHandler.removeCallbacks(rebindRunnable);
+        }
         LogHelper.d(TAG, "LOOP: stopped");
     }
     
@@ -430,7 +477,7 @@ public class RearScreenWakeService extends Service {
         LogHelper.d(TAG, "onStartCommand (flags=" + flags + ", startId=" + startId + ")");
         
         // ???????????????Intent Action?
-        if (intent != null && "ACTION_SET_KEEP_SCREEN_ON_ENABLED".equals(intent.getAction())) {
+        if (intent != null && ACTION_SET_KEEP_SCREEN_ON_ENABLED.equals(intent.getAction())) {
             boolean enabled = intent.getBooleanExtra("enabled", true);
             LogHelper.d(TAG, "CFG: keep_screen_on=" + enabled);
             
@@ -457,6 +504,17 @@ public class RearScreenWakeService extends Service {
         // 无注册（未投屏或未调用 startWakeService）则停止，与「始终常亮」仅由开关/服务启停不同
         if (!hasProjectionRegistration()) {
             LogHelper.d(TAG, "SVC: no projection registration -> stopSelf");
+            stopWakeupLoop();
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        // 背屏桌面打开第三方应用后由 Keeper 单独负责迁屏/常亮；避免与 Wake 双前台通知并存
+        Set<String> regForKeeper = RearScreenWakeManager.getInstance().getRegisteredActivities();
+        boolean wakeHasLyrics = regForKeeper.contains(RearScreenLyricsActivity.class.getName());
+        boolean wakeHasCar = regForKeeper.contains(RearScreenCarControlActivity.class.getName());
+        if (RearSwitchKeeperService.isRunning() && !wakeHasLyrics && !wakeHasCar) {
+            LogHelper.d(TAG, "SVC: keeper active without music/car wake -> stopSelf");
             stopWakeupLoop();
             stopSelf();
             return START_NOT_STICKY;
@@ -523,8 +581,9 @@ public class RearScreenWakeService extends Service {
         
         // 解绑 TaskService（RootTaskService）
         try {
-            if (taskService != null) {
+            if (taskServiceBound) {
                 unbindService(taskServiceConnection);
+                taskServiceBound = false;
                 LogHelper.d(TAG, "BIND: unbound TaskService");
             }
         } catch (Exception e) {

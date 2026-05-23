@@ -1,4 +1,5 @@
 package com.wmqc.miroot.lyrics;
+import com.wmqc.miroot.display.MainDisplayUi;
 
 import android.Manifest;
 import android.app.NotificationChannel;
@@ -42,7 +43,7 @@ public class ScreenshotSavedReceiver extends BroadcastReceiver {
         if (canPostNotification) {
             showNotification(app, filepath);
         } else {
-            showToastOnMainDisplay(app, app.getString(R.string.toast_screenshot_saved));
+            MainDisplayUi.showToast(app, R.string.toast_screenshot_saved, Toast.LENGTH_SHORT);
         }
     }
 
@@ -100,45 +101,7 @@ public class ScreenshotSavedReceiver extends BroadcastReceiver {
             }
         } catch (Exception e) {
             LogHelper.w("ScreenshotSavedRx", "通知失败，改用 Toast: " + e.getMessage());
-            showToastOnMainDisplay(context, context.getString(R.string.toast_screenshot_saved));
+            MainDisplayUi.showToast(context, R.string.toast_screenshot_saved, Toast.LENGTH_SHORT);
         }
-    }
-
-    /** 与 {@link RearScreenshotTileService} 一致：尽量在主屏显示 Toast。 */
-    private static void showToastOnMainDisplay(Context appCtx, String message) {
-        new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
-            try {
-                Context mainDisplayContext = null;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    try {
-                        android.hardware.display.DisplayManager dm =
-                                (android.hardware.display.DisplayManager)
-                                        appCtx.getSystemService(Context.DISPLAY_SERVICE);
-                        if (dm != null) {
-                            android.view.Display mainDisplay = dm.getDisplay(0);
-                            if (mainDisplay != null) {
-                                mainDisplayContext = appCtx.createDisplayContext(mainDisplay);
-                            }
-                        }
-                    } catch (Exception ignored) {
-                    }
-                }
-                Context ctx = mainDisplayContext != null ? mainDisplayContext : appCtx;
-                Toast toast = Toast.makeText(ctx, message, Toast.LENGTH_SHORT);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    try {
-                        java.lang.reflect.Method m = Toast.class.getMethod("setDisplayId", int.class);
-                        m.invoke(toast, 0);
-                    } catch (Exception ignored) {
-                    }
-                }
-                toast.show();
-            } catch (Exception e) {
-                try {
-                    Toast.makeText(appCtx, message, Toast.LENGTH_SHORT).show();
-                } catch (Exception ignored) {
-                }
-            }
-        });
     }
 }

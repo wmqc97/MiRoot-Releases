@@ -1,4 +1,5 @@
 package com.wmqc.miroot.record
+import com.wmqc.miroot.display.MainDisplayUi
 
 import com.wmqc.miroot.lyrics.LogHelper
 import android.app.Activity
@@ -16,7 +17,6 @@ import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
-import android.hardware.display.DisplayManager
 import android.os.Build
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -95,10 +95,12 @@ class RearScreenRecordService : Service() {
     /** 本会话是否实际在录 PCM（投影 + AudioCaptureHelper 成功启动） */
     @Volatile
     private var sessionPcmCapture: Boolean = false
-    /** 本会话是否使用了 screenrecord 原生音轨录制（--audio）。 */
+    /** Android 12+ screenrecord --audio 内录音频（无需 MediaProjection/PCM 路径）。 */
     @Volatile
-    private var sessionNativeAudioCapture: Boolean = false
-
+    private var sessionAudioBuiltin: Boolean = false
+    /** 本次点击录制时是否期望内录（以悬浮窗实时开关为准）。 */
+    @Volatile
+    private var sessionAudioWanted: Boolean = false
     private var audioCaptureHelper: AudioCaptureHelper? = null
     private var currentMediaProjection: MediaProjection? = null
 
@@ -108,11 +110,9 @@ class RearScreenRecordService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile
     private var stopWorker: Thread? = null
-    @Volatile
-    private var screenrecordAudioSupportedCache: Boolean? = null
 
     /**
-     * 投屏常亮：与功能页「投屏常亮 / 始终常亮」及「发送间隔」一致；
+     * 录屏专属常亮：仅读取「录屏/截图常亮」开关；与投屏常亮设置逻辑分离。
      * 仅当 [RearScreenWakeService] 未在跑投屏唤醒循环时由本服务定时唤醒（避免与投屏重复）。
      * 须在后台线程执行 [PrivilegedShell.runAndWait]，不可阻塞主线程。
      */
@@ -224,7 +224,7 @@ class RearScreenRecordService : Service() {
                     }
                     val r = recordBtn ?: return START_STICKY
                     val c = closeBtn ?: return START_STICKY
-                    if (projection == null && audioEnabled()) {
+                    if (projection == null && sessionAudioWanted()) {
                         restoreForegroundSpecialUseOnly()
                         mainHandler.post {
                             toastMain(getString(R.string.record_projection_failed))
@@ -357,7 +357,45 @@ class RearScreenRecordService : Service() {
                     toastMain(getString(R.string.record_busy))
                     return@setOnClickListener
                 }
-                if (audioEnabled() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val wantsAudioNow = sessionAudioWanted()
+                RecordSynthDebugLog.diagI(
+                    "record click: wantsAudioNow=$wantsAudioNow sdk=${Build.VERSION.SDK_INT}",
+                )
+                if (wantsAudioNow && Build.VERSION.SDK_INT >= 31) {
+                    // 检查 screenrecord 是否支持 --audio，避免直接使用导致 screenrecord 失败退出
+                    thread(name = "MiRoot-AudioProbe") {
+                        val audioOk = screenrecordSupportsAudio()
+                        RecordSynthDebugLog.diagI("record click: screenrecord --audio support=$audioOk")
+                        mainHandler.post {
+                            if (audioOk) {
+                                startRecordingInternal(
+                                    this@RearScreenRecordService, close, null,
+                                    audioWantedByUser = true,
+                                )
+                            } else {
+                                // --audio 不可用：回退到旧 MediaProjection + PCM 路径
+                                RecordSynthDebugLog.diagW(
+                                    "screenrecord --audio not supported, fallback to PCM path",
+                                )
+                                if (!RuntimePermissionGate.hasRecordAudio(this@RearScreenRecordService)) {
+                                    toastMain(getString(R.string.record_need_record_audio))
+                                    try {
+                                        startActivity(
+                                            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                data = Uri.fromParts("package", packageName, null)
+                                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            },
+                                        )
+                                    } catch (_: Exception) {
+                                    }
+                                    return@post
+                                }
+                                toastMain(getString(R.string.record_audio_builtin_unavailable))
+                                requestMediaProjectionThenStart(this, close)
+                            }
+                        }
+                    }
+                } else if (wantsAudioNow && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     if (!RuntimePermissionGate.hasRecordAudio(this@RearScreenRecordService)) {
                         toastMain(getString(R.string.record_need_record_audio))
                         try {
@@ -617,6 +655,7 @@ class RearScreenRecordService : Service() {
         recordView: View,
         closeView: View,
         mediaProjection: MediaProjection?,
+        audioWantedByUser: Boolean = false,
     ) {
         synchronized(stateLock) {
             if (isRecording || isStarting || isStopping) {
@@ -625,9 +664,10 @@ class RearScreenRecordService : Service() {
             }
             isStarting = true
         }
-        toastMain(getString(R.string.record_starting), longDuration = true)
+        val useBuiltinAudio = audioWantedByUser && Build.VERSION.SDK_INT >= 31
         RecordSynthDebugLog.diagI(
-            "start: enter privilegedOk=${privilegedOk()} cacheDir=${cacheDir.absolutePath} hasProjection=${mediaProjection != null}",
+            "start: enter privilegedOk=${privilegedOk()} cacheDir=${cacheDir.absolutePath} " +
+                "hasProjection=${mediaProjection != null} useBuiltinAudio=$useBuiltinAudio",
         )
         if (!privilegedOk()) {
             RecordSynthDebugLog.diagW("start: abort — no privileged shell (Root/Shizuku)")
@@ -638,14 +678,15 @@ class RearScreenRecordService : Service() {
         }
         thread(name = "MiRoot-RecStart") {
             try {
+                sessionAudioWanted = mediaProjection != null || useBuiltinAudio
                 sessionPcmCapture = false
-                sessionNativeAudioCapture = false
-                if (RearAssistPrefs.isKeepScreenOnEnabled(this) &&
+                sessionAudioBuiltin = useBuiltinAudio
+                if (RearAssistPrefs.isRecordScreenshotKeepScreenOnEnabled(this) &&
                     !RearScreenWakeService.isWakeupLoopActive()
                 ) {
                     PrivilegedShell.execCmd("input -d 1 keyevent KEYCODE_WAKEUP")
                 }
-                Thread.sleep(200)
+                Thread.sleep(50)
                 val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 currentCaptureTs = ts
                 val path = File(cacheDir, "miroot_rear_work_$ts").absolutePath
@@ -703,14 +744,14 @@ class RearScreenRecordService : Service() {
                     failStart(recordView, closeView, getString(R.string.record_no_screenrecord))
                     return@thread
                 }
-                RecordSynthDebugLog.diagI("start: screenrecord bin=$which (video only, no --audio)")
+                RecordSynthDebugLog.diagI("start: screenrecord bin=$which")
 
-                val wantsAudio = mediaProjection != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-                val useNativeScreenrecordAudio = wantsAudio && screenrecordSupportsAudio(which)
-                val audioArg = if (useNativeScreenrecordAudio) " --audio" else ""
-                // 20Mbps 在「投屏动画 + 内录」同开时编码压力大，易拖慢 SurfaceFlinger；12Mbps 多数背屏分辨率足够清晰
+                val audioFlag = if (useBuiltinAudio) " --audio --audio-bit-rate 128000" else ""
+                RecordSynthDebugLog.diagI(
+                    "start: screenrecord bin=$which audioBuiltin=$useBuiltinAudio",
+                )
                 val cmd =
-                    "$which --display-id $displayId --bit-rate 12000000$audioArg $path > $LOG_FILE 2>&1 & echo \$! > $PID_FILE"
+                    "$which --display-id $displayId --bit-rate 12000000$audioFlag $path > $LOG_FILE 2>&1 & echo \$! > $PID_FILE"
                 RecordSynthDebugLog.d("start: launch cmd=${cmd.take(520)}${if (cmd.length > 520) "…" else ""}")
                 if (!PrivilegedShell.execCmd(cmd)) {
                     RecordSynthDebugLog.diagW(
@@ -720,12 +761,8 @@ class RearScreenRecordService : Service() {
                     return@thread
                 }
 
-                // 与画面时间轴对齐：screenrecord 已启动后立即开内录，避免晚 ~800ms+ 才采 PCM 导致整段声画错位
                 var pcmStarted = false
-                if (!useNativeScreenrecordAudio &&
-                    mediaProjection != null &&
-                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
-                ) {
+                if (!useBuiltinAudio && mediaProjection != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val pcmPath = "${path}_audio.pcm"
                     val helper = AudioCaptureHelper(mediaProjection)
                     if (helper.start(pcmPath)) {
@@ -738,25 +775,29 @@ class RearScreenRecordService : Service() {
                         audioCaptureHelper = null
                         currentMediaProjection = null
                     }
-                }
-                if (useNativeScreenrecordAudio) {
-                    sessionNativeAudioCapture = true
-                    RecordSynthDebugLog.diagI("start: using screenrecord --audio (native track)")
+                } else if (useBuiltinAudio) {
+                    pcmStarted = true  // audio embedded in screenrecord output
                 }
 
-                Thread.sleep(800)
-                val logSnap = snapshotScreenrecordLog()
-                val pidStr = PrivilegedShell.captureOutput("cat $PID_FILE 2>/dev/null")?.trim().orEmpty()
-                recordPid = pidStr.toIntOrNull() ?: -1
-                val lsOut = PrivilegedShell.captureOutput("ls -l \"$path\" 2>&1").orEmpty()
-                val fileOk = lsOut.isNotBlank() && !lsOut.contains("No such")
+                // 轮询 screenrecord 进程/文件确认已启动，替代固定 sleep
+                var pollAttempts = 0
+                val pollMax = 12 // 12×50ms = 600ms 上限（shell 调用耗时另计，合计 ~1s 与原 800ms 相当）
+                var pidStr = ""
+                var fileOk = false
+                while (pollAttempts < pollMax) {
+                    Thread.sleep(50)
+                    pollAttempts++
+                    pidStr = PrivilegedShell.captureOutput("cat $PID_FILE 2>/dev/null")?.trim().orEmpty()
+                    recordPid = pidStr.toIntOrNull() ?: -1
+                    val lsOut = PrivilegedShell.captureOutput("ls -l \"$path\" 2>&1").orEmpty()
+                    fileOk = lsOut.isNotBlank() && !lsOut.contains("No such")
+                    if (fileOk || isScreenrecordBinaryProcessRunning(recordPid)) break
+                }
                 val runningBin = isScreenrecordBinaryProcessRunning(recordPid)
                 val pidofLine = PrivilegedShell.captureOutput("pidof screenrecord 2>/dev/null").orEmpty()
                 RecordSynthDebugLog.diagI(
-                    "start: pidFile='$pidStr' recordPid=$recordPid fileOk=$fileOk runningBin=$runningBin pidof=$pidofLine",
+                    "start: polled=${pollAttempts}×50ms pidFile='$pidStr' recordPid=$recordPid fileOk=$fileOk runningBin=$runningBin pidof=$pidofLine",
                 )
-                RecordSynthDebugLog.d("start: ls work=\n${RecordSynthDebugLog.truncateShellOutput(lsOut, 800)}")
-                RecordSynthDebugLog.d("start: screenrecord log tail=\n$logSnap")
                 if (!fileOk && !runningBin) {
                     RecordSynthDebugLog.diagW(
                         "start: proc/file check failed | log=\n${snapshotScreenrecordLog()}",
@@ -773,8 +814,7 @@ class RearScreenRecordService : Service() {
 
                 sessionPcmCapture = pcmStarted
                 RecordSynthDebugLog.diagI(
-                    "start: OK sessionComposite=$sessionCompositeEnabled sessionPcmCapture=$sessionPcmCapture " +
-                        "sessionNativeAudioCapture=$sessionNativeAudioCapture",
+                    "start: OK sessionComposite=$sessionCompositeEnabled sessionPcmCapture=$sessionPcmCapture",
                 )
                 mainHandler.post {
                     closeView.visibility = View.GONE
@@ -783,9 +823,8 @@ class RearScreenRecordService : Service() {
                     startWakeup()
                     toastMain(getString(R.string.record_started), longDuration = true)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-                        audioEnabled() &&
-                        !sessionPcmCapture &&
-                        !sessionNativeAudioCapture
+                        sessionAudioWanted &&
+                        !sessionPcmCapture
                     ) {
                         toastMain(getString(R.string.record_no_internal_audio), longDuration = true)
                     }
@@ -812,17 +851,25 @@ class RearScreenRecordService : Service() {
         }
         currentCaptureTs = null
         currentVideoPath?.let { p ->
+            val isBuiltin = sessionAudioBuiltin
             try {
                 File(p).delete()
             } catch (_: Exception) {
             }
-            try {
-                File("${p}_audio.pcm").delete()
-            } catch (_: Exception) {
-            }
-            try {
-                PrivilegedShell.execCmd("rm -f \"$p\" \"${p}_audio.pcm\"")
-            } catch (_: Exception) {
+            if (!isBuiltin) {
+                try {
+                    File("${p}_audio.pcm").delete()
+                } catch (_: Exception) {
+                }
+                try {
+                    PrivilegedShell.execCmd("rm -f \"$p\" \"${p}_audio.pcm\"")
+                } catch (_: Exception) {
+                }
+            } else {
+                try {
+                    PrivilegedShell.execCmd("rm -f \"$p\"")
+                } catch (_: Exception) {
+                }
             }
         }
         currentVideoPath = null
@@ -858,82 +905,68 @@ class RearScreenRecordService : Service() {
             try {
                 RecordSynthDebugLog.diagI(
                     "stop: enter currentVideoPath=$currentVideoPath recordPid=$recordPid " +
-                        "sessionPcmCapture=$sessionPcmCapture " +
-                        "sessionNativeAudioCapture=$sessionNativeAudioCapture " +
+                        "sessionPcmCapture=$sessionPcmCapture sessionAudioBuiltin=$sessionAudioBuiltin " +
                         "sessionComposite=$sessionCompositeEnabled",
                 )
-                Thread.sleep(200)
 
-                val pcmPathForMerge = currentVideoPath?.let { "${it}_audio.pcm" }
+                val pcmPathForMerge = if (!sessionAudioBuiltin) {
+                    currentVideoPath?.let { "${it}_audio.pcm" }
+                } else null
                 val pcmRate = audioCaptureHelper?.pcmSampleRate ?: AudioCaptureHelper.SAMPLE_RATE
                 val pcmCh = audioCaptureHelper?.pcmChannelCount ?: 2
-                val tryPcmMerge = sessionPcmCapture && pcmPathForMerge != null
+                val tryPcmMerge = !sessionAudioBuiltin && sessionPcmCapture && pcmPathForMerge != null
 
-                try {
+                if (sessionAudioBuiltin) {
+                    // --audio 路径：screenrecord 已内嵌音频，立即停止即可
                     audioCaptureHelper?.stop()
-                } catch (_: Exception) {
+                    audioCaptureHelper = null
+                } else {
+                    try {
+                        audioCaptureHelper?.stop()
+                    } catch (_: Exception) {
+                    }
+                    Thread.sleep(250)
+                    audioCaptureHelper = null
                 }
-                try {
-                    Thread.sleep(650)
-                } catch (_: InterruptedException) {
-                }
-                audioCaptureHelper = null
                 stopAndReleaseMediaProjection()
                 if (Build.VERSION.SDK_INT >= 34) {
                     mainHandler.post {
                         restoreForegroundSpecialUseOnly()
                     }
-                    Thread.sleep(50)
                 }
 
-                Thread.sleep(200)
-
-                if (recordPid <= 0) {
-                    val pidStr = PrivilegedShell.captureOutput("cat $PID_FILE 2>/dev/null")?.trim().orEmpty()
-                    recordPid = pidStr.toIntOrNull() ?: -1
-                    RecordSynthDebugLog.d("stop: recovered pid from file='$pidStr' -> recordPid=$recordPid")
+                val killAttempts = 6
+                for (i in 1..killAttempts) {
+                    val runningNow = recordPid > 0 && isScreenrecordBinaryProcessRunning(recordPid)
+                    if (!runningNow) break
+                    if (recordPid > 0) {
+                        PrivilegedShell.execCmd("kill -2 $recordPid")
+                    } else {
+                        killScreenrecordFallback()
+                    }
+                    if (i < killAttempts) Thread.sleep(100)
                 }
-                if (recordPid > 0) {
-                    val k = PrivilegedShell.execCmd("kill -2 $recordPid")
-                    RecordSynthDebugLog.diagI("stop: kill -2 $recordPid ok=$k")
-                } else {
-                    RecordSynthDebugLog.diagI("stop: recordPid invalid, fallback kill screenrecord")
-                    killScreenrecordFallback()
-                }
-                Thread.sleep(1200)
                 recordPid = -1
 
                 val videoPath = currentVideoPath
-                val preChownLs =
-                    videoPath?.let { PrivilegedShell.captureOutput("ls -l \"$it\" 2>&1").orEmpty() }
-                        .orEmpty()
-                RecordSynthDebugLog.d(
-                    "stop: pre-chown ls=\n${RecordSynthDebugLog.truncateShellOutput(preChownLs, 600)}",
-                )
-                videoPath?.let { chownWorkVideoToApp(it) }
-                val postChownLs =
-                    videoPath?.let { PrivilegedShell.captureOutput("ls -l \"$it\" 2>&1").orEmpty() }
-                        .orEmpty()
-                RecordSynthDebugLog.d(
-                    "stop: post-chown ls=\n${RecordSynthDebugLog.truncateShellOutput(postChownLs, 600)}",
-                )
                 currentVideoPath = null
                 val composite = sessionCompositeEnabled
                 val workVideo = if (videoPath != null) File(videoPath) else null
 
                 val appCtx = applicationContext
-
                 if (workVideo == null || !workVideo.exists()) {
-                    val cacheListing = PrivilegedShell.captureOutput(
-                        "ls -la \"${cacheDir.absolutePath}\" 2>&1 | head -n 40",
-                    ).orEmpty()
-                    RecordSynthDebugLog.diagW(
-                        "stop: work video missing path=$videoPath | appCanRead=" +
-                            "${videoPath?.let { File(it).canRead() }} " +
-                            "| screenrecord log:\n${snapshotScreenrecordLog()}\n" +
-                            "| cacheDir head:\n${RecordSynthDebugLog.truncateShellOutput(cacheListing, 2500)}",
-                    )
                     currentCaptureTs = null
+                    mainHandler.post {
+                        toastMain(getString(R.string.record_saved_missing))
+                        afterStopUi(closeView)
+                    }
+                    return@thread
+                }
+
+                // 修复 root 写入的文件权限
+                chownWorkVideoToApp(workVideo.absolutePath)
+                if (!workVideo.canRead()) {
+                    RecordSynthDebugLog.diagW("stop: video unreadable after chown path=$videoPath")
                     mainHandler.post {
                         toastMain(getString(R.string.record_saved_missing))
                         afterStopUi(closeView)
@@ -949,10 +982,35 @@ class RearScreenRecordService : Service() {
                     "/storage/emulated/0/Movies/MiRoot_${tsToken ?: SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.mp4",
                 )
 
+                mainHandler.post { toastMain(getString(R.string.record_synthesis_start)) }
+
+                // 内嵌音频路径：直接走 compositeShellOverVideo 或直接拷贝
+                if (sessionAudioBuiltin) {
+                    RecordSynthDebugLog.d("branch: --audio builtin, composite=$composite workLen=${workVideo.length()}")
+                    if (!composite) {
+                        try {
+                            workVideo.copyTo(finalVideo, overwrite = true)
+                        } catch (_: Exception) {
+                        }
+                        PrivilegedShell.execCmd("rm -f \"${workVideo.absolutePath}\"")
+                        if (finalVideo.isFile && finalVideo.length() > 0L) {
+                            mediaScan(finalVideo)
+                        }
+                        mainHandler.post {
+                            afterStopUi(closeView)
+                            toastMain(getString(R.string.record_done_process))
+                        }
+                        return@thread
+                    }
+                    // 带壳合成（保留内嵌音轨）
+                    compositeShellOverVideoWithCallback(appCtx, workVideo, finalVideo, closeView)
+                    return@thread
+                }
+
+                // 旧 PCM 路径 ↓
                 val pcmFile = pcmPathForMerge?.let { File(it) }
                 val pcmLen = pcmFile?.takeIf { it.isFile }?.length() ?: 0L
                 val doMerge = tryPcmMerge && pcmLen >= AudioCaptureHelper.MIN_VALID_BYTES
-                /** 带壳 + 有效 PCM 时一次 Transformer 完成叠壳与并轨，避免先 merge 再 composite 的二次重编码。 */
                 val singlePassShellWithPcm = composite && doMerge && pcmFile != null
 
                 RecordSynthDebugLog.d(
@@ -1042,7 +1100,7 @@ class RearScreenRecordService : Service() {
                     RecordSynthDebugLog.d("branch: copy to Movies -> ${finalVideo.length()} bytes")
                     mainHandler.post {
                         afterStopUi(closeView)
-                        toastMain(getString(R.string.record_saved_movies))
+                        toastMain(getString(R.string.record_done_process))
                     }
                     return@thread
                 }
@@ -1062,6 +1120,7 @@ class RearScreenRecordService : Service() {
                             val out = outputOrNull?.takeIf { it.isFile && it.length() > 0L }
                             val outMatchesTmp = out != null &&
                                 out.absolutePath == tmpPath
+                            var errorDetail: String? = null
                             try {
                                 if (success && out != null && outMatchesTmp) {
                                     try {
@@ -1079,15 +1138,15 @@ class RearScreenRecordService : Service() {
                                         RecordSynthDebugLog.diagW(
                                             "composite move to Movies failed: ${e.message}",
                                         )
-                                        toastMain(
-                                            getString(R.string.record_process_fail, e.message ?: ""),
-                                        )
+                                        errorDetail = e.message ?: ""
                                     }
                                 } else {
                                     if (!success) {
                                         val detail = error?.takeIf { it.isNotBlank() }
                                             ?: getString(R.string.record_process_fail_unknown)
-                                        toastMain(getString(R.string.record_process_fail, detail))
+                                        // 某些机型回调 success=false，但仍可能产出可用文件；最终以落盘结果判定提示。
+                                        RecordSynthDebugLog.diagW("composite callback unsuccessful: $detail")
+                                        errorDetail = detail
                                     } else if (out != null && !outMatchesTmp) {
                                         RecordSynthDebugLog.diagW(
                                             "composite: success but output path != tmp (out=${out.absolutePath})",
@@ -1098,6 +1157,7 @@ class RearScreenRecordService : Service() {
                                             RecordSynthDebugLog.diagW(
                                                 "composite copy mismatched out: ${e.message}",
                                             )
+                                            errorDetail = e.message ?: ""
                                         }
                                     } else if (tmp.isFile && tmp.length() > 0L) {
                                         RecordSynthDebugLog.diagW(
@@ -1119,9 +1179,7 @@ class RearScreenRecordService : Service() {
                                             RecordSynthDebugLog.diagW(
                                                 "composite tmp fallback move: ${e.message}",
                                             )
-                                            toastMain(
-                                                getString(R.string.record_process_fail, e.message ?: ""),
-                                            )
+                                            errorDetail = e.message ?: ""
                                         }
                                     }
                                 }
@@ -1136,15 +1194,16 @@ class RearScreenRecordService : Service() {
                                     mediaScan(finalVideo)
                                 }
                                 afterStopUi(closeView)
-                                if (success && finalVideo.isFile && finalVideo.length() > 0L) {
+                                if (finalVideo.isFile && finalVideo.length() > 0L) {
                                     toastMain(getString(R.string.record_done_process))
+                                } else if (errorDetail != null) {
+                                    toastMain(getString(R.string.record_process_fail, errorDetail ?: ""))
                                 }
                             }
                         }
                     }
                 }
 
-                mainHandler.post { toastMain(getString(R.string.record_synthesis_start)) }
                 if (singlePassShellWithPcm) {
                     RecordSynthDebugLog.d(
                         "branch: mergePcmThenCompositeShell (1× Transformer) in=${workVideo.absolutePath}",
@@ -1191,6 +1250,50 @@ class RearScreenRecordService : Service() {
         }
     }
 
+    /**
+     * 带壳合成保留内嵌音轨；[--audio] 路径下直接调用，合成完成后移动最终文件到 Movies/。
+     */
+    private fun compositeShellOverVideoWithCallback(
+        appCtx: Context,
+        sourceFile: File,
+        targetFile: File,
+        closeView: View,
+    ) {
+        val tmp = File(appCtx.cacheDir, "miroot_record_out_${System.currentTimeMillis()}.mp4")
+        ShellMedia3Export.compositeShellOverVideo(
+            appCtx,
+            sourceFile,
+            tmp,
+            object : ShellMedia3Export.ExportCallback {
+                override fun onFinished(success: Boolean, outputOrNull: File?, error: String?) {
+                    mainHandler.post {
+                        try {
+                            if (success && outputOrNull != null && outputOrNull.isFile && outputOrNull.length() > 0L) {
+                                PrivilegedShell.execCmd("rm -f \"${sourceFile.absolutePath}\"")
+                                if (!outputOrNull.renameTo(targetFile)) {
+                                    outputOrNull.copyTo(targetFile, overwrite = true)
+                                }
+                            } else {
+                                // 合成失败降级：直接拷贝原始文件
+                                RecordSynthDebugLog.w("compositeShell fallback to raw: $error")
+                                sourceFile.copyTo(targetFile, overwrite = true)
+                            }
+                        } catch (e: Exception) {
+                            RecordSynthDebugLog.e("compositeShell finalize failed", e)
+                        } finally {
+                            if (tmp.exists()) tmp.delete()
+                            if (targetFile.isFile && targetFile.length() > 0L) {
+                                mediaScan(targetFile)
+                            }
+                            afterStopUi(closeView)
+                            toastMain(getString(R.string.record_done_process))
+                        }
+                    }
+                }
+            },
+        )
+    }
+
     private fun afterStopUi(closeView: View) {
         synchronized(stateLock) {
             isStopping = false
@@ -1220,7 +1323,21 @@ class RearScreenRecordService : Service() {
     }
 
     /**
-     * 是否为本机 `/system/bin/screenrecord` 进程：优先 [pidof screenrecord]，再核对 [ps -p] 的 COMM。
+     * 检测本机 screenrecord 二进制是否支持 `--audio` 标志。
+     * 在后台线程调用（会启动子进程）；`--audio` 自 Android 12（API 31）引入，
+     * 但部分 ROM（含 HyperOS 早期版本）可能未包含此功能。
+     */
+    private fun screenrecordSupportsAudio(): Boolean {
+        val out = PrivilegedShell.captureOutput(
+            "screenrecord --help 2>/dev/null | grep -c -- '--audio'",
+        )?.trim().orEmpty()
+        val count = out.toIntOrNull() ?: 0
+        RecordSynthDebugLog.d("screenrecordSupportsAudio: grep count=$out -> $count")
+        return count > 0
+    }
+
+    /**
+     * 屏录进程 PID 是否仍存活（优先 [pidof]，兜底 [ps -p]）。
      */
     private fun isScreenrecordBinaryProcessRunning(recordPid: Int): Boolean {
         val pidofOut = PrivilegedShell.captureOutput("pidof screenrecord 2>/dev/null")?.trim().orEmpty()
@@ -1266,22 +1383,10 @@ class RearScreenRecordService : Service() {
         }
     }
 
-    private fun screenrecordSupportsAudio(binPath: String): Boolean {
-        screenrecordAudioSupportedCache?.let { return it }
-        val cmd = "$binPath --help 2>&1"
-        val out = PrivilegedShell.captureOutput(cmd).orEmpty()
-        val supported = out.contains("--audio")
-        screenrecordAudioSupportedCache = supported
-        RecordSynthDebugLog.diagI(
-            "screenrecord --audio supported=$supported",
-        )
-        return supported
-    }
-
-    /** 仅「投屏常亮」开启时按滑块间隔补发唤醒；与「始终常亮」分流（后者由 [RearAssistService] 负责）。 */
+    /** 仅「录屏/截图常亮」开启时按滑块间隔补发唤醒；与「始终常亮」分流（后者由 [RearAssistService] 负责）。 */
     private fun shouldPeriodicWakeForRecord(): Boolean {
         if (RearScreenWakeService.isWakeupLoopActive()) return false
-        return RearAssistPrefs.isKeepScreenOnEnabled(this)
+        return RearAssistPrefs.isRecordScreenshotKeepScreenOnEnabled(this)
     }
 
     private fun startWakeup() {
@@ -1380,6 +1485,21 @@ class RearScreenRecordService : Service() {
         return readFlutterRecordAudio()
     }
 
+    /**
+     * 录制入口优先读取悬浮窗实时开关，避免 UI 与 SharedPreferences 极端时序不同步。
+     * 同时把值写回偏好，保证重启服务后状态一致。
+     */
+    private fun sessionAudioWanted(): Boolean {
+        val fromUi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            switchAudio?.isChecked
+        } else {
+            null
+        }
+        val resolved = fromUi ?: audioEnabled()
+        setAudioPref(resolved)
+        return resolved
+    }
+
     private fun setAudioPref(v: Boolean) {
         prefs().edit().putBoolean(KEY_AUDIO, v).apply()
     }
@@ -1425,39 +1545,11 @@ class RearScreenRecordService : Service() {
     }
 
     private fun toastMain(msg: String, longDuration: Boolean = false) {
-        if (Looper.myLooper() == mainHandler.looper) {
-            toastMainDisplay(msg, longDuration)
-        } else {
-            mainHandler.post { toastMainDisplay(msg, longDuration) }
-        }
-    }
-
-    private fun toastMainDisplay(msg: String, longDuration: Boolean = false) {
-        try {
-            val dm = getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
-            val main = dm.getDisplay(android.view.Display.DEFAULT_DISPLAY)
-            val ctx = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && main != null) {
-                createDisplayContext(main)
-            } else {
-                applicationContext
-            }
-            val len = if (longDuration) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
-            val t = Toast.makeText(ctx, msg, len)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                try {
-                    Toast::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType)
-                        .invoke(t, android.view.Display.DEFAULT_DISPLAY)
-                } catch (_: Exception) {
-                }
-            }
-            t.show()
-        } catch (_: Exception) {
-            Toast.makeText(
-                applicationContext,
-                msg,
-                if (longDuration) Toast.LENGTH_LONG else Toast.LENGTH_SHORT,
-            ).show()
-        }
+        MainDisplayUi.showToast(
+            applicationContext,
+            msg,
+            if (longDuration) Toast.LENGTH_LONG else Toast.LENGTH_SHORT,
+        )
     }
 
     /**

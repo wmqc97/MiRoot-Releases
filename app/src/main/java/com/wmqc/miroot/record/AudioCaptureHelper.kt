@@ -26,6 +26,12 @@ import kotlin.concurrent.thread
 class AudioCaptureHelper(
     private val mediaProjection: MediaProjection,
 ) {
+    private data class CaptureProfile(
+        val sampleRate: Int,
+        val channelMask: Int,
+        val channelCount: Int,
+    )
+
     private val running = AtomicBoolean(false)
     private val bytesCaptured = AtomicLong(0)
     private var audioRecord: AudioRecord? = null
@@ -40,54 +46,64 @@ class AudioCaptureHelper(
         private set
 
     private fun minValidBytesForChannels(ch: Int): Long =
-        SAMPLE_RATE * 2L * ch.coerceAtLeast(1) // 约 1s 16-bit
+        pcmSampleRate * 2L * ch.coerceAtLeast(1) // 约 1s 16-bit
 
     @SuppressLint("MissingPermission")
     fun start(path: String): Boolean {
         if (running.get()) return false
         bytesCaptured.set(0)
-        pcmSampleRate = SAMPLE_RATE
-
-        val order = listOf(
-            AudioFormat.CHANNEL_IN_STEREO to 2,
-            AudioFormat.CHANNEL_IN_MONO to 1,
+        // Android 16 上不同 ROM 对采样率/声道容忍度差异更大，优先 48k 再回退 44.1k。
+        val profileOrder = listOf(
+            CaptureProfile(sampleRate = 48_000, channelMask = AudioFormat.CHANNEL_IN_STEREO, channelCount = 2),
+            CaptureProfile(sampleRate = 48_000, channelMask = AudioFormat.CHANNEL_IN_MONO, channelCount = 1),
+            CaptureProfile(sampleRate = SAMPLE_RATE, channelMask = AudioFormat.CHANNEL_IN_STEREO, channelCount = 2),
+            CaptureProfile(sampleRate = SAMPLE_RATE, channelMask = AudioFormat.CHANNEL_IN_MONO, channelCount = 1),
         )
-        for ((channelMask, ch) in order) {
-            val record = buildPlaybackRecord(channelMask, ch) ?: continue
+        for (profile in profileOrder) {
+            val record = buildPlaybackRecord(profile) ?: continue
             if (record.state != AudioRecord.STATE_INITIALIZED) {
                 record.release()
                 continue
             }
-            pcmChannelCount = ch
+            pcmSampleRate = profile.sampleRate
+            pcmChannelCount = profile.channelCount
             audioRecord = record
             running.set(true)
             captureThread = thread(name = "MiRoot-AudioCap") {
                 captureLoop(path)
             }
             RecordSynthDebugLog.diagI(
-                "audio playback_capture (Flux-style) path=$path ${SAMPLE_RATE}Hz ch=$ch",
+                "audio playback_capture path=$path ${pcmSampleRate}Hz ch=$pcmChannelCount",
             )
             return true
         }
-        RecordSynthDebugLog.diagW("audio: stereo and mono playback_capture both failed")
+        RecordSynthDebugLog.diagW("audio: all playback_capture profiles failed")
         return false
     }
 
-    private fun buildPlaybackRecord(channelMask: Int, ch: Int): AudioRecord? {
+    /** 由 [start] 调用；内录权限由录屏/投屏流程在更上层保证。 */
+    @SuppressLint("MissingPermission")
+    private fun buildPlaybackRecord(profile: CaptureProfile): AudioRecord? {
         return try {
-            val config = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
+            val configBuilder = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                 .addMatchingUsage(AudioAttributes.USAGE_GAME)
                 .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                .addMatchingUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                .addMatchingUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                configBuilder.addMatchingUsage(AudioAttributes.USAGE_ASSISTANT)
+            }
+            val config = configBuilder
                 .build()
 
             var minBuf = AudioRecord.getMinBufferSize(
-                SAMPLE_RATE,
-                channelMask,
+                profile.sampleRate,
+                profile.channelMask,
                 AUDIO_FORMAT,
             )
             if (minBuf <= 0) {
-                minBuf = SAMPLE_RATE * 2 * ch
+                minBuf = profile.sampleRate * 2 * profile.channelCount
             }
             // FluxRecorder：bufferSize = getMinBufferSize * 2
             val bufferSize = minBuf * 2
@@ -97,14 +113,16 @@ class AudioCaptureHelper(
                 .setAudioFormat(
                     AudioFormat.Builder()
                         .setEncoding(AUDIO_FORMAT)
-                        .setSampleRate(SAMPLE_RATE)
-                        .setChannelMask(channelMask)
+                        .setSampleRate(profile.sampleRate)
+                        .setChannelMask(profile.channelMask)
                         .build(),
                 )
                 .setBufferSizeInBytes(bufferSize)
                 .build()
         } catch (e: Exception) {
-            RecordSynthDebugLog.d("playback_capture build failed ch=$ch: ${e.message}")
+            RecordSynthDebugLog.d(
+                "playback_capture build failed ${profile.sampleRate}Hz ch=${profile.channelCount}: ${e.message}",
+            )
             null
         }
     }
@@ -119,7 +137,7 @@ class AudioCaptureHelper(
                 while (running.get() &&
                     audioRecord?.recordingState == AudioRecord.RECORDSTATE_RECORDING
                 ) {
-                    val n = audioRecord?.read(buf, 0, buf.size) ?: -1
+                    val n = audioRecord?.read(buf, 0, buf.size, AudioRecord.READ_BLOCKING) ?: -1
                     if (n > 0) {
                         fos.write(buf, 0, n)
                         total += n
@@ -135,7 +153,7 @@ class AudioCaptureHelper(
                     }
                     try {
                         while (true) {
-                            val n = r.read(buf, 0, buf.size)
+                            val n = r.read(buf, 0, buf.size, AudioRecord.READ_BLOCKING)
                             if (n <= 0) break
                             fos.write(buf, 0, n)
                             total += n

@@ -51,15 +51,15 @@ object RearScreenshotCoordinator {
     }
 
     private fun runCapture(app: Context, composite: Boolean): Pair<Boolean, String> {
-        PrivilegedShell.runAndWait("mkdir -p /storage/emulated/0/Pictures/RearDisplay")
+        PrivilegedShell.execCmd("mkdir -p /storage/emulated/0/Pictures/RearDisplay")
         val workDir = DeviceGeometry.screenshotWorkDir(app)
         workDir.mkdirs()
 
         try {
-            if (RearAssistPrefs.isKeepScreenOnEnabled(app) &&
+            if (RearAssistPrefs.isRecordScreenshotKeepScreenOnEnabled(app) &&
                 !RearScreenWakeService.isWakeupLoopActive()
             ) {
-                PrivilegedShell.runAndWait("input -d 1 keyevent KEYCODE_WAKEUP")
+                PrivilegedShell.execCmd("input -d 1 keyevent KEYCODE_WAKEUP")
             }
             Thread.sleep(RearAssistPrefs.wakeSettleDelayMsAfterKeyevent(app).toLong())
         } catch (_: Exception) {
@@ -76,7 +76,7 @@ object RearScreenshotCoordinator {
         val tempPath = File(workDir, tempName).absolutePath
 
         val capCmd = "screencap -p -d $displayId $tempPath"
-        if (!PrivilegedShell.runAndWait(capCmd)) {
+        if (!PrivilegedShell.execCmd(capCmd)) {
             File(tempPath).delete()
             return false to app.getString(R.string.screenshot_fail_cap)
         }
@@ -90,7 +90,7 @@ object RearScreenshotCoordinator {
         val finalPath = "/storage/emulated/0/Pictures/RearDisplay/$finalName"
 
         if (!composite) {
-            if (!PrivilegedShell.runAndWait("cp \"$tempPath\" \"$finalPath\"")) {
+            if (!PrivilegedShell.execCmd("cp \"$tempPath\" \"$finalPath\"")) {
                 tempFile.delete()
                 return false to app.getString(R.string.screenshot_fail_save)
             }
@@ -114,7 +114,7 @@ object RearScreenshotCoordinator {
         }
         deleteQuietly(tempFile)
 
-        if (!PrivilegedShell.runAndWait("cp \"$compositeTemp\" \"$finalPath\"")) {
+        if (!PrivilegedShell.execCmd("cp \"$compositeTemp\" \"$finalPath\"")) {
             deleteQuietly(compositeOut)
             return false to app.getString(R.string.screenshot_fail_save)
         }

@@ -1,4 +1,5 @@
 package com.wmqc.miroot.rear
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.Context
 import android.content.Intent
@@ -63,11 +64,11 @@ object ForegroundAppRearSwitcher {
                             LogHelper.w(TAG, "Failed to collapse for toast: ${e.message}")
                         }
                         mainHandler.postDelayed({
-                            Toast.makeText(
+                            MainDisplayUi.showToast(
                                 appCtx,
                                 appCtx.getString(R.string.toast_please_switch_back, oldAppName),
                                 Toast.LENGTH_LONG,
-                            ).show()
+                            )
                         }, 300)
                         feedback(appCtx.getString(R.string.tile_switch_feedback_rear_busy))
                         return
@@ -77,17 +78,17 @@ object ForegroundAppRearSwitcher {
                 }
             }
 
-            try {
-                ts.disableSubScreenLauncher()
-            } catch (e: Exception) {
-                LogHelper.w(TAG, "Failed to disable SubScreenLauncher", e)
-            }
-
             val currentApp = ts.getCurrentForegroundApp()
 
             if (currentApp != null && currentApp.contains(":")) {
                 val parts = currentApp.split(":")
                 val packageName = parts[0]
+                // 磁贴/广播迁屏：与 3.4 一致一律 force-stop 官方背屏中心（不走路径「应用列表」的 per-app 策略）。
+                try {
+                    ts.disableSubScreenLauncher()
+                } catch (e: Exception) {
+                    LogHelper.w(TAG, "Failed to disable SubScreenLauncher before projection", e)
+                }
                 val taskId = parts[1].toInt()
                 val appName = getAppName(appCtx, packageName)
                 val appConfig = AppProjectionDisplayPrefs.getConfig(appCtx, packageName)
@@ -99,7 +100,7 @@ object ForegroundAppRearSwitcher {
                     )
                     if (!appliedConfigOk) {
                         mainHandler.post {
-                            Toast.makeText(appCtx, R.string.apps_projection_apply_failed, Toast.LENGTH_LONG).show()
+                            MainDisplayUi.showToast(appCtx, R.string.apps_projection_apply_failed, Toast.LENGTH_LONG)
                         }
                     }
                 } else {
@@ -110,6 +111,7 @@ object ForegroundAppRearSwitcher {
                 val serviceIntent = Intent(appCtx, RearSwitchKeeperService::class.java).apply {
                     putExtra("lastMovedTask", currentApp)
                     putExtra("keepScreenOnEnabled", RearAssistPrefs.isKeepScreenOnEnabled(appCtx))
+                    putExtra(RearSwitchKeeperService.EXTRA_USE_APP_LIST_OFFICIAL_GESTURE_POLICY, false)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     appCtx.startForegroundService(serviceIntent)
@@ -139,11 +141,11 @@ object ForegroundAppRearSwitcher {
                     }
 
                     mainHandler.postDelayed({
-                        Toast.makeText(
+                        MainDisplayUi.showToast(
                             appCtx,
                             appCtx.getString(R.string.toast_cast_to_rear, appName),
                             Toast.LENGTH_SHORT,
-                        ).show()
+                        )
                     }, 300)
 
                     try {
@@ -163,11 +165,11 @@ object ForegroundAppRearSwitcher {
                         LogHelper.w(TAG, "Failed to collapse: ${e.message}")
                     }
                     mainHandler.postDelayed({
-                        Toast.makeText(
+                        MainDisplayUi.showToast(
                             appCtx,
                             R.string.toast_switch_failed,
                             Toast.LENGTH_SHORT,
-                        ).show()
+                        )
                     }, 300)
                     feedback(appCtx.getString(R.string.tile_switch_feedback_fail))
                 }

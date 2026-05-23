@@ -1,4 +1,5 @@
 package com.wmqc.miroot.shell
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.ComponentName
 import android.content.Context
@@ -124,11 +125,11 @@ class SwitchToRearQsTileService : TileService() {
                 if (taskService != null) {
                     performSwitch()
                 } else {
-                    Toast.makeText(
+                    MainDisplayUi.showToast(
                         applicationContext,
                         R.string.tile_switch_toast_open_app_auth,
                         Toast.LENGTH_LONG,
-                    ).show()
+                    )
                 }
             }, 1000)
             return

@@ -76,7 +76,7 @@ public class VehicleControlService {
             File loginFile = LoginService.getLoginInfoFile(context);
             
             if (!loginFile.exists()) {
-                LogHelper.e(TAG, "❌ 登录文件不存在: " + loginFile.getAbsolutePath());
+                LogHelper.d(TAG, "登录文件不存在（未登录）: " + loginFile.getAbsolutePath());
                 return params;
             }
             

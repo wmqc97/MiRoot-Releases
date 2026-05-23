@@ -25,6 +25,12 @@ public class LogHelper {
      */
     private static boolean shouldLog(String tag, String msg, long intervalMs) {
         if (!DEBUG) return false;
+        if (msg != null) {
+            // 屏蔽 InsetsSource/RenderInspector 这类无意义重复警告，避免影响 RenderInspector 渲染/耗时。
+            if (msg.contains("InsetsSource") || msg.contains("RenderInspector")) {
+                return false;
+            }
+        }
         int len = (msg != null) ? Math.min(100, msg.length()) : 0;
         String key = tag + "|" + (msg != null && len > 0 ? msg.substring(0, len) : "");
         long now = System.currentTimeMillis();
@@ -138,5 +144,16 @@ public class LogHelper {
         int len = body == null ? 0 : body.length();
         String preview = truncateForLog(body, previewMax);
         Log.d(tag, label + " len=" + len + " preview=" + preview);
+    }
+
+    /**
+     * 仅 Debug：不节流，用于需连贯多行的排查（例如 AI 目录列表封面手动绑定与换视频后的同步路径）。
+     * Release 构建中不输出。
+     */
+    public static void dDebug(String tag, String msg) {
+        if (!DEBUG) {
+            return;
+        }
+        Log.d(tag, msg);
     }
 }

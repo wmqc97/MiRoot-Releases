@@ -1,4 +1,5 @@
 package com.wmqc.miroot.ui.theme
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.ComponentName
 import android.content.Context
@@ -9,9 +10,11 @@ import android.net.Uri
 import android.widget.ImageView
 import android.os.Bundle
 import android.os.IBinder
+import android.provider.OpenableColumns
 import android.view.LayoutInflater
 import android.view.View
 import java.io.File
+import java.io.FileOutputStream
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.compose.runtime.mutableIntStateOf
@@ -24,7 +27,6 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
-import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.textfield.TextInputEditText
 import com.wmqc.miroot.R
 import com.wmqc.miroot.ui.common.showSectionHelp
@@ -35,12 +37,15 @@ import com.wmqc.miroot.lyrics.RootTaskService
 import com.wmqc.miroot.theme.AiWallpaperThemeHelper
 import com.wmqc.miroot.theme.AppliedRearTheme
 import com.wmqc.miroot.theme.AppliedRearThemeHelper
+import com.wmqc.miroot.theme.AiRearscreenLyricsGestureInjector
 import com.wmqc.miroot.theme.DirectoryCoverBindingHelper
 import com.wmqc.miroot.theme.ThemeMetadataInjector
 import com.wmqc.miroot.theme.ThemeWorkspaceCleaner
 import com.wmqc.miroot.theme.VideoReplacer
 import com.wmqc.miroot.viewmodel.MainPermissionViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -52,17 +57,15 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
     private val binding get() = _binding!!
 
     private fun snack(message: Int, longDuration: Boolean = false) {
-        val root = _binding?.root ?: return
-        Snackbar.make(
-            root,
+        MainDisplayUi.showToast(
+            requireContext(),
             message,
-            if (longDuration) Snackbar.LENGTH_LONG else Snackbar.LENGTH_SHORT,
-        ).show()
+            if (longDuration) android.widget.Toast.LENGTH_LONG else android.widget.Toast.LENGTH_SHORT,
+        )
     }
 
     private fun snack(message: String) {
-        val root = _binding?.root ?: return
-        Snackbar.make(root, message, Snackbar.LENGTH_LONG).show()
+        MainDisplayUi.showToast(requireContext(), message, android.widget.Toast.LENGTH_LONG)
     }
 
     private val permissionViewModel: MainPermissionViewModel by activityViewModels()
@@ -77,7 +80,9 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
     private var selectedDirName: String? = null
     private var selectedVideoPath: String? = null
     private var pendingReplaceThemeDir: String? = null
-    private var pendingAppliedRearTheme: AppliedRearTheme? = null
+
+    @Volatile
+    private var aiDirectoryRefreshRunning = false
 
     /**
      * 与 [PermissionSnapshot.privileged] 同步；仅在变化时 [refreshDirectoryList]，避免
@@ -191,6 +196,11 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                             }
                             if (ok) {
                                 snack(R.string.theme_replace_ok, longDuration = true)
+                                AiWallpaperThemeHelper.invalidateAiDirectoryRearscreenPreviewCaches(
+                                    ctx.applicationContext,
+                                    dir,
+                                )
+                                directoryAdapter.evictThumbnailMemoryCache()
                                 _binding?.switchAutoThemeManager?.let { sw ->
                                     if (sw.isChecked) AiWallpaperThemeHelper.openThemeManager(ctx)
                                 }
@@ -237,18 +247,18 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                 ?.setImageURI(result.uri)
         }
 
-    private val pickAppliedMrcLauncher =
-        registerForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-            if (uri == null) {
-                pendingAppliedRearTheme = null
-                return@registerForActivityResult
+    private val pickThemeForGestureInjectLauncher =
+        registerForActivityResult(OpenPersistableDocumentContract(writable = false)) { result ->
+            if (result == null) return@registerForActivityResult
+            runCatching {
+                val flags = result.resultIntent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION
+                if (flags != 0) {
+                    requireContext().contentResolver.takePersistableUriPermission(result.uri, flags)
+                }
             }
-            val theme = pendingAppliedRearTheme
-            pendingAppliedRearTheme = null
-            if (theme == null) return@registerForActivityResult
-            val ref = uri.toString()
+            val ref = result.uri.toString()
             viewLifecycleOwner.lifecycleScope.launch {
-                runReplaceAppliedTheme(theme, ref)
+                runInjectGestureOnPickedThemeZip(ref)
             }
         }
 
@@ -291,6 +301,9 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             binding.layoutAppliedThemesBody.visibility = if (expanded) View.VISIBLE else View.GONE
             binding.imageAppliedThemesExpand.rotation = if (expanded) 180f else 0f
         }
+        // 默认展开「已应用背屏主题」
+        binding.layoutAppliedThemesBody.visibility = View.VISIBLE
+        binding.imageAppliedThemesExpand.rotation = 180f
         binding.textSectionThemeVideo.setOnClickListener {
             showSectionHelp(R.string.theme_section_video, R.string.help_theme_video)
         }
@@ -315,7 +328,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                 onClick = { item -> onDirectoryClicked(item) },
                 onLongClick = { item -> onDirectoryLongClick(item) },
             )
-        binding.recyclerDirectories.layoutManager = LinearLayoutManager(requireContext())
+        binding.recyclerDirectories.layoutManager = GridLayoutManager(requireContext(), 2)
         binding.recyclerDirectories.adapter = directoryAdapter
 
         binding.textAppliedHint.setText(R.string.theme_applied_hint)
@@ -323,7 +336,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             AppliedRearThemeAdapter(
                 scope = viewLifecycleOwner.lifecycleScope,
                 taskService = { taskService },
-                onItemClick = { item -> onAppliedThemeClicked(item) },
+                onItemClick = null,
                 onItemLongClick = { item ->
                     onAppliedThemeLongClick(item)
                     true
@@ -333,18 +346,38 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
         binding.recyclerAppliedThemes.adapter = appliedAdapter
 
         binding.buttonRefreshDirs.setOnClickListener {
-            val appCtx = requireContext().applicationContext
             viewLifecycleOwner.lifecycleScope.launch {
-                withContext(Dispatchers.IO) {
-                    AiWallpaperThemeHelper.clearAiWallpaperPreviewThumbnailCaches(appCtx)
+                if (aiDirectoryRefreshRunning) return@launch
+                aiDirectoryRefreshRunning = true
+                val btn = _binding?.buttonRefreshDirs ?: run {
+                    aiDirectoryRefreshRunning = false
+                    return@launch
                 }
-                refreshDirectoryList()
-                refreshAppliedThemes()
+                val appCtx = requireContext().applicationContext
+                btn.isEnabled = false
+                btn.alpha = 0.55f
+                try {
+                    withContext(Dispatchers.IO) {
+                        AiWallpaperThemeHelper.clearAiWallpaperPreviewThumbnailCaches(appCtx)
+                    }
+                    directoryAdapter.evictThumbnailMemoryCache()
+                    refreshThemeDirectoriesAndAppliedUnified(reloadAppliedThumbnails = false)
+                } finally {
+                    aiDirectoryRefreshRunning = false
+                    _binding?.buttonRefreshDirs?.let {
+                        it.isEnabled = true
+                        it.alpha = 1f
+                    }
+                }
             }
         }
 
         binding.buttonEditThemeMeta.setOnClickListener {
             pickThemeForMetaLauncher.launch("*/*")
+        }
+
+        binding.buttonInjectGestureZip.setOnClickListener {
+            pickThemeForGestureInjectLauncher.launch("*/*")
         }
 
         binding.buttonCleanWorkspaceCache.setOnClickListener {
@@ -461,6 +494,8 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                 getString(R.string.theme_menu_delete),
                 getString(R.string.theme_menu_replace_theme),
                 coverAction,
+                getString(R.string.theme_menu_inject_lyrics_gesture),
+                getString(R.string.theme_menu_remove_lyrics_gesture),
             )
         MaterialAlertDialogBuilder(ctx)
             .setTitle(item.name)
@@ -476,6 +511,65 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                             clearCoverBinding(item.name)
                         } else {
                             showBindCoverDialog(item.name)
+                        }
+                    }
+                    3 -> {
+                        val snap = permissionViewModel.snapshot.value
+                        if (snap?.privileged != true) {
+                            snack(R.string.theme_need_privilege)
+                            return@setItems
+                        }
+                        val ts = taskService
+                        if (ts == null) {
+                            snack(R.string.theme_replace_fail)
+                            return@setItems
+                        }
+                        viewLifecycleOwner.lifecycleScope.launch {
+                            snack(R.string.theme_preparing_gesture_incremental)
+                            val ok =
+                                withContext(Dispatchers.IO) {
+                                    AiRearscreenLyricsGestureInjector.inject(ts, item.name)
+                                }
+                            if (ok) {
+                                snack(R.string.theme_inject_gesture_ok, longDuration = true)
+                                selectedDirName = item.name
+                                binding.textSelectedDir.text = getString(R.string.theme_selected_dir_fmt, item.name)
+                                refreshDirectoryList()
+                                binding.recyclerDirectories.post {
+                                    directoryAdapter.syncVisibleSelectionOverlay(binding.recyclerDirectories)
+                                }
+                                showAfterVideoReplaceDialog(
+                                    aiDirectoryName = item.name,
+                                    sourceVideoPath = null,
+                                )
+                            } else {
+                                snack(R.string.theme_replace_fail)
+                            }
+                        }
+                    }
+                    4 -> {
+                        val snap = permissionViewModel.snapshot.value
+                        if (snap?.privileged != true) {
+                            snack(R.string.theme_need_privilege)
+                            return@setItems
+                        }
+                        val ts = taskService
+                        if (ts == null) {
+                            snack(R.string.theme_replace_fail)
+                            return@setItems
+                        }
+                        viewLifecycleOwner.lifecycleScope.launch {
+                            snack(R.string.theme_gesture_inject_working)
+                            val ok =
+                                withContext(Dispatchers.IO) {
+                                    AiRearscreenLyricsGestureInjector.remove(ts, item.name)
+                                }
+                            if (ok) {
+                                snack(R.string.theme_applied_gesture_removed_ok, longDuration = true)
+                                refreshDirectoryList()
+                            } else {
+                                snack(R.string.theme_applied_gesture_removed_fail, longDuration = true)
+                            }
                         }
                     }
                 }
@@ -515,11 +609,18 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                 withContext(Dispatchers.IO) {
                     taskService?.let { AiWallpaperThemeHelper.listAiWallpaperRootPngs(it) }.orEmpty()
                 }
-            if (paths.isEmpty()) {
-                snack(R.string.theme_bind_none, longDuration = true)
+            val ctx = requireContext()
+            val filtered =
+                paths.filter { p ->
+                    DirectoryCoverBindingHelper.isUsableCoverCandidateForBinding(ctx, dirName, p)
+                }
+            if (filtered.isEmpty()) {
+                snack(
+                    if (paths.isEmpty()) R.string.theme_bind_none else R.string.theme_bind_none_filtered,
+                    longDuration = true,
+                )
                 return@launch
             }
-            val ctx = requireContext()
             val dialogView = layoutInflater.inflate(R.layout.dialog_bind_cover, null)
             val rv = dialogView.findViewById<RecyclerView>(R.id.recycler_bind_cover)
             rv.layoutManager = GridLayoutManager(ctx, 2)
@@ -527,7 +628,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             val adapter =
                 BindCoverPngAdapter(
                     viewLifecycleOwner.lifecycleScope,
-                    paths,
+                    filtered,
                     { taskService },
                 ) { path ->
                     bindCoverDialog?.dismiss()
@@ -646,6 +747,155 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             .show()
     }
 
+    private suspend fun runInjectGestureOnPickedThemeZip(pickedUriString: String) {
+        val ctx = requireContext().applicationContext
+        snack(R.string.theme_gesture_inject_working)
+        val resolved =
+            withContext(Dispatchers.IO) {
+                AiWallpaperThemeHelper.resolvePickedFilePath(ctx, pickedUriString) ?: pickedUriString
+            }
+        var tempIn: File? = null
+        val outTemp =
+            File(
+                AiWallpaperThemeHelper.THEME_TEMP_DIR + "gesture_zip_out_" + System.currentTimeMillis() + ".zip",
+            )
+        try {
+            val inputFile =
+                withContext(Dispatchers.IO) {
+                    val rf = File(resolved)
+                    if (resolved.startsWith("/") &&
+                        rf.isFile &&
+                        rf.length() > 0L &&
+                        isStableStorageThemeZipPath(resolved, ctx)
+                    ) {
+                        rf
+                    } else {
+                        val t = runCatching { AiWallpaperThemeHelper.resolveThemeZipForGestureRead(ctx, pickedUriString) }.getOrNull()
+                        tempIn = t
+                        t
+                    }
+                }
+            if (inputFile == null || !inputFile.isFile || inputFile.length() == 0L) {
+                snack(R.string.theme_replace_fail)
+                return
+            }
+            val patched =
+                withContext(Dispatchers.IO) {
+                    AiRearscreenLyricsGestureInjector.injectGestureIntoLocalZipFile(inputFile, outTemp)
+                }
+            if (!patched || !outTemp.isFile || outTemp.length() == 0L) {
+                snack(R.string.theme_gesture_inject_fail)
+                return
+            }
+            val savedPath =
+                withContext(Dispatchers.IO) {
+                    saveGestureInjectedZipToDisk(ctx, pickedUriString, resolved, outTemp)
+                }
+            if (savedPath == null) {
+                snack(R.string.theme_replace_fail)
+            } else {
+                snack(getString(R.string.theme_gesture_inject_ok_fmt, savedPath))
+            }
+        } finally {
+            withContext(Dispatchers.IO) {
+                tempIn?.let { AiWallpaperThemeHelper.deleteThemeMetadataTempSourceZipQuietly(it) }
+                AiWallpaperThemeHelper.deleteThemeMetadataTempSourceZipQuietly(outTemp)
+            }
+        }
+    }
+
+    /** 非应用缓存、非 MiRoot 主题临时目录下的真实文件路径，便于在原目录旁另存。 */
+    private fun isStableStorageThemeZipPath(resolvedPath: String, ctx: Context): Boolean {
+        if (!resolvedPath.startsWith("/")) return false
+        val f = File(resolvedPath)
+        if (!f.isFile || f.length() == 0L) return false
+        val cache = ctx.cacheDir.absolutePath
+        val ext = ctx.externalCacheDir?.absolutePath
+        if (resolvedPath.startsWith(cache)) return false
+        if (ext != null && resolvedPath.startsWith(ext)) return false
+        if (resolvedPath.startsWith(AiWallpaperThemeHelper.THEME_TEMP_DIR)) return false
+        return true
+    }
+
+    private fun displayNameForThemeZip(ctx: Context, pickedUriString: String): String {
+        if (pickedUriString.startsWith("content://")) {
+            val uri = Uri.parse(pickedUriString)
+            ctx.contentResolver
+                .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c ->
+                    if (c.moveToFirst()) {
+                        val n = c.getString(0)
+                        if (!n.isNullOrBlank()) return sanitizeZipDisplayName(n)
+                    }
+                }
+            return "theme_${System.currentTimeMillis()}.zip"
+        }
+        val path =
+            when {
+                pickedUriString.startsWith("file://") -> Uri.parse(pickedUriString).path ?: pickedUriString
+                pickedUriString.startsWith("/") -> pickedUriString
+                else -> pickedUriString
+            }
+        return sanitizeZipDisplayName(File(path).name.ifEmpty { "theme.zip" })
+    }
+
+    private fun sanitizeZipDisplayName(name: String): String =
+        name.replace("/", "_").replace("\\", "_").trim().ifEmpty { "theme.zip" }
+
+    private fun buildInjectedZipFileName(originalDisplayName: String): String {
+        val base = originalDisplayName.trim().ifEmpty { "theme.zip" }
+        val suf = "_已注入手势"
+        val dot = base.lastIndexOf('.')
+        return if (dot > 0) {
+            base.substring(0, dot) + suf + base.substring(dot)
+        } else {
+            base + suf + ".zip"
+        }
+    }
+
+    private fun uniquifyZipInDirectory(parent: File, preferredName: String): File {
+        var candidate = File(parent, preferredName)
+        if (!candidate.exists()) return candidate
+        val dot = preferredName.lastIndexOf('.')
+        val stem = if (dot > 0) preferredName.substring(0, dot) else preferredName
+        val ext = if (dot > 0) preferredName.substring(dot) else ".zip"
+        var n = 2
+        while (true) {
+            candidate = File(parent, "${stem}_$n$ext")
+            if (!candidate.exists()) return candidate
+            n++
+        }
+    }
+
+    private fun copyZipFileOrNull(src: File, dst: File): Boolean =
+        runCatching {
+            dst.parentFile?.mkdirs()
+            src.inputStream().use { inp ->
+                FileOutputStream(dst).use { out -> inp.copyTo(out) }
+            }
+            dst.isFile && dst.length() > 0L
+        }.getOrDefault(false)
+
+    private fun saveGestureInjectedZipToDisk(
+        ctx: Context,
+        pickedUriString: String,
+        resolvedPath: String,
+        patchedTemp: File,
+    ): String? {
+        val injectedName =
+            buildInjectedZipFileName(displayNameForThemeZip(ctx, pickedUriString))
+        if (isStableStorageThemeZipPath(resolvedPath, ctx)) {
+            val src = File(resolvedPath)
+            val parent = src.parentFile ?: return null
+            val dest = uniquifyZipInDirectory(parent, injectedName)
+            return if (copyZipFileOrNull(patchedTemp, dest)) dest.absolutePath else null
+        }
+        val dir = File(AiWallpaperThemeHelper.THEME_TEMP_DIR)
+        dir.mkdirs()
+        val dest = uniquifyZipInDirectory(dir, sanitizeZipDisplayName(injectedName))
+        return if (copyZipFileOrNull(patchedTemp, dest)) dest.absolutePath else null
+    }
+
     private suspend fun runThemeMetadataInject(
         themeRef: String,
         author: String,
@@ -731,19 +981,19 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             }
         if (ok) {
             val appCtx = requireContext().applicationContext
-            val previewPng =
-                AiWallpaperThemeHelper.AI_MAML_BASE + dir + "/preview/preview_rearscreen_0.png"
-            AiWallpaperThemeHelper.invalidatePreviewImageCache(appCtx, previewPng)
+            AiWallpaperThemeHelper.invalidateAiDirectoryRearscreenPreviewCaches(appCtx, dir)
+            directoryAdapter.evictThumbnailMemoryCache()
             refreshDirectoryList()
             viewLifecycleOwner.lifecycleScope.launch {
-                delay(1200)
-                AiWallpaperThemeHelper.invalidatePreviewImageCache(appCtx, previewPng)
-                refreshDirectoryList()
-                delay(2300)
-                AiWallpaperThemeHelper.invalidatePreviewImageCache(appCtx, previewPng)
+                delay(800)
+                AiWallpaperThemeHelper.invalidateAiDirectoryRearscreenPreviewCaches(appCtx, dir)
+                directoryAdapter.evictThumbnailMemoryCache()
                 refreshDirectoryList()
             }
-            showAfterVideoReplaceDialog()
+            showAfterVideoReplaceDialog(
+                aiDirectoryName = dir,
+                sourceVideoPath = video,
+            )
         } else {
             snack(R.string.theme_replace_fail)
         }
@@ -753,7 +1003,10 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
      * 用户选定视频且视频替换完成后：弹窗选择「跳转主题壁纸」或「替换已应用背屏主题」（仅个性签名类列表）。
      * 长按目录「替换主题」仍为选包替换，不受此弹窗影响。
      */
-    private fun showAfterVideoReplaceDialog() {
+    private fun showAfterVideoReplaceDialog(
+        aiDirectoryName: String,
+        sourceVideoPath: String?,
+    ) {
         if (!isAdded) return
         val ctx = requireContext()
         val actions = LayoutInflater.from(ctx).inflate(R.layout.dialog_after_video_replace_actions, null, false)
@@ -768,7 +1021,10 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
         }
         actions.findViewById<MaterialButton>(R.id.btn_after_video_replace).setOnClickListener {
             dialog.dismiss()
-            showSignatureAppliedReplacePicker()
+            showSignatureAppliedReplacePicker(
+                aiDirectoryName = aiDirectoryName,
+                sourceVideoPath = sourceVideoPath,
+            )
         }
         actions.findViewById<MaterialButton>(R.id.btn_after_video_jump).setOnClickListener {
             dialog.dismiss()
@@ -777,9 +1033,10 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
         dialog.show()
     }
 
-    private fun showSignatureAppliedReplacePicker() {
-        val dir = selectedDirName ?: return
-        val videoPath = selectedVideoPath ?: return
+    private fun showSignatureAppliedReplacePicker(
+        aiDirectoryName: String,
+        sourceVideoPath: String?,
+    ) {
         viewLifecycleOwner.lifecycleScope.launch {
             val ts = taskService
             if (ts == null) {
@@ -815,7 +1072,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                     onItemClick = { theme ->
                         dialog.dismiss()
                         viewLifecycleOwner.lifecycleScope.launch {
-                            runReplaceAiRearscreenIntoAppliedTheme(theme, dir, videoPath)
+                            runReplaceAiRearscreenIntoAppliedTheme(theme, aiDirectoryName, sourceVideoPath)
                         }
                     },
                 )
@@ -828,7 +1085,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
     private suspend fun runReplaceAiRearscreenIntoAppliedTheme(
         theme: AppliedRearTheme,
         aiDirectoryName: String,
-        sourceVideoPath: String,
+        sourceVideoPath: String?,
     ) {
         val snap = permissionViewModel.snapshot.value
         if (snap?.privileged != true) {
@@ -874,7 +1131,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                         ts,
                         aiDirectoryName,
                         theme.snapshotPath,
-                        sourceVideoPath,
+                                    sourceVideoPath?.takeIf { it.isNotBlank() },
                     )
                 }
             } else {
@@ -884,7 +1141,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             withContext(Dispatchers.IO) {
                 val snapP = theme.snapshotPath.trim()
                 AiWallpaperThemeHelper.invalidatePreviewImageCache(appCtx, snapP)
-                val resolved = AppliedRearThemeHelper.resolveSnapshotPreviewPath(ts, snapP)
+                val resolved = AppliedRearThemeHelper.resolveThemeThumbnailPreviewPath(ts, theme)
                 if (!resolved.isNullOrEmpty() && resolved != snapP) {
                     AiWallpaperThemeHelper.invalidatePreviewImageCache(appCtx, resolved)
                 }
@@ -918,8 +1175,9 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             val list =
                 withContext(Dispatchers.IO) {
                     AiWallpaperThemeHelper.scanAiWallpaperDirectories(ts).map {
+                        val dirName = it["name"].orEmpty()
                         ThemeDirectoryUi(
-                            name = it["name"].orEmpty(),
+                            name = dirName,
                             previewPath = it["previewPath"].orEmpty(),
                             listRevision = rev,
                         )
@@ -927,6 +1185,58 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                 }
             directoryAdapter.submitList(list)
         }
+    }
+
+    /**
+     * 一次拉取「已应用背屏主题」与 AI 目录列表，并在 IO 上并行扫描，避免刷新按钮串联两次扫描与
+     * [refreshAppliedThemes] 末尾再次 [refreshDirectoryList] 的重复开销。
+     */
+    private suspend fun refreshThemeDirectoriesAndAppliedUnified(reloadAppliedThumbnails: Boolean) {
+        if (!isAdded) return
+        val snap = permissionViewModel.snapshot.value
+        if (snap?.privileged != true) {
+            directoryAdapter.submitList(emptyList())
+            appliedAdapter.submitList(emptyList())
+            binding.textAppliedThemesEmpty.visibility = View.GONE
+            return
+        }
+        val ts = taskService
+        if (ts == null) {
+            directoryAdapter.submitList(emptyList())
+            appliedAdapter.submitList(emptyList())
+            binding.textAppliedThemesEmpty.visibility = View.GONE
+            return
+        }
+        val rev = System.currentTimeMillis()
+        val (rawDirs, appliedList) =
+            coroutineScope {
+                val dirsJob = async(Dispatchers.IO) { AiWallpaperThemeHelper.scanAiWallpaperDirectories(ts) }
+                val appliedJob = async(Dispatchers.IO) { AppliedRearThemeHelper.loadAppliedThemes(ts) }
+                Pair(dirsJob.await(), appliedJob.await())
+            }
+        val dirUi =
+            rawDirs.map {
+                val dirName = it["name"].orEmpty()
+                ThemeDirectoryUi(
+                    name = dirName,
+                    previewPath = it["previewPath"].orEmpty(),
+                    listRevision = rev,
+                )
+            }
+        directoryAdapter.submitList(dirUi)
+        if (reloadAppliedThumbnails) {
+            appliedAdapter.evictThumbnailMemoryCache()
+            appliedAdapter.submitList(appliedList) {
+                val n = appliedAdapter.itemCount
+                if (n > 0) {
+                    appliedAdapter.notifyItemRangeChanged(0, n)
+                }
+            }
+        } else {
+            appliedAdapter.submitList(appliedList)
+        }
+        binding.textAppliedThemesEmpty.visibility =
+            if (appliedList.isEmpty()) View.VISIBLE else View.GONE
     }
 
     private fun refreshAppliedThemes(reloadThumbnails: Boolean = false) {
@@ -945,6 +1255,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
         viewLifecycleOwner.lifecycleScope.launch {
             val list = withContext(Dispatchers.IO) { AppliedRearThemeHelper.loadAppliedThemes(ts) }
             if (reloadThumbnails) {
+                appliedAdapter.evictThumbnailMemoryCache()
                 appliedAdapter.submitList(list) {
                     val n = appliedAdapter.itemCount
                     if (n > 0) {
@@ -956,6 +1267,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             }
             binding.textAppliedThemesEmpty.visibility =
                 if (list.isEmpty()) View.VISIBLE else View.GONE
+            refreshDirectoryList()
         }
     }
 
@@ -969,6 +1281,22 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             snack(R.string.theme_applied_delete_fail)
             return
         }
+        val ctx = requireContext()
+        val names =
+            arrayOf(
+                getString(R.string.theme_applied_delete),
+            )
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle(item.resName)
+            .setItems(names) { _, which ->
+                when (which) {
+                    0 -> confirmDeleteAppliedTheme(item)
+                }
+            }
+            .show()
+    }
+
+    private fun confirmDeleteAppliedTheme(item: AppliedRearTheme) {
         MaterialAlertDialogBuilder(requireContext())
             .setTitle(item.resName)
             .setMessage(getString(R.string.theme_applied_delete_confirm, item.resName))
@@ -986,135 +1314,6 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                     } else {
                         snack(R.string.theme_applied_delete_fail, longDuration = true)
                     }
-                }
-            }
-            .show()
-    }
-
-    private fun onAppliedThemeClicked(item: AppliedRearTheme) {
-        val snap = permissionViewModel.snapshot.value
-        if (snap?.privileged != true) {
-            snack(R.string.theme_need_privilege)
-            return
-        }
-        val ts = taskService
-        if (ts == null) {
-            snack(R.string.theme_replace_fail)
-            return
-        }
-        viewLifecycleOwner.lifecycleScope.launch {
-            val exists =
-                withContext(Dispatchers.IO) {
-                    AppliedRearThemeHelper.mrcFileExists(ts, item.mrcPath)
-                }
-            if (!exists) {
-                snack(R.string.theme_applied_mrc_missing)
-                return@launch
-            }
-            pendingAppliedRearTheme = item
-            pickAppliedMrcLauncher.launch("*/*")
-        }
-    }
-
-    private suspend fun runReplaceAppliedTheme(theme: AppliedRearTheme, themeRef: String) {
-        val ctx = requireContext()
-        val resolved =
-            withContext(Dispatchers.IO) {
-                AiWallpaperThemeHelper.resolvePickedFilePath(ctx, themeRef) ?: themeRef
-            }
-        val themeFile = File(resolved)
-        if (!themeFile.isFile || themeFile.length() == 0L) {
-            snack(R.string.theme_replace_fail)
-            return
-        }
-        val config =
-            withContext(Dispatchers.IO) {
-                AiWallpaperThemeHelper.readVarConfigFromZip(resolved)
-            }
-        if (config == null) {
-            snack(R.string.theme_replace_fail)
-            return
-        }
-        val previewBytes =
-            withContext(Dispatchers.IO) {
-                AiWallpaperThemeHelper.readThemePreviewImage(ctx, themeRef)
-            }
-        val author = config["author"] ?: "—"
-        val packName = config["name"] ?: "—"
-        val desc = config["description"] ?: "—"
-        val bmp = previewBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
-        MaterialAlertDialogBuilder(ctx)
-            .setTitle(R.string.theme_applied_confirm_title)
-            .setMessage(
-                buildString {
-                    append(
-                        getString(
-                            R.string.theme_applied_confirm_message,
-                            theme.resName,
-                            theme.mrcPath,
-                        ),
-                    )
-                    append("\n\n")
-                    append(getString(R.string.theme_meta_name))
-                    append("：")
-                    append(packName)
-                    append("\n")
-                    append(getString(R.string.theme_author_fmt, author))
-                    append("\n")
-                    append(getString(R.string.theme_desc_fmt, desc))
-                },
-            )
-            .apply {
-                if (bmp != null) {
-                    val iv =
-                        android.widget.ImageView(ctx).apply {
-                            setImageBitmap(bmp)
-                            adjustViewBounds = true
-                        }
-                    setView(iv)
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .setPositiveButton(R.string.theme_apply) { _, _ ->
-                viewLifecycleOwner.lifecycleScope.launch {
-                    val ts = taskService
-                    if (ts == null) {
-                        snack(R.string.theme_replace_fail)
-                        return@launch
-                    }
-                    val appCtx = requireContext().applicationContext
-                    val okMrc =
-                        withContext(Dispatchers.IO) {
-                            AiWallpaperThemeHelper.replaceRootOwnedFile(ts, theme.mrcPath, resolved, true)
-                        }
-                    if (!okMrc) {
-                        snack(R.string.theme_replace_fail)
-                        return@launch
-                    }
-                    val snapUpdated =
-                        if (theme.snapshotPath.isNotEmpty()) {
-                            withContext(Dispatchers.IO) {
-                                AiWallpaperThemeHelper.updateRearSnapshotFromThemeZip(
-                                    appCtx,
-                                    ts,
-                                    resolved,
-                                    theme.snapshotPath,
-                                )
-                            }
-                        } else {
-                            false
-                        }
-                    val msgRes =
-                        if (theme.snapshotPath.isNotEmpty() && snapUpdated) {
-                            R.string.theme_applied_replace_ok
-                        } else {
-                            R.string.theme_applied_replace_ok_mrc_only
-                        }
-                    snack(msgRes, longDuration = true)
-                    if (_binding?.switchAutoThemeManager?.isChecked == true) {
-                        AiWallpaperThemeHelper.openThemeManager(requireContext())
-                    }
-                    refreshAppliedThemes()
                 }
             }
             .show()

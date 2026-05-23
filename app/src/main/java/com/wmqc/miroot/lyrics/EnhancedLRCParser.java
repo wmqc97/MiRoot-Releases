@@ -15,9 +15,13 @@
 
 package com.wmqc.miroot.lyrics;
 
+import com.wmqc.miroot.BuildConfig;
+
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -33,6 +37,23 @@ import java.util.regex.Pattern;
  */
 public class EnhancedLRCParser {
     private static final String TAG = "EnhancedLRCParser";
+    private static final int PARSE_CACHE_SIZE = 48;
+    private static long cacheHits = 0L;
+    private static long cacheMisses = 0L;
+    private static long cacheEvictions = 0L;
+    private static final Map<String, ParseResult> PARSE_CACHE = Collections.synchronizedMap(
+        new LinkedHashMap<String, ParseResult>(PARSE_CACHE_SIZE, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, ParseResult> eldest) {
+                boolean shouldEvict = size() > PARSE_CACHE_SIZE;
+                if (shouldEvict) {
+                    cacheEvictions++;
+                    logCacheStatsIfDebug();
+                }
+                return shouldEvict;
+            }
+        }
+    );
     
     /**
      * 逐字时间戳
@@ -63,6 +84,8 @@ public class EnhancedLRCParser {
         public String text;                            // 歌词文本
         public String translation;                     // 翻译(如果有)
         public List<WordTimestamp> wordTimestamps;     // 逐字时间戳(如果有)
+        /** 为 true 表示 {@link #wordTimestamps} 来自 SuperLyric 模块推送，高亮应走模块轴而非 LRC 行区间推算。 */
+        public boolean moduleWordTimeline;
         public boolean isTranslationLine;              // 是否为翻译行
         
         public EnhancedLyricLine(long time, String text) {
@@ -70,6 +93,7 @@ public class EnhancedLRCParser {
             this.text = text;
             this.translation = null;
             this.wordTimestamps = new ArrayList<>();
+            this.moduleWordTimeline = false;
             this.isTranslationLine = false;
         }
         
@@ -119,6 +143,14 @@ public class EnhancedLRCParser {
         if (lrcContent == null || lrcContent.isEmpty()) {
             return result;
         }
+        ParseResult cached = PARSE_CACHE.get(lrcContent);
+        if (cached != null) {
+            cacheHits++;
+            logCacheStatsIfDebug();
+            return cloneParseResult(cached);
+        }
+        cacheMisses++;
+        logCacheStatsIfDebug();
         
         try {
             String[] lines = lrcContent.split("\n");
@@ -210,12 +242,44 @@ public class EnhancedLRCParser {
             associateTranslations(result.lines);
             
             LogHelper.d(TAG, "解析完成: " + result.lines.size() + " 行歌词, 元数据: " + result.metadata);
+            PARSE_CACHE.put(lrcContent, cloneParseResult(result));
             
         } catch (Exception e) {
             LogHelper.e(TAG, "解析LRC失败", e);
         }
         
         return result;
+    }
+
+    private static void logCacheStatsIfDebug() {
+        if (!BuildConfig.DEBUG) return;
+        LogHelper.d(TAG, "LRC缓存 stats hit=" + cacheHits + " miss=" + cacheMisses + " evict=" + cacheEvictions + " size=" + PARSE_CACHE.size());
+    }
+
+    private static ParseResult cloneParseResult(ParseResult source) {
+        ParseResult copy = new ParseResult();
+        if (source == null) {
+            return copy;
+        }
+        copy.metadata.title = source.metadata.title;
+        copy.metadata.artist = source.metadata.artist;
+        copy.metadata.album = source.metadata.album;
+        copy.metadata.by = source.metadata.by;
+        copy.metadata.offset = source.metadata.offset;
+        for (EnhancedLyricLine line : source.lines) {
+            EnhancedLyricLine lineCopy = new EnhancedLyricLine(line.time, line.text);
+            lineCopy.translation = line.translation;
+            lineCopy.isTranslationLine = line.isTranslationLine;
+            if (line.wordTimestamps != null && !line.wordTimestamps.isEmpty()) {
+                lineCopy.wordTimestamps = new ArrayList<>(line.wordTimestamps.size());
+                for (WordTimestamp word : line.wordTimestamps) {
+                    lineCopy.wordTimestamps.add(new WordTimestamp(word.word, word.startTime, word.endTime));
+                }
+            }
+            lineCopy.moduleWordTimeline = line.moduleWordTimeline;
+            copy.lines.add(lineCopy);
+        }
+        return copy;
     }
     
     /**

@@ -1,5 +1,7 @@
 package com.wmqc.miroot.lyrics;
+import com.wmqc.miroot.display.MainDisplayUi;
 
+import android.app.Activity;
 import android.app.KeyguardManager;
 import android.content.ComponentName;
 import android.content.Context;
@@ -13,19 +15,26 @@ import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
+import android.graphics.Bitmap;
+import android.graphics.RenderEffect;
+import android.graphics.Shader;
 import android.graphics.Point;
 import android.util.TypedValue;
+import android.util.Log;
 import android.view.Display;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import com.wmqc.miroot.BuildConfig;
@@ -36,27 +45,26 @@ import com.wmqc.miroot.license.OfflineActivationRepository;
 import com.wmqc.miroot.BottomSwipeExitHelper;
 import com.wmqc.miroot.RearDisplayInputHelper;
 import com.wmqc.miroot.service.MiRootNotificationListenerService;
-import com.wmqc.miroot.rear.OfficialSubscreenServiceGate;
+import com.wmqc.miroot.rear.OfficialSubscreenMiRootProjectionSession;
 import com.wmqc.miroot.rear.ProjectionOngoingNotifications;
 import com.wmqc.miroot.rear.ProjectionOnlyNotificationHelper;
 import com.wmqc.miroot.rear.RearAssistPrefs;
+import com.wmqc.miroot.lyrics.RootTaskServiceConnector;
+import com.wmqc.miroot.rear.RearMirootProjectionLifecycle;
 import com.wmqc.miroot.rear.RearProjectionProximitySession;
-import com.wmqc.miroot.mv.MvIntents;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 
 import androidx.lifecycle.Lifecycle;
 
-import androidx.media3.common.MediaItem;
-import androidx.media3.common.Player;
-import androidx.media3.exoplayer.ExoPlayer;
-import androidx.media3.ui.PlayerView;
 
 /**
  * 背屏歌词显示Activity
@@ -106,6 +114,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
      */
     private static final long REAR_STOP_EXIT_GRACE_MS = 800L;
     private Runnable rearStopExitGraceRunnable;
+    private long rearStopExitGraceDeadlineElapsedMs = 0L;
+    private long rearStopExitGraceRemainingMs = 0L;
+    /** 双击息屏等 {@link Intent#ACTION_SCREEN_OFF} 期间暂停宽限倒计时，亮屏/回前台后再取消而非续跑 */
+    private boolean rearStopExitGracePausedForScreenOff;
     
     /**
      * 获取当前Activity实例（用于实时更新设置）
@@ -163,18 +175,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return;
         }
         LogHelper.d(TAG, "🛑 通知广播：在背屏结束音乐投屏");
-        ProjectionOngoingNotifications.cancelAll(a.getApplicationContext());
-        try {
-            if (a.getWindow() != null) {
-                a.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
-                a.getWindow().setFlags(
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
-            }
-        } catch (Exception e) {
-            LogHelper.w(TAG, "预备结束投屏窗口状态失败", e);
-        }
-        a.requestProjectionExitSequence("notification-static-stop");
+        a.finishProjectionFromUser("notification-static-stop");
     }
 
     private static void bestEffortCleanupMusicProjectionFromNotification(Context appContext) {
@@ -218,9 +219,197 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             mainScreenPolicyHandler.removeCallbacks(rearStopExitGraceRunnable);
             rearStopExitGraceRunnable = null;
         }
+        rearStopExitGraceDeadlineElapsedMs = 0L;
+        rearStopExitGraceRemainingMs = 0L;
+        rearStopExitGracePausedForScreenOff = false;
+    }
+
+    /**
+     * 背屏双击息屏：暂停 onPause/onStop 已安排的退出宽限，避免灭屏 800ms 内误销毁投屏。
+     */
+    private void pauseRearStopExitGraceForScreenOff() {
+        if (rearStopExitGraceRunnable == null) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (rearStopExitGraceDeadlineElapsedMs > now) {
+            rearStopExitGraceRemainingMs = rearStopExitGraceDeadlineElapsedMs - now;
+        }
+        mainScreenPolicyHandler.removeCallbacks(rearStopExitGraceRunnable);
+        rearStopExitGraceRunnable = null;
+        rearStopExitGraceDeadlineElapsedMs = 0L;
+        rearStopExitGracePausedForScreenOff = true;
+        if (BuildConfig.DEBUG) {
+            LogHelper.d(TAG, "息屏：暂停投屏退出宽限，剩余 " + rearStopExitGraceRemainingMs + "ms（亮屏后取消）");
+        }
+    }
+
+    /** 亮屏或回到 RESUMED：取消因息屏暂停的宽限；充电覆盖结束则按剩余时间续跑宽限。 */
+    private void handleProjectionForegroundAfterStopGrace() {
+        if (rearStopExitGracePausedForScreenOff) {
+            rearStopExitGracePausedForScreenOff = false;
+            cancelRearStopExitGrace();
+            if (BuildConfig.DEBUG) {
+                LogHelper.d(TAG, "投屏已恢复可见，取消息屏期间暂停的退出宽限");
+            }
+            return;
+        }
+        if (rearStopExitGraceRemainingMs > 0L && !isChargingOverlayActive()) {
+            resumeRearStopExitGraceAfterChargingIfNeeded();
+        } else {
+            cancelRearStopExitGrace();
+        }
+    }
+
+    /** 息屏后确保「投屏常亮」前台唤醒循环在跑（与功能页开关一致）。 */
+    private void ensureProjectionWakeServiceAfterScreenOff() {
+        if (!isProjectionKeepScreenOnEnabled()) {
+            return;
+        }
+        if (getDisplayIdSafe() != 1 || isFinishing()) {
+            return;
+        }
+        try {
+            RearScreenWakeManager.getInstance().startWakeService(getApplicationContext(), RearScreenLyricsActivity.class);
+            RearScreenWakeService.requestNotificationRefresh(this);
+        } catch (Exception e) {
+            LogHelper.w(TAG, "息屏后确保 RearScreenWakeService 失败", e);
+        }
+    }
+
+    private boolean isChargingOverlayActive() {
+        try {
+            return RearChargingAnimationCoordinator.isChargingProtectionActive();
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * 供充电覆盖层结束前调用：强制把背屏歌词界面恢复为可见并刷新一帧，避免出现黑屏空窗。
+     */
+    public static void forceShowProjectionUiAfterChargingOverlay() {
+        RearScreenLyricsActivity inst = currentInstance;
+        if (inst == null) {
+            return;
+        }
+        Runnable r = () -> inst.forceShowProjectionUiAfterChargingOverlayOnUiThread();
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            r.run();
+        } else {
+            inst.runOnUiThread(r);
+        }
+    }
+
+    private void forceShowProjectionUiAfterChargingOverlayOnUiThread() {
+        Log.d("CHARGING_FIX", "STEP 3: 恢复视图 VISIBLE + alpha=1 + 刷新布局");
+        if (isFinishing()) {
+            return;
+        }
+        View decor = (getWindow() != null) ? getWindow().getDecorView() : null;
+        if (decor != null) {
+            decor.setVisibility(View.VISIBLE);
+            decor.setAlpha(1f);
+            decor.requestLayout();
+            decor.invalidate();
+            decor.postInvalidateOnAnimation();
+        }
+        if (lyricsView != null) {
+            lyricsView.setVisibility(View.VISIBLE);
+            lyricsView.requestLayout();
+            lyricsView.invalidate();
+        }
+        if (abyssalMirrorLyricsViewGroup != null) {
+            abyssalMirrorLyricsViewGroup.setVisibility(View.VISIBLE);
+            abyssalMirrorLyricsViewGroup.requestLayout();
+            abyssalMirrorLyricsViewGroup.invalidate();
+        }
+        resumeLyricsAnimatorAfterForeground();
+        if (BuildConfig.DEBUG) {
+            LogHelper.d(TAG, "▶️ 强制恢复背屏歌词 UI 为可见并刷新（充电覆盖层结束前）");
+        }
+    }
+
+    /**
+     * 从 onPause / 充电覆盖层恢复后：若音乐仍在播放则恢复歌词位置推进，并立即对齐当前进度。
+     */
+    private void resumeLyricsAnimatorAfterForeground() {
+        if (!hasLyricsView()) {
+            return;
+        }
+        uiAnimationsCancelled = false;
+        if (mediaController == null) {
+            setupMediaController();
+        }
+        if (mediaController == null) {
+            return;
+        }
+        android.media.session.PlaybackState state = mediaController.getPlaybackState();
+        if (state == null) {
+            return;
+        }
+        boolean isPlaying = state.getState() == android.media.session.PlaybackState.STATE_PLAYING;
+        if (lyricsView != null) {
+            lyricsView.setPlaybackActive(isPlaying);
+        }
+        if (lyricsAnimator == null) {
+            return;
+        }
+        if (isPlaying) {
+            long position = state.getPosition();
+            long updateTime = state.getLastPositionUpdateTime();
+            lyricsAnimator.calibratePosition(position, updateTime);
+            lyricsAnimator.resume();
+            if (lyricsView != null) {
+                lyricsView.snapPlaybackPositionToTarget();
+            }
+        }
+    }
+
+    private void resumeRearStopExitGraceAfterChargingIfNeeded() {
+        if (rearStopExitGraceRemainingMs <= 0L) {
+            return;
+        }
+        if (rearStopExitGraceRunnable != null) {
+            return;
+        }
+        if (isFinishing() || isChangingConfigurations() || isMainScreenLandscapeMode) {
+            return;
+        }
+        if (!hasLyricsView()) {
+            return;
+        }
+        if (getDisplayIdSafe() != 1) {
+            return;
+        }
+        long delayMs = rearStopExitGraceRemainingMs;
+        rearStopExitGraceRemainingMs = 0L;
+        rearStopExitGraceRunnable = () -> {
+            rearStopExitGraceRunnable = null;
+            rearStopExitGraceDeadlineElapsedMs = 0L;
+            if (isFinishing()) {
+                return;
+            }
+            if (getLifecycle().getCurrentState() == Lifecycle.State.RESUMED) {
+                return;
+            }
+            LogHelper.w(TAG, "充电覆盖恢复后：投屏宽限到期仍未回前台，销毁 Activity");
+            finishProjectionFromUser("rear-stop-exit-grace-resumed");
+        };
+        rearStopExitGraceDeadlineElapsedMs = SystemClock.elapsedRealtime() + delayMs;
+        mainScreenPolicyHandler.postDelayed(rearStopExitGraceRunnable, delayMs);
+        if (BuildConfig.DEBUG) {
+            LogHelper.d(TAG, "▶️ 充电覆盖结束：继续投屏退出宽限计时，剩余 " + delayMs + "ms");
+        }
     }
 
     private void scheduleRearStopExitGraceIfNeeded(String reason) {
+        if (rearStopExitGracePausedForScreenOff) {
+            if (BuildConfig.DEBUG) {
+                LogHelper.d(TAG, reason + "：息屏暂停宽限中，跳过重新安排退出宽限");
+            }
+            return;
+        }
         cancelRearStopExitGrace();
         if (isFinishing() || isChangingConfigurations() || isMainScreenLandscapeMode) {
             return;
@@ -228,8 +417,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         // 充电动画会短暂顶替歌词投屏为前台；对齐 3.4：此时不应触发 800ms 宽限自毁，
         // 否则歌词清理流程会恢复官方手势/Launcher，进而把充电动画也冲掉（表现为“两边都立刻销毁”）。
         try {
-            if (RearChargingAnimationCoordinator.getCurrentAnimation()
-                == RearChargingAnimationCoordinator.AnimationType.CHARGING) {
+            if (isChargingOverlayActive()) {
                 LogHelper.d(TAG, reason + "：检测到充电动画播放中，跳过背屏 onStop 宽限自毁");
                 return;
             }
@@ -243,6 +431,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
         rearStopExitGraceRunnable = () -> {
             rearStopExitGraceRunnable = null;
+            rearStopExitGraceDeadlineElapsedMs = 0L;
+            rearStopExitGraceRemainingMs = 0L;
             if (isFinishing()) {
                 return;
             }
@@ -251,8 +441,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 return;
             }
             LogHelper.w(TAG, reason + "：背屏投屏已不可见且宽限(" + REAR_STOP_EXIT_GRACE_MS + "ms)内未恢复前台，销毁 Activity");
-            requestProjectionExitSequence("rear-stop-exit-grace");
+            finishProjectionFromUser("rear-stop-exit-grace");
         };
+        rearStopExitGraceDeadlineElapsedMs = SystemClock.elapsedRealtime() + REAR_STOP_EXIT_GRACE_MS;
         mainScreenPolicyHandler.postDelayed(rearStopExitGraceRunnable, REAR_STOP_EXIT_GRACE_MS);
     }
 
@@ -289,6 +480,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return true;
         }
         int d = getDisplayIdSafe();
+        boolean chargingRelated = isChargingOverlayActive();
         if (isMainScreenLandscapeMode) {
             if (d == 0) {
                 return false;
@@ -298,6 +490,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return true;
         }
         if (d == 1) {
+            return false;
+        }
+        if (chargingRelated && hasLyricsView()) {
+            // 充电覆盖切换期 displayId 可能瞬时抖到 0/异常值，避免误触发“非法屏幕自毁”。
+            LogHelper.d(TAG, reason + "：充电覆盖相关窗口期(displayId=" + d + ")，跳过非法屏幕销毁");
             return false;
         }
         if (hasLyricsView()) {
@@ -314,15 +511,123 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     }
 
     private void finishIllegalProjectionSurface() {
+        finishProjectionFromUser("illegal-surface");
+    }
+
+    /** 主屏占位迁背屏后轮询 displayId，落背屏即建 UI（与车控一致）。 */
+    private void schedulePollRearLyricsUiInitAfterMove() {
+        cancelRearLyricsUiInitPoll();
+        if (lyricsView != null) {
+            return;
+        }
+        rearUiInitPollAttempts = 0;
+        rearUiInitPollRunnable = this::pollRearLyricsUiInitStep;
+        uiHandler.post(rearUiInitPollRunnable);
+    }
+
+    private void cancelRearLyricsUiInitPoll() {
+        if (rearUiInitPollRunnable != null) {
+            uiHandler.removeCallbacks(rearUiInitPollRunnable);
+        }
+        rearUiInitPollRunnable = null;
+        rearUiInitPollAttempts = 0;
+    }
+
+    private void pollRearLyricsUiInitStep() {
+        rearUiInitPollRunnable = null;
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        if (lyricsView != null) {
+            return;
+        }
+        if (getDisplayIdSafe() == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
+            RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
+            initLyricsUiOnRearIfNeeded("poll");
+            return;
+        }
+        rearUiInitPollAttempts++;
+        if (rearUiInitPollAttempts < RearMirootProjectionLifecycle.REAR_UI_INIT_POLL_MAX_ATTEMPTS) {
+            rearUiInitPollRunnable = this::pollRearLyricsUiInitStep;
+            uiHandler.postDelayed(
+                    rearUiInitPollRunnable,
+                    RearMirootProjectionLifecycle.REAR_UI_INIT_POLL_INTERVAL_MS);
+        } else {
+            LogHelper.w(TAG, "迁屏轮询超时仍未到背屏 (attempts=" + rearUiInitPollAttempts + ")");
+        }
+    }
+
+    /**
+     * 背屏创建歌词 UI（onCreate 直启 / 迁屏轮询 / onResume / onWindowFocusChanged 共用）。
+     *
+     * @return true 表示本次完成了初始化
+     */
+    private boolean initLyricsUiOnRearIfNeeded(String reason) {
+        if (lyricsView != null || isFinishing() || isMainScreenLandscapeMode) {
+            return false;
+        }
+        if (getDisplayIdSafe() != RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
+            return false;
+        }
+        cancelMainScreenPlaceholderTimeout();
+        cancelRearLyricsUiInitPoll();
+        LogHelper.d(TAG, "🎯 背屏初始化歌词 UI (" + reason + ")");
+        currentInstance = this;
+        if (initialDisplayId == -1) {
+            initialDisplayId = RearMirootProjectionLifecycle.REAR_DISPLAY_ID;
+        }
+        RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
+        setupWindow();
+        WindowManager.LayoutParams params = getWindow().getAttributes();
+        params.width = WindowManager.LayoutParams.MATCH_PARENT;
+        params.height = WindowManager.LayoutParams.MATCH_PARENT;
+        getWindow().setAttributes(params);
+        loadSettings();
+        createUI();
+        initLyricsAnimator();
+        setupMediaController();
+        updateMediaInfo();
+        updatePlaybackState();
+        registerActiveSessionsChangedListener();
+        if (getDisplayIdSafe() == RearMirootProjectionLifecycle.REAR_DISPLAY_ID
+                && hasLyricsView()
+                && !isFinishing()) {
+            startMusicProjectionWakeService();
+            notifyMainActivityProjectionStarted();
+            LogHelper.d(TAG, "✅ 投屏成功 (" + reason + ")");
+        } else {
+            stopMusicProjectionWakeService();
+        }
+        if (taskService == null) {
+            bindTaskService();
+        }
+        if (screenReceiver == null) {
+            registerScreenReceiver();
+        }
+        return true;
+    }
+
+    /**
+     * 对齐充电动画：不压黑、不在 finish 前 restore；资源清理在 onDestroy。
+     */
+    private void finishProjectionFromUser(String reason) {
+        if (projectionExitFlowStarted || isFinishing()) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed()) {
+            return;
+        }
+        projectionExitFlowStarted = true;
+        finishRequestedByMiRoot = true;
+        LogHelper.d(TAG, "🚪 音乐投屏结束: " + reason);
         try {
-            if (getWindow() != null) {
-                getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
-                getWindow().setFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
-            }
+            ProjectionOngoingNotifications.cancelAll(getApplicationContext());
+            ProjectionOnlyNotificationHelper.cancelMusic(this);
         } catch (Exception ignored) {
         }
-        requestProjectionExitSequence("illegal-surface");
+        RearMirootProjectionLifecycle.hideWindowBeforeProjectionFinish(this);
+        // 主屏 HOME 仅在 finish() 中发送一次（避免与 finish / onDestroy restore 连发）
+        finish();
     }
 
     /** 当前 Activity 所在 Display 的 dp → px（背屏与主屏密度可能不同，勿用固定 px） */
@@ -346,6 +651,34 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         button.setMinWidth(dp(40));
         button.setBackground(bg);
         button.setElevation(dp(2));
+    }
+
+    private void executeMediaSkip(boolean next, String source) {
+        if (!checkNotificationListenerPermission()) {
+            MainDisplayUi.showToast(getApplicationContext(), "需要通知监听权限才能控制音乐", android.widget.Toast.LENGTH_LONG);
+            openNotificationListenerSettings();
+            return;
+        }
+        if (mediaController == null) {
+            setupMediaController();
+            if (mediaController == null) {
+                MainDisplayUi.showToast(getApplicationContext(), "无法获取音乐控制器", android.widget.Toast.LENGTH_SHORT);
+                return;
+            }
+        }
+        android.media.session.MediaController.TransportControls controls = mediaController.getTransportControls();
+        if (controls == null) {
+            return;
+        }
+        try {
+            if (next) {
+                controls.skipToNext();
+            } else {
+                controls.skipToPrevious();
+            }
+        } catch (Exception e) {
+            LogHelper.e(TAG, source + "失败", e);
+        }
     }
 
     private void ensureDisplayInfoCacheForCutout() {
@@ -457,7 +790,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 songTitleText.setHorizontallyScrolling(true);
                 songTitleText.setEllipsize(android.text.TextUtils.TruncateAt.MARQUEE);
                 songTitleText.setMarqueeRepeatLimit(-1);
-                songTitleText.setSelected(true);
+                restartTextMarquee(songTitleText);
             } else {
                 songTitleText.setGravity(android.view.Gravity.CENTER | android.view.Gravity.BOTTOM);
                 songTitleText.setHorizontallyScrolling(false);
@@ -469,36 +802,82 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
     }
 
-    /** 歌名显示区避开安全区并限制在可视区域内，超长文本才 marquee 滚动。 */
+    /**
+     * Android 系统 marquee 偶发卡住时，单纯 setSelected(true) 不一定会重新启动。
+     * 这里用“先 false 再 post true”的方式强制重触发，同时要求处于单行+MARQUEE 模式。
+     */
+    private void restartTextMarquee(TextView tv) {
+        if (tv == null) return;
+        try {
+            if (tv.getEllipsize() != android.text.TextUtils.TruncateAt.MARQUEE) {
+                tv.setEllipsize(android.text.TextUtils.TruncateAt.MARQUEE);
+            }
+            tv.setSingleLine(true);
+            tv.setHorizontallyScrolling(true);
+            tv.setMarqueeRepeatLimit(-1);
+            // 关键：toggle selected，且把 true 延迟到布局稳定后
+            tv.setSelected(false);
+            tv.removeCallbacks(restartSongTitleMarqueeRunnable);
+            restartSongTitleMarqueeTarget = tv;
+            tv.postDelayed(restartSongTitleMarqueeRunnable, 80);
+        } catch (Exception ignored) {
+        }
+    }
+
+    // 复用 runnable，避免频繁分配
+    private TextView restartSongTitleMarqueeTarget = null;
+    private final Runnable restartSongTitleMarqueeRunnable = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                if (restartSongTitleMarqueeTarget != null) {
+                    restartSongTitleMarqueeTarget.setSelected(true);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    };
+
+    /** 歌名右侧安全内边距：15px + 跑马灯线宽（避免被跑马灯遮挡）。 */
+    private int songTitleRightPaddingPx() {
+        int base = dp(15);
+        if (!marqueeLightEnabled) {
+            return base;
+        }
+        return base + (int) Math.ceil(Math.max(0f, marqueeLightSize));
+    }
+
+    private void applySongTitleRightPadding() {
+        if (songTitleText == null) return;
+        try {
+            int l = songTitleText.getPaddingLeft();
+            int t = songTitleText.getPaddingTop();
+            int b = songTitleText.getPaddingBottom();
+            int r = songTitleRightPaddingPx();
+            if (songTitleText.getPaddingRight() != r) {
+                songTitleText.setPadding(l, t, r, b);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** 歌名/来源显示区：背屏左侧固定留白 {@link #REAR_LYRICS_LEFT_CLEAR_PX}；主屏对称边距。 */
     private void applySongTitleSafeInsets() {
         if (songTitleText == null && hookSourceStatusText == null) return;
         if (isFinishing()) return;
         try {
-            if (!isMainScreenLandscapeMode) {
-                ensureDisplayInfoCacheForCutout();
-            }
-            final int baseLeft = dp(20);
-            final int baseRight = dp(20);
-            final int gutterAfterCutout = dp(14);
             final int topMargin = (int) (marqueeLightSize + dp(2));
-            final int leftSystem = isMainScreenLandscapeMode ? 0 : computeMediaBarLeftInsetPx();
-            final int rightSystem = isMainScreenLandscapeMode ? 0 : computeRightSafeInsetPx();
-            int containerWidth = 0;
-            if (mainFrameLayout != null && mainFrameLayout.getWidth() > 0) {
-                containerWidth = mainFrameLayout.getWidth();
+            final int pmWidth = getResources().getDisplayMetrics().widthPixels;
+            final int leftMargin;
+            final int rightMargin;
+            if (isMainScreenLandscapeMode) {
+                leftMargin = dp(20);
+                rightMargin = dp(20);
+            } else {
+                leftMargin = REAR_LYRICS_LEFT_CLEAR_PX;
+                rightMargin = 0;
             }
-            if (containerWidth <= 0) {
-                containerWidth = getResources().getDisplayMetrics().widthPixels;
-            }
-            int contentPadL = contentRootLayout != null ? contentRootLayout.getPaddingLeft() : 0;
-            int contentPadR = contentRootLayout != null ? contentRootLayout.getPaddingRight() : 0;
-            // rootLayout 可能已经通过 applySafeAreaPadding 吃掉了 cutout inset，
-            // 这里对标题边距做“去重”，避免左侧安全区被重复叠加导致过大。
-            final int extraLeftInset = Math.max(0, leftSystem - contentPadL);
-            final int extraRightInset = Math.max(0, rightSystem - contentPadR);
-            final int leftMargin = baseLeft + (extraLeftInset > 0 ? extraLeftInset + gutterAfterCutout : 0);
-            final int rightMargin = baseRight + extraRightInset;
-            int visibleWidth = containerWidth - leftMargin - rightMargin - contentPadL - contentPadR;
+            final int visibleWidth = Math.max(0, pmWidth - leftMargin - rightMargin);
 
             if (songTitleText != null) {
                 LinearLayout.LayoutParams lp = songTitleLayoutParams;
@@ -508,19 +887,49 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                         lp = (LinearLayout.LayoutParams) raw;
                     } else {
                         lp = new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            visibleWidth,
                             LinearLayout.LayoutParams.WRAP_CONTENT
                         );
-                        lp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
                     }
                 }
+                lp.width = visibleWidth;
+                lp.gravity = android.view.Gravity.START;
                 lp.setMargins(leftMargin, topMargin, rightMargin, 0);
                 songTitleLayoutParams = lp;
                 songTitleText.setLayoutParams(lp);
+                applySongTitleRightPadding();
                 if (visibleWidth > dp(120)) {
                     songTitleText.setMaxWidth(visibleWidth);
                 }
                 applySongTitleOverflowMode(visibleWidth);
+            }
+            if (gestureTitleLayer != null) {
+                android.widget.FrameLayout.LayoutParams touchLp = gestureTitleLayerLayoutParams;
+                final int gestureExtraTop = dp(GESTURE_TITLE_LAYER_EXTRA_TOP_DP);
+                int titleTouchBaseHeight = dp(GESTURE_TITLE_LAYER_BASE_HEIGHT_DP);
+                if (songTitleText != null) {
+                    int measured = songTitleText.getMeasuredHeight();
+                    int current = songTitleText.getHeight();
+                    int raw = Math.max(measured, current);
+                    if (raw > 0) {
+                        titleTouchBaseHeight = raw;
+                    }
+                }
+                final int gestureExtraBottom = dp(GESTURE_TITLE_LAYER_EXTRA_BOTTOM_DP);
+                final int gestureHeight = titleTouchBaseHeight + gestureExtraTop + gestureExtraBottom;
+                final int gestureTopMargin = Math.max(0, topMargin - gestureExtraTop);
+                if (touchLp == null) {
+                    touchLp = new android.widget.FrameLayout.LayoutParams(
+                        visibleWidth,
+                        gestureHeight
+                    );
+                }
+                touchLp.width = visibleWidth;
+                touchLp.height = gestureHeight;
+                touchLp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+                touchLp.setMargins(leftMargin, gestureTopMargin, rightMargin, 0);
+                gestureTitleLayerLayoutParams = touchLp;
+                gestureTitleLayer.setLayoutParams(touchLp);
             }
 
             if (hookSourceStatusText != null) {
@@ -531,12 +940,13 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                         hookLp = (LinearLayout.LayoutParams) raw;
                     } else {
                         hookLp = new LinearLayout.LayoutParams(
-                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            visibleWidth,
                             LinearLayout.LayoutParams.WRAP_CONTENT
                         );
-                        hookLp.gravity = android.view.Gravity.CENTER_HORIZONTAL;
                     }
                 }
+                hookLp.width = visibleWidth;
+                hookLp.gravity = android.view.Gravity.START;
                 hookLp.setMargins(leftMargin, 0, rightMargin, 0);
                 hookSourceStatusLayoutParams = hookLp;
                 hookSourceStatusText.setLayoutParams(hookLp);
@@ -547,43 +957,38 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             }
 
             LogHelper.d(TAG, "✅ 歌名安全区已更新: left=" + leftMargin + "px, right=" + rightMargin
-                + "px, top=" + topMargin + "px, visibleWidth=" + Math.max(0, visibleWidth) + "px");
+                + "px, pmWidth=" + pmWidth
+                + "px, visibleWidth=" + Math.max(0, visibleWidth) + "px");
         } catch (Exception e) {
             LogHelper.w(TAG, "applySongTitleSafeInsets 失败", e);
         }
     }
 
-    /** 根据系统左侧摄像头/cutout 与较大外边距，更新底部三键容器位置与内边距 */
+    /** 三键控制条：背屏左侧与歌名一致的固定留白；主屏对称边距。 */
     private void applyMediaButtonBarInsets() {
         if (buttonLayout == null || mediaButtonBarLayoutParams == null) return;
         if (isFinishing()) return;
         try {
-            if (!isMainScreenLandscapeMode) {
-                ensureDisplayInfoCacheForCutout();
-            }
-            final int innerPadH = dp(22);
-            final int innerPadV = dp(14);
-            final int marginRight = dp(22);
-            final int marginBottom = dp(28);
-            final int gutterAfterCutout = dp(14);
+            final int innerPadH = dp(18);
+            final int innerPadV = dp(10);
+            final int marginBottom = Math.max(0, dp(28) - 28);
+            final int pmWidth = getResources().getDisplayMetrics().widthPixels;
+            final int leftMargin;
+            final int rightMargin;
             if (isMainScreenLandscapeMode) {
-                int m = dp(22);
-                buttonLayout.setPadding(innerPadH, innerPadV, innerPadH, innerPadV);
-                mediaButtonBarLayoutParams.setMargins(m, 0, m, marginBottom);
+                leftMargin = dp(20);
+                rightMargin = dp(20);
             } else {
-                int leftSystem = computeMediaBarLeftInsetPx();
-                buttonLayout.setPadding(innerPadH, innerPadV, innerPadH, innerPadV);
-                mediaButtonBarLayoutParams.setMargins(
-                    leftSystem + gutterAfterCutout,
-                    0,
-                    marginRight,
-                    marginBottom);
-                if (leftSystem > 0) {
-                    LogHelper.d(TAG, "媒体控制条: 系统左侧避让 " + leftSystem + "px, 左外边距合计 "
-                        + (leftSystem + gutterAfterCutout) + "px");
-                }
+                leftMargin = REAR_LYRICS_LEFT_CLEAR_PX;
+                rightMargin = 0;
             }
+            final int visibleWidth = Math.max(0, pmWidth - leftMargin - rightMargin);
+
+            buttonLayout.setPadding(innerPadH, innerPadV, innerPadH, innerPadV);
+            mediaButtonBarLayoutParams.setMargins(leftMargin, 0, rightMargin, marginBottom);
             buttonLayout.setLayoutParams(mediaButtonBarLayoutParams);
+            LogHelper.d(TAG, "媒体控制条已更新: left=" + leftMargin + "px, right=" + rightMargin
+                + "px, pmWidth=" + pmWidth + "px, visibleWidth=" + visibleWidth + "px, bottom=" + marginBottom + "px");
             applySongTitleSafeInsets();
         } catch (Exception e) {
             LogHelper.w(TAG, "applyMediaButtonBarInsets 失败", e);
@@ -591,10 +996,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     }
 
     /**
-     * 鎖屏啟動 +「主屏占位→移動到背屏」時，insets/圓角資訊可能短暫仍是主屏值，造成偶發圓角半徑不正確。
-     * 在「背屏 + 鎖屏」情境下沿用固定 101px 的穩定策略（與廣播啟動一致）以避免競態。
+     * 固定圆角仅用于背屏（display 1）：广播启动或锁屏竞态时 insets 可能仍是主屏值，用 {@link ProjectionHelper#REAR_PROJECTION_FIXED_CORNER_RADIUS_PX} 稳定四角。
+     * 主屏打开（含横屏歌词、display 0）始终返回 false，跑马灯/深渊镜通过系统参数检测圆角。
      */
-    private boolean shouldUseFixedCornerRadius101() {
+    private boolean shouldUseFixedRearProjectionCornerRadius() {
         if (isMainScreenLandscapeMode) return false;
         if (getDisplayIdSafe() != 1) return false;
 
@@ -613,29 +1018,19 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private TextView hookSourceStatusText;
     /** 标题区布局参数缓存：用于按安全区与跑马灯宽度实时刷新边距。 */
     private LinearLayout.LayoutParams songTitleLayoutParams;
+    /** 标题手势层：放在最上层，避免被边框跑马灯覆盖触摸。 */
+    private android.widget.FrameLayout gestureTitleLayer;
+    private android.widget.FrameLayout.LayoutParams gestureTitleLayerLayoutParams;
+    private static final int GESTURE_TITLE_LAYER_BASE_HEIGHT_DP = 64;
+    private static final int GESTURE_TITLE_LAYER_EXTRA_TOP_DP = 32;
+    private static final int GESTURE_TITLE_LAYER_EXTRA_BOTTOM_DP = 10;
     /** 调试来源文本布局参数缓存：用于按安全区实时刷新边距。 */
     private LinearLayout.LayoutParams hookSourceStatusLayoutParams;
     private ModernLyricsView lyricsView;
-
-    // --- Rear MV mode (mutually exclusive with lyrics view) ---
-    private static final String KEY_REAR_DISPLAY_MODE = "rearDisplayMode";
-    private static final String VALUE_REAR_MODE_LYRICS = "LYRICS";
-    private static final String VALUE_REAR_MODE_MV = "MV";
-    private static final String INTENT_EXTRA_REAR_MODE = "rearMode";
-    private static final String INTENT_EXTRA_MV_URL = "mvUrl";
-
-    private boolean rearMvModePreferred = false;
-    private String pendingMvUrl = "";
-    private ExoPlayer mvPlayer;
-    private PlayerView mvPlayerView;
-    private TextView mvLyricLineView;
-    private android.widget.FrameLayout mvLayer;
+    private ImageView albumArtBackgroundView;
 
     private android.widget.FrameLayout mainFrameLayout;
     private LinearLayout contentRootLayout;
-
-    private final Handler mvHandler = uiHandler;
-    private Runnable mvNoUrlFallbackRunnable;
 
     private AbyssalMirrorLyricsView abyssalMirrorLyricsView; // 深渊镜歌词视图（旧版，3D旋转效果）
     private AbyssalMirrorLyricsViewGroup abyssalMirrorLyricsViewGroup; // 深渊镜歌词视图（新版，多层边框效果）
@@ -649,6 +1044,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private KuwoCarMediaSessionHelper kuwoCarMediaSessionHelper;
     /** 当前是否使用酷我 MediaBrowser 会话（用于 extras 歌词与 loadLyrics 分支） */
     private boolean kuwoCarLyricsSessionActive;
+    /** 上次成功绑定的播放器包名；用于检测跨应用切换并重置歌词状态 */
+    private String lastBoundMediaPackage = "";
 
     /** 活跃媒体会话列表变化时重新绑定，解决切换播放器后仍附着旧 [MediaController] 导致元数据/歌词不更新 */
     private boolean activeSessionsListenerRegistered;
@@ -661,10 +1058,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return;
         }
         LogHelper.d(TAG, "🔁 活跃媒体会话列表变化，重新绑定 MediaController");
-        setupMediaController();
-        updateMediaInfo();
-        updatePlaybackState();
+        refreshMediaControllerBinding();
     };
+
+    private static final long MEDIA_CONTROLLER_REFRESH_CHECK_THROTTLE_MS = 500L;
+    private long lastMediaControllerRefreshCheckMs = 0L;
 
     // 「歌名跳動」防護：部分播放器在開啟車載藍牙歌詞時會把當前歌詞行塞進 METADATA_KEY_TITLE
     // 這裡用「曲目簽名」鎖定顯示用的 title/artist，避免同一首歌期間反覆刷新造成跳動
@@ -705,18 +1103,37 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     // 第三方 API 防重：同曲目请求进行中时不重复发起
     private String inflightApiTrackKey = "";
     /** SUPER_LYRIC_ONLY：SuperLyric 逐句回调的实时刷新（非完整 LRC）。 */
-    private Runnable superLyricRealtimeRunnable;
-    private final java.util.concurrent.atomic.AtomicBoolean superLyricRealtimeInFlight =
-        new java.util.concurrent.atomic.AtomicBoolean(false);
-    private String lastSuperLyricRealtimeText = "";
     private SuperLyricApi.RealtimeListener superLyricRealtimeListener;
+    /** SuperLyric 单句平滑：同一句重复回调时沿用已锚定时间，避免逐字进度抖动/跳变。 */
+    private String lastSuperLyricAppliedTextNormalized = "";
+    private long lastSuperLyricAppliedLineTimeMs = -1L;
+    /** 歌词渲染侧最近一次位置（由 LyricsAnimator 回调更新），用于 SuperLyric 单句时间锚定。 */
+    private volatile long latestLyricsRenderPositionMs = 0L;
+    /**
+     * 播放器进度明显落后于缓存（多为切歌后回到新曲开头）时，锚定行以播放器为准，避免仍按上首尾声居中。
+     */
+    private static final long TRACK_CHANGE_CACHED_POSITION_GAP_MS = 4_000L;
+    /** 切歌后短期内只信 MediaSession 进度，避免用上首残留缓存导致行号/滚动来回跳。 */
+    private static final long TRACK_CHANGE_PLAYBACK_TRUST_MS = 3_500L;
+    private long lyricsTrackSettledAtMs = 0L;
+    /** SuperLyric 单句时间戳允许落后当前进度的最大阈值，超出则判定为跨曲/异常数据。 */
+    private static final long SUPER_LYRIC_STALE_BACKWARD_TOLERANCE_MS = 3500L;
     /** 「仅切歌触发」的歌词加载门控：记录最近一次触发 loadLyrics 的曲目签名。 */
     private String lastLyricsLoadTrackSignature = "";
     /** 酷我 AUDIO_LYRIC 去重：同曲同 payload 不重复解析/设置。 */
     private String lastKuwoAudioLyricTrackKey = "";
     private String lastKuwoAudioLyricPayload = "";
+    /** 酷我：AUDIO_LYRIC 等待超时后再走网络/智能兜底（避免与专用解析并行抢结果）。 */
+    private Runnable pendingKuwoNativeFallbackRunnable;
+    private boolean kuwoPostNativeFallbackScheduled = false;
+    /** 仅 {@link #beginKuwoLyricsFallbackAfterNativeFailed} 允许在酷我专用阶段之后发起第三方拉词。 */
+    private boolean kuwoAllowThirdPartyFallback = false;
     /** 仍无歌词时再显示「暂无」，避免切歌/异步未返回时闪一下暂无（第三方 API 已结束后的短防抖） */
     private static final long NO_LYRICS_UI_DELAY_MS = 2200L;
+    /**
+     * 汽水·智能切换：网络 API 优先等待时长；超时仍未返回完整歌词才启用 SuperLyric 单行兜底。
+     */
+    private static final long QISHUI_NETWORK_API_PRIORITY_DELAY_MS = 2800L;
     /**
      * 酷我车载等仅依赖会话 extras 推送歌词、不走 API 时：新歌 AUDIO_LYRIC 可能晚于元数据很久，
      * 若沿用 {@link #NO_LYRICS_UI_DELAY_MS} 会在歌词仍在路上时误显示「暂无歌词」。
@@ -729,7 +1146,6 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private Runnable taskServiceRebindRunnable;
     private Runnable screenOffWakeRetryRunnable;
     private Runnable legacySystemUiExitConfirmRunnable;
-    private Runnable delayedGestureCheckRunnable;
     private Runnable systemUiExitConfirmRunnable;
     private Runnable deferredCreateUiRunnable;
     private Runnable notifyStopRetryRunnable;
@@ -738,12 +1154,16 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private boolean uiAnimationsCancelled = false;
     private boolean projectionExitFlowStarted = false;
     private boolean projectionCleanupDone = false;
+    /** 对齐充电动画：MiRoot 主动结束，onDestroy 后再 restore 官方背屏。 */
+    private boolean finishRequestedByMiRoot = false;
+    private Runnable rearUiInitPollRunnable;
+    private int rearUiInitPollAttempts;
     private boolean projectionExitUiLocked = false;
     private static final long EXIT_FADE_DURATION_MS = 200L;
     private static final long EXIT_HIDE_WAIT_ONE_FRAME_MS = 16L;
     // 限制背屏目标帧率，降低 DequeueBuffer timeout 风险
-    private static final float REAR_RENDER_TARGET_FPS = 18f;
-    private static final float REAR_RENDER_TARGET_FPS_SHUFFLE = 15f;
+    private static final float REAR_RENDER_TARGET_FPS = 30f;
+    private static final float REAR_RENDER_TARGET_FPS_SHUFFLE = 24f;
     
     // 播放位置同步
     private android.os.Handler positionSyncHandler;
@@ -778,158 +1198,496 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private LyricsSource currentLyricsSource = LyricsSource.NONE;
     private String currentLyricsSourcePkg = "";
     private boolean superLyricFallbackModeActive = false;
+    /** 汽水·智能切换：网络 API 拉取中（优先）；超时前不展示 SuperLyric 单行。 */
+    private boolean qishuiAwaitingNetworkLyrics = false;
+    private Runnable pendingQishuiSuperLyricPreviewRunnable;
+    /** 当前 SuperLyric 单行兜底是否含逐字时间轴（是否启用逐字渲染由 wordByWord 开关决定）。 */
+    private boolean superLyricActiveLineHasWords = false;
+    /** 智能切换：上次写入逐字融合的行索引，用于同句回调时跳过整表 setLyrics。 */
+    private int lastWordFusionLineIndex = -1;
+    /** 模块已推送逐字但多行结构未就绪时暂存，网络/整曲 LRC 到达后立即补融合。 */
+    private SuperLyricApi.SuperLyricFallbackPayload cachedWordFusionPayload;
+    private final ExecutorService superLyricWordFusionExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "SuperLyricWordFusion");
+        thread.setDaemon(true);
+        thread.setPriority(Thread.NORM_PRIORITY);
+        return thread;
+    });
+    private final AtomicInteger wordFusionGeneration = new AtomicInteger(0);
+    /** 最近一次命中网络歌词的 API（kugou / qsgc 等），供 Debug「当前歌词来源」展示。 */
+    private String lastNetworkLyricsProvider = "";
+    private LyricsRuntimeSource lastNetworkLyricsRuntimeSource = LyricsRuntimeSource.NETWORK;
+    /** Debug 来源条：最近一次写入的通道与附注（智能切换刷新逐字段时复用）。 */
+    private LyricsRuntimeSource hookLastRuntimeSource = LyricsRuntimeSource.IDLE;
+    private String hookLastRuntimeDetail = "";
     private final ExecutorService lyricsParseExecutor = Executors.newSingleThreadExecutor();
 
+    /**
+     * SuperLyric 实时歌词是否允许在「非前台」阶段继续运行。
+     * <p>
+     * 现实场景：锁屏/息屏时 Activity 可能触发 onPause/onStop，但投屏界面仍在背屏显示（FLAG_SHOW_WHEN_LOCKED），
+     * 若按 isInForeground 直接停掉实时回调，会导致锁屏期间歌词不刷新，解锁后出现「跟不上/跳行」。
+     */
+    private boolean shouldRunSuperLyricRealtimeWhilePaused() {
+        if (isFinishing() || isDestroyed()) return false;
+        if (isNetworkOnlyLyricsSourceMode()) return false;
+        if (isKuwoAwaitingNativeLyrics()) return false;
+        // 没有 UI 时不跑（占位/迁屏阶段）
+        if (!hasLyricsView() && !isMainScreenLandscapeMode) return false;
+        int displayId = getDisplayIdSafe();
+        // 背屏投屏：锁屏时仍应继续刷新
+        if (displayId == 1) return true;
+        // 主屏横屏投屏：允许继续刷新（某些机型锁屏会 pause 但画面仍可见）
+        return isMainScreenLandscapeMode && displayId == 0;
+    }
+
+    /** 酷我车载：网络歌词 / 网络API·逐字融合 / 仅 SuperLyric 均优先 AUDIO_LYRIC 专用解析。 */
+    private boolean shouldUseKuwoNativeLyricsPath(String packageName) {
+        if (kuwoCarLyricsSessionActive) {
+            return true;
+        }
+        return packageName != null
+            && KuwoCarMediaSessionHelper.KUWO_PACKAGE.equals(packageName.trim());
+    }
+
+    /** 专用解析进行中：尚未拿到逐行歌词（含 MediaBrowser 连接前按包名识别的窗口）。 */
+    private boolean isKuwoAwaitingNativeLyrics() {
+        if (currentLyricsSource != LyricsSource.KUWO_CAR) {
+            return false;
+        }
+        if (enhancedLyricLines != null && !enhancedLyricLines.isEmpty()) {
+            return false;
+        }
+        return shouldUseKuwoNativeLyricsPath(resolveCurrentLyricsPackageName());
+    }
+
+    private void markKuwoAudioLyricApplied() {
+        cancelPendingKuwoNativeFallbackWait();
+        kuwoPostNativeFallbackScheduled = false;
+        kuwoAllowThirdPartyFallback = false;
+        currentLyricsSource = LyricsSource.KUWO_CAR;
+        updateHookSourceStatusText(LyricsRuntimeSource.KUWO_AUDIO_LYRIC);
+    }
+
+    private void cancelPendingKuwoNativeFallbackWait() {
+        if (pendingKuwoNativeFallbackRunnable != null) {
+            uiHandler.removeCallbacks(pendingKuwoNativeFallbackRunnable);
+            pendingKuwoNativeFallbackRunnable = null;
+        }
+    }
+
+    /**
+     * 酷我车载：先等 {@link KuwoAudioLyricParser} 推送；超时仍无词再按来源模式兜底（与来源设置无关，均走此链路）。
+     */
+    private void scheduleKuwoNativeWaitThenFallback(int requestSeq, String trackKey, String title, String artist) {
+        cancelPendingKuwoNativeFallbackWait();
+        if (!shouldUseKuwoNativeLyricsPath(resolveCurrentLyricsPackageName()) || title == null || title.isEmpty()) {
+            return;
+        }
+        kuwoPostNativeFallbackScheduled = true;
+        final String finalTitle = title;
+        final String finalArtist = artist != null ? artist : "";
+        pendingKuwoNativeFallbackRunnable = () -> {
+            pendingKuwoNativeFallbackRunnable = null;
+            if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
+                return;
+            }
+            if (enhancedLyricLines != null && !enhancedLyricLines.isEmpty()) {
+                kuwoPostNativeFallbackScheduled = false;
+                return;
+            }
+            beginKuwoLyricsFallbackAfterNativeFailed("等待AUDIO_LYRIC超时", requestSeq, trackKey, finalTitle, finalArtist);
+        };
+        uiHandler.postDelayed(pendingKuwoNativeFallbackRunnable, NO_LYRICS_WAIT_SESSION_EXTRAS_MS);
+    }
+
+    /**
+     * 酷我专用解析失败后按来源模式兜底：网络歌词→仅网络 API；网络API·逐字融合→网络后 SuperLyric；仅 SuperLyric→SuperLyric。
+     */
+    private void beginKuwoLyricsFallbackAfterNativeFailed(String reason,
+                                                          int requestSeq,
+                                                          String trackKey,
+                                                          String title,
+                                                          String artist) {
+        cancelPendingKuwoNativeFallbackWait();
+        if (currentLyricsSource != LyricsSource.KUWO_CAR) {
+            return;
+        }
+        if (enhancedLyricLines != null && !enhancedLyricLines.isEmpty()) {
+            kuwoPostNativeFallbackScheduled = false;
+            return;
+        }
+        if (title == null || title.isEmpty() || "未知歌曲".contentEquals(title) || isLikelyLyricLine(title)) {
+            LogHelper.d(TAG, "酷我兜底跳过（无有效曲名）: " + reason);
+            kuwoPostNativeFallbackScheduled = false;
+            return;
+        }
+        if (trackKey != null && !trackKey.isEmpty() && trackKey.equals(inflightApiTrackKey)) {
+            LogHelper.d(TAG, "酷我兜底防重：同曲目网络请求进行中");
+            return;
+        }
+        kuwoPostNativeFallbackScheduled = false;
+        kuwoAllowThirdPartyFallback = true;
+        try {
+            if (shouldUseNetworkApiSource()) {
+                LogHelper.d(TAG, "酷我 AUDIO_LYRIC 未命中（" + reason + "）→ 网络API(酷狗优先)"
+                    + (isMixedLyricsSourceMode() ? " → 逐字融合" : ""));
+                String networkPkg = KuwoCarMediaSessionHelper.KUWO_PACKAGE;
+                MusicPlayerLyricsPolicy.PrimaryStrategy networkStrategy =
+                    MusicPlayerLyricsPolicy.resolvePrimaryStrategy(networkPkg);
+                updateHookSourceStatusText(
+                    LyricsRuntimeSource.NETWORK,
+                    "兜底·" + MusicPlayerLyricsPolicy.strategyDisplayLabel(networkStrategy)
+                );
+                fetchLyricsFromThirdPartyApi(title, artist, "酷我网络API兜底", requestSeq, trackKey);
+                return;
+            }
+            if (VALUE_LYRICS_SOURCE_SUPER_ONLY.equalsIgnoreCase(lyricsSourceMode)) {
+                LogHelper.d(TAG, "酷我 AUDIO_LYRIC 未命中（" + reason + "）→ SuperLyric");
+                updateHookSourceStatusText(LyricsRuntimeSource.SUPER_LYRIC);
+                startSuperLyricRealtimeTicker();
+                fetchLyricsFromSuperLyricApi(title, artist, requestSeq, trackKey);
+                return;
+            }
+            scheduleNoLyricsIfStillEmpty(requestSeq, trackKey, null, null);
+        } finally {
+            kuwoAllowThirdPartyFallback = false;
+        }
+    }
+
     private void beginLyricsAcquisitionForTrack(String pkg, String trackKey, int requestSeq, String title, String artist) {
+        final String pkgSafe = pkg != null ? pkg : "";
+        final boolean sameSongWithLyrics = enhancedLyricLines != null && !enhancedLyricLines.isEmpty()
+            && isSameSongTrackKey(trackKey, currentTrackKey, title, artist);
+        final boolean apiAlreadyTriedForSong = sameSongWithLyrics
+            && !TextUtils.isEmpty(trackKey)
+            && (trackKey.equals(apiAttemptedTrackKey) || trackKey.equals(inflightApiTrackKey));
+
+        if (apiAlreadyTriedForSong) {
+            if (BuildConfig.DEBUG) {
+                LogHelper.d(TAG, "🛡️ 同曲已有歌词且网络 API 已拉取/进行中，跳过重复 acquisition: " + trackKey);
+            }
+            if (isMixedLyricsSourceMode() || isSuperLyricOnlySourceMode()) {
+                SuperLyricApi.ensureReceiverRegistered();
+                startSuperLyricRealtimeTicker();
+            }
+            return;
+        }
+
         currentLyricsSource = LyricsSource.NONE;
-        currentLyricsSourcePkg = pkg != null ? pkg : "";
+        currentLyricsSourcePkg = pkgSafe;
         superLyricFallbackModeActive = false;
-        updateHookSourceStatusText("来源：网络API 获取中...");
+        cancelPendingQishuiSuperLyricPreviewWait();
+        qishuiAwaitingNetworkLyrics = false;
+        superLyricActiveLineHasWords = false;
+        lastWordFusionLineIndex = -1;
+        cachedWordFusionPayload = null;
+        wordFusionGeneration.incrementAndGet();
+        lastNetworkLyricsProvider = "";
+        lastNetworkLyricsRuntimeSource = LyricsRuntimeSource.NETWORK;
+        updateHookSourceStatusText(LyricsRuntimeSource.ACQUIRING);
 
         if (BuildConfig.DEBUG) {
             LogHelper.d(TAG, "🎛️ LyricsSource begin: pkg=" + currentLyricsSourcePkg
                 + " trackKey=" + trackKey);
         }
 
-        // 切歌立即清空旧歌词，避免跨曲串词
-        try {
-            enhancedLyricLines = new ArrayList<>();
-            lastAbyssalRenderedLineIndex = -1;
-            lastAppliedLyricsTrackKey = "";
-            lastAppliedLyricsFingerprint = "";
-            if (lyricsView != null) {
-                lyricsView.setTrackLoading(true);
-                lyricsView.clearTokenizationCache();
-            }
-            LyricsWordTokenizer.clearCaches();
-            setLyricsToView(null);
-        } catch (Exception ignored) {}
+        // 切歌立即清空旧歌词，避免跨曲串词（同曲仅补全时长/mediaId 时不清空）
+        if (!sameSongWithLyrics) {
+            lyricsTrackSettledAtMs = SystemClock.uptimeMillis();
+            syncLyricsRenderPositionCache(0L);
+            apiAttemptedTrackKey = "";
+            try {
+                enhancedLyricLines = new ArrayList<>();
+                lastAbyssalRenderedLineIndex = -1;
+                lastAppliedLyricsTrackKey = "";
+                lastAppliedLyricsFingerprint = "";
+                lastSuperLyricAppliedTextNormalized = "";
+                lastSuperLyricAppliedLineTimeMs = -1L;
+                // V3.17+: 先清空歌词视图再置 trackLoading，避免 onDraw 间隙残留旧歌词
+                setLyricsToView(null);
+                if (lyricsView != null) {
+                    lyricsView.setTrackLoading(true);
+                    lyricsView.clearTokenizationCache();
+                }
+                LyricsWordTokenizer.clearCaches();
+            } catch (Exception ignored) {}
+        } else if (lyricsView != null) {
+            lyricsView.setTrackLoading(false);
+        }
 
-        if (kuwoCarLyricsSessionActive) {
+        if (shouldUseKuwoNativeLyricsPath(pkg)) {
             currentLyricsSource = LyricsSource.KUWO_CAR;
-            updateHookSourceStatusText("来源：酷我专用解析链");
+            currentLyricsSourcePkg = pkg != null ? pkg : KuwoCarMediaSessionHelper.KUWO_PACKAGE;
+            updateHookSourceStatusText(LyricsRuntimeSource.KUWO_PENDING);
             stopSuperLyricRealtimeTicker();
+            // 所有来源模式：仅 AUDIO_LYRIC；失败后再按设置兜底（网络 / SuperLyric）
+            if (title != null && !title.isEmpty()) {
+                scheduleKuwoNativeWaitThenFallback(requestSeq, trackKey, title, artist);
+            }
+            tryApplyKuwoLyricsFromCurrentExtras();
             return;
         }
         if (!shouldUseNetworkApiSource()) {
-            updateHookSourceStatusText("来源：SuperLyric 专用");
-            // SUPER_LYRIC_ONLY：SuperLyric 通常是逐句回调，需要持续刷新，否则会卡在首次命中那一行。
+            if (!SuperLyricApi.isServiceAvailable()) {
+                updateHookSourceStatusText(LyricsRuntimeSource.SUPER_LYRIC, "模块未就绪");
+                scheduleNoLyricsIfStillEmpty(requestSeq, trackKey, LyricsRuntimeSource.SUPER_LYRIC, "服务不可用");
+                return;
+            }
+            updateHookSourceStatusText(LyricsRuntimeSource.SUPER_LYRIC, "等待模块推送");
+            // 与 SuperLyricApi ModuleDemo 一致：先 registerReceiver，再靠 onLyric 实时驱动。
+            SuperLyricApi.ensureReceiverRegistered();
             startSuperLyricRealtimeTicker();
             fetchLyricsFromSuperLyricApi(title, artist, requestSeq, trackKey);
             return;
         }
-        stopSuperLyricRealtimeTicker();
+        if (isMixedLyricsSourceMode()) {
+            // MIXED：网络 API 优先；汽水 qsgc 超时未返回才 SuperLyric 单行，完整歌词到达后逐字融合。
+            SuperLyricApi.ensureReceiverRegistered();
+            startSuperLyricRealtimeTicker();
+            if (MusicPlayerLyricsPolicy.allowsQishuiSuperLyricPreviewWhileNetworkPending(pkgSafe, true)) {
+                qishuiAwaitingNetworkLyrics = true;
+                scheduleQishuiNetworkWaitThenSuperLyricPreview(
+                    requestSeq, trackKey, title, artist, pkgSafe);
+            }
+        } else {
+            stopSuperLyricRealtimeTicker();
+        }
+        String networkPkg = resolveCurrentLyricsPackageName();
+        MusicPlayerLyricsPolicy.PrimaryStrategy networkStrategy =
+            MusicPlayerLyricsPolicy.resolvePrimaryStrategy(networkPkg);
+        updateHookSourceStatusText(
+            LyricsRuntimeSource.NETWORK,
+            "拉取中·" + MusicPlayerLyricsPolicy.strategyDisplayLabel(networkStrategy)
+        );
         fetchLyricsFromThirdPartyApi(title, artist, "网络API优先获取", requestSeq, trackKey);
     }
 
+    private void cancelPendingQishuiSuperLyricPreviewWait() {
+        if (pendingQishuiSuperLyricPreviewRunnable != null) {
+            uiHandler.removeCallbacks(pendingQishuiSuperLyricPreviewRunnable);
+            pendingQishuiSuperLyricPreviewRunnable = null;
+        }
+    }
+
+    /**
+     * 汽水 qsgc 偏慢：先等网络 API；超时仍无完整歌词再 SuperLyric 单行占位。
+     */
+    private void scheduleQishuiNetworkWaitThenSuperLyricPreview(int requestSeq,
+                                                                String trackKey,
+                                                                String title,
+                                                                String artist,
+                                                                String pkg) {
+        cancelPendingQishuiSuperLyricPreviewWait();
+        if (!isMixedLyricsSourceMode()
+            || !MusicPlayerLyricsPolicy.allowsQishuiSuperLyricPreviewWhileNetworkPending(pkg, true)) {
+            return;
+        }
+        final String titleSafe = title != null ? title : "";
+        final String artistSafe = artist != null ? artist : "";
+        final String pkgSafe = pkg != null ? pkg : "";
+        pendingQishuiSuperLyricPreviewRunnable = () -> {
+            pendingQishuiSuperLyricPreviewRunnable = null;
+            if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
+                return;
+            }
+            if (!qishuiAwaitingNetworkLyrics) {
+                return;
+            }
+            if (hasMixedModeNetworkLyricsStructure()) {
+                return;
+            }
+            if (enhancedLyricLines != null && !enhancedLyricLines.isEmpty() && !superLyricFallbackModeActive) {
+                return;
+            }
+            LogHelper.d(TAG, "汽水：网络 API 等待超时，启用 SuperLyric 单行兜底");
+            bootstrapQishuiSuperLyricPreview(requestSeq, trackKey, titleSafe, artistSafe, pkgSafe);
+        };
+        uiHandler.postDelayed(
+            pendingQishuiSuperLyricPreviewRunnable,
+            QISHUI_NETWORK_API_PRIORITY_DELAY_MS
+        );
+    }
+
+    /**
+     * 网络 API 超时后：SuperLyric 单行占位（仍等待 qsgc 完整歌词）。
+     */
+    private void bootstrapQishuiSuperLyricPreview(int requestSeq,
+                                                  String trackKey,
+                                                  String title,
+                                                  String artist,
+                                                  String pkg) {
+        if (!isMixedLyricsSourceMode()
+            || !MusicPlayerLyricsPolicy.allowsQishuiSuperLyricPreviewWhileNetworkPending(pkg, true)) {
+            return;
+        }
+        final String titleSafe = title != null ? title : "";
+        final String artistSafe = artist != null ? artist : "";
+        final String pkgSafe = pkg != null ? pkg : "";
+        SuperLyricApi.SuperLyricFallbackPayload cached =
+            SuperLyricApi.peekCachedFallbackPayload(titleSafe, artistSafe, pkgSafe);
+        if (cached != null && cached.text != null && !cached.text.trim().isEmpty()) {
+            uiHandler.post(() -> {
+                if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
+                    return;
+                }
+                if (applySuperLyricFallbackPayload(cached, pkgSafe, requestSeq, trackKey)) {
+                    updateHookSourceStatusText(LyricsRuntimeSource.SUPER_LYRIC, "单句·等待汽水API");
+                }
+            });
+            return;
+        }
+        new Thread(() -> {
+            try {
+                SuperLyricApi.SuperLyricFallbackPayload payload =
+                    SuperLyricApi.fetchFallbackPayload(titleSafe, artistSafe, pkgSafe);
+                if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
+                    return;
+                }
+                if (payload == null || payload.text == null || payload.text.trim().isEmpty()) {
+                    return;
+                }
+                runOnUiThread(() -> {
+                    if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
+                        return;
+                    }
+                    if (applySuperLyricFallbackPayload(payload, pkgSafe, requestSeq, trackKey)) {
+                        updateHookSourceStatusText(LyricsRuntimeSource.SUPER_LYRIC, "单句·等待汽水API");
+                    }
+                });
+            } catch (Exception e) {
+                LogHelper.w(TAG, "汽水单句预加载失败: " + e.getMessage());
+            }
+        }, "QishuiSuperLyricBootstrap").start();
+    }
+
     private void startSuperLyricRealtimeTicker() {
+        // NETWORK_ONLY：严格不接入 SuperLyric。
+        if (isNetworkOnlyLyricsSourceMode()) {
+            return;
+        }
+        if (isKuwoAwaitingNativeLyrics()) {
+            return;
+        }
+        SuperLyricApi.ensureReceiverRegistered();
         if (superLyricRealtimeListener != null) {
+            if (!shouldUseNetworkApiSource()) {
+                uiHandler.post(this::tryFlushCachedSuperLyricFallback);
+                uiHandler.post(this::tryFlushCachedSuperLyricWordFusion);
+            } else {
+                uiHandler.post(this::tryFlushCachedSuperLyricWordFusion);
+            }
             return;
         }
         // 以回调驱动为主：只要 SuperLyric 推送，就立刻更新当前句（避免轮询导致耗电）。
         superLyricRealtimeListener = (publisher, title, artist, text, payload, atMs) -> {
-            if (isFinishing() || !isInForeground) return;
-            if (shouldUseNetworkApiSource()) return; // 不在 SUPER_LYRIC_ONLY
+            if (!shouldRunSuperLyricRealtimeWhilePaused()) return;
             if (payload == null || payload.text == null) return;
             final String t = payload.text.trim();
             if (t.isEmpty()) return;
-            if (TextUtils.equals(t, lastSuperLyricRealtimeText)) return;
-            lastSuperLyricRealtimeText = t;
+            if (!isSuperLyricRealtimeTrackMatched(title, artist)) {
+                if (BuildConfig.DEBUG) {
+                    LogHelper.d(TAG, "⏭ 忽略跨曲 SuperLyric 回调: cbTitle="
+                        + safeShort(title) + ", cbArtist=" + safeShort(artist)
+                        + ", stableTitle=" + safeShort(stableTitle)
+                        + ", stableArtist=" + safeShort(stableArtist));
+                }
+                return;
+            }
             final int seq = lyricsRequestSeq;
             final String tk = currentTrackKey != null ? currentTrackKey : "";
             final String sourcePkg = resolveCurrentLyricsPackageName();
-            uiHandler.post(() -> {
+            uiHandler.postAtFrontOfQueue(() -> {
                 if (BuildConfig.DEBUG) {
                     LogHelper.d(TAG, "🎤 SuperLyric(回调) recv: publisher=" + (publisher != null ? publisher : "")
                         + ", pos=" + getCurrentPlaybackPositionSafe()
                         + "ms, lineStart=" + payload.lineStartMs
                         + "ms, text=" + safeShort(t));
                 }
-                applySuperLyricFallbackPayload(payload, sourcePkg, seq, tk);
+                boolean applied = false;
+                // SUPER_LYRIC_ONLY：歌词与逐字仅来自模块；多行整曲时优先逐字融合，否则单句兜底。
+                if (!shouldUseNetworkApiSource()) {
+                    if (payload.hasValidWords() && canUseSuperLyricWordFusion()) {
+                        applied = applySuperLyricWordFusionPayload(payload, sourcePkg, seq, tk);
+                    }
+                    if (!applied) {
+                        applied = applySuperLyricFallbackPayload(payload, sourcePkg, seq, tk);
+                    }
+                } else if (isMixedLyricsSourceMode()) {
+                    applied = dispatchMixedModeSuperLyricPayload(payload, sourcePkg, seq, tk);
+                } else {
+                    boolean hasStructuredLyrics = enhancedLyricLines != null && !enhancedLyricLines.isEmpty();
+                    boolean canFuseWordTimestamps = supportsWordByWordLyricsFeatures()
+                        && currentLyricsSource == LyricsSource.NETWORK_API
+                        && hasStructuredLyrics
+                        && !superLyricFallbackModeActive;
+                    if (canFuseWordTimestamps) {
+                        applied = applySuperLyricWordFusionPayload(payload, sourcePkg, seq, tk);
+                    } else {
+                        applied = applySuperLyricFallbackPayload(payload, sourcePkg, seq, tk);
+                    }
+                }
+                // 纯回调驱动：每次有效 payload 都交给渲染链路处理，不做文本去重拦截。
             });
         };
         SuperLyricApi.addRealtimeListener(superLyricRealtimeListener);
+        if (!shouldUseNetworkApiSource()) {
+            uiHandler.post(this::tryFlushCachedSuperLyricFallback);
+            uiHandler.post(this::tryFlushCachedSuperLyricWordFusion);
+        } else {
+            uiHandler.post(this::tryFlushCachedSuperLyricWordFusion);
+        }
+        // 纯回调驱动刷新：不再使用定时轮询。
+    }
 
-        // 低频兜底：极端情况下回调未到，仍允许很慢地拉一次缓存（避免“完全不更新”）。
-        superLyricRealtimeInFlight.set(false);
-        lastSuperLyricRealtimeText = "";
-        superLyricRealtimeRunnable = new Runnable() {
-            @Override
-            public void run() {
-                if (isFinishing() || !isInForeground) {
-                    stopSuperLyricRealtimeTicker();
-                    return;
-                }
-                if (shouldUseNetworkApiSource()) {
-                    // 不在 SUPER_LYRIC_ONLY 模式：停止实时刷新。
-                    stopSuperLyricRealtimeTicker();
-                    return;
-                }
-                final String title = stableTitle != null ? stableTitle : "";
-                if (title.isEmpty() || isLikelyLyricLine(title)) {
-                    // 没有稳定曲名时不刷新（避免误用歌词行作为曲名）。
-                    uiHandler.postDelayed(this, 2500L);
-                    return;
-                }
-                final String artist = stableArtist != null ? stableArtist : "";
-                final String trackKey = currentTrackKey != null ? currentTrackKey : "";
-                final int requestSeq = lyricsRequestSeq;
-                if (trackKey.isEmpty() || requestSeq <= 0) {
-                    uiHandler.postDelayed(this, 2500L);
-                    return;
-                }
-                if (!superLyricRealtimeInFlight.compareAndSet(false, true)) {
-                    uiHandler.postDelayed(this, 2500L);
-                    return;
-                }
-                lyricsParseExecutor.execute(() -> {
-                    try {
-                        final String sourcePkg = resolveCurrentLyricsPackageName();
-                        SuperLyricApi.SuperLyricFallbackPayload payload =
-                            SuperLyricApi.fetchFallbackPayload(title, artist, sourcePkg);
-                        uiHandler.post(() -> {
-                            try {
-                                if (payload != null && payload.text != null) {
-                                    String text = payload.text.trim();
-                                    if (!text.isEmpty() && !TextUtils.equals(text, lastSuperLyricRealtimeText)) {
-                                        if (BuildConfig.DEBUG) {
-                                            LogHelper.d(TAG, "🎤 SuperLyric(单句) recv: pos="
-                                                + getCurrentPlaybackPositionSafe()
-                                                + "ms, lineStart=" + payload.lineStartMs
-                                                + "ms, text=" + safeShort(text));
-                                        }
-                                        lastSuperLyricRealtimeText = text;
-                                        applySuperLyricFallbackPayload(payload, sourcePkg, requestSeq, trackKey);
-                                    }
-                                }
-                            } finally {
-                                superLyricRealtimeInFlight.set(false);
-                                if (superLyricRealtimeRunnable != null) {
-                                    uiHandler.postDelayed(superLyricRealtimeRunnable, 5000L);
-                                }
-                            }
-                        });
-                        return;
-                    } catch (Throwable ignored) {
-                    }
-                    uiHandler.post(() -> {
-                        superLyricRealtimeInFlight.set(false);
-                        if (superLyricRealtimeRunnable != null) {
-                            uiHandler.postDelayed(superLyricRealtimeRunnable, 5000L);
-                        }
-                    });
-                });
-            }
-        };
-        uiHandler.postDelayed(superLyricRealtimeRunnable, 5000L);
+    /**
+     * 仅 SuperLyric / 智能切换占位：用 Binder 最新缓存立即显示，避免只等 fetch 超时。
+     */
+    private void tryFlushCachedSuperLyricFallback() {
+        if (isNetworkOnlyLyricsSourceMode()) {
+            return;
+        }
+        if (isMixedLyricsSourceMode() && hasMixedModeNetworkLyricsStructure()) {
+            return;
+        }
+        if (qishuiAwaitingNetworkLyrics && !superLyricFallbackModeActive) {
+            return;
+        }
+        SuperLyricApi.SuperLyricFallbackPayload payload = null;
+        String pkg = resolveCurrentLyricsPackageName();
+        String title = stableTitle != null ? stableTitle : "";
+        String artist = stableArtist != null ? stableArtist : "";
+        if (!TextUtils.isEmpty(title)) {
+            payload = SuperLyricApi.peekCachedFallbackPayload(title, artist, pkg);
+        }
+        if (payload == null || payload.text == null || payload.text.trim().isEmpty()) {
+            return;
+        }
+        if (lyricsView != null && lyricsView.isTrackLoading() && isMixedLyricsSourceMode()) {
+            return;
+        }
+        int seq = lyricsRequestSeq;
+        String tk = currentTrackKey != null ? currentTrackKey : "";
+        applySuperLyricFallbackPayload(payload, pkg, seq, tk);
+    }
+
+    /** onResume / 背屏 UI 就绪后恢复 ModuleDemo 式接收链路。 */
+    private void resumeSuperLyricLyricsPipeline() {
+        if (isNetworkOnlyLyricsSourceMode() || isKuwoAwaitingNativeLyrics()) {
+            return;
+        }
+        SuperLyricApi.ensureReceiverRegistered();
+        if (isMixedLyricsSourceMode()) {
+            startSuperLyricRealtimeTicker();
+            return;
+        }
+        if (!shouldUseNetworkApiSource()) {
+            startSuperLyricRealtimeTicker();
+        }
     }
 
     private void stopSuperLyricRealtimeTicker() {
         try {
-            if (superLyricRealtimeRunnable != null) {
-                uiHandler.removeCallbacks(superLyricRealtimeRunnable);
-                superLyricRealtimeRunnable = null;
-            }
         } catch (Exception ignored) {
         }
         if (superLyricRealtimeListener != null) {
@@ -939,18 +1697,79 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             }
             superLyricRealtimeListener = null;
         }
-        superLyricRealtimeInFlight.set(false);
-        lastSuperLyricRealtimeText = "";
+        lastSuperLyricAppliedTextNormalized = "";
+        lastSuperLyricAppliedLineTimeMs = -1L;
+        cachedWordFusionPayload = null;
+        wordFusionGeneration.incrementAndGet();
+    }
+
+    private void cacheSuperLyricWordFusionPayload(SuperLyricApi.SuperLyricFallbackPayload payload) {
+        if (payload == null || !payload.hasValidWords()) {
+            return;
+        }
+        cachedWordFusionPayload = payload;
+    }
+
+    /**
+     * 多行结构刚就绪时，用已缓存的 SuperLyric 逐字立即补融合（无需等待下一次 Binder 推送）。
+     */
+    private void tryFlushCachedSuperLyricWordFusion() {
+        if (!canUseSuperLyricWordFusion()) {
+            return;
+        }
+        SuperLyricApi.SuperLyricFallbackPayload payload = cachedWordFusionPayload;
+        if (payload == null || !payload.hasValidWords()) {
+            String pkg = resolveCurrentLyricsPackageName();
+            payload = SuperLyricApi.peekCachedFallbackPayload(stableTitle, stableArtist, pkg);
+            if (payload != null && payload.hasValidWords()) {
+                cachedWordFusionPayload = payload;
+            }
+        }
+        if (payload == null || !payload.hasValidWords()) {
+            return;
+        }
+        int seq = lyricsRequestSeq;
+        String tk = currentTrackKey != null ? currentTrackKey : "";
+        applySuperLyricWordFusionPayload(payload, resolveCurrentLyricsPackageName(), seq, tk);
     }
 
     private boolean shouldAcceptApiResultForTrack(String pkg) {
+        if (isSuperLyricOnlySourceMode()) {
+            return false;
+        }
         // 当前由 SuperLyric 兜底时，若 API 命中应允许覆盖以恢复完整 LRC。
         if (currentLyricsSource == LyricsSource.SUPER_LYRIC_FALLBACK) return true;
+        // 酷我专用通道已有歌词时，不让网络结果覆盖；兜底阶段（kuwoAllowThirdPartyFallback）允许
+        if (currentLyricsSource == LyricsSource.KUWO_CAR) {
+            if (kuwoAllowThirdPartyFallback) {
+                return true;
+            }
+            return enhancedLyricLines == null || enhancedLyricLines.isEmpty();
+        }
         // 若 API 来源包名与当前不一致，也不要覆盖
         if (pkg != null && !pkg.isEmpty() && currentLyricsSourcePkg != null && !currentLyricsSourcePkg.isEmpty()) {
             return pkg.equalsIgnoreCase(currentLyricsSourcePkg);
         }
         return true;
+    }
+
+    private static LyricsRuntimeSource resolveNetworkRuntimeSource(String provider) {
+        if (TextUtils.isEmpty(provider)) {
+            return LyricsRuntimeSource.NETWORK;
+        }
+        if ("kugou".equalsIgnoreCase(provider)) {
+            return LyricsRuntimeSource.NETWORK_KUGOU;
+        }
+        if ("qsgc".equalsIgnoreCase(provider)) {
+            return LyricsRuntimeSource.NETWORK_QSGC;
+        }
+        if ("lrclib".equalsIgnoreCase(provider)) {
+            return LyricsRuntimeSource.NETWORK_LRCLIB;
+        }
+        if ("lyrics.ovh".equalsIgnoreCase(provider)) {
+            return LyricsRuntimeSource.NETWORK_LYRICS_OVH;
+        }
+        return LyricsRuntimeSource.NETWORK;
     }
 
     private static String normalizeLyricsSourceMode(String raw) {
@@ -975,8 +1794,244 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         return VALUE_LYRICS_SOURCE_NETWORK_ONLY.equalsIgnoreCase(lyricsSourceMode);
     }
 
+    private boolean isSuperLyricOnlySourceMode() {
+        return VALUE_LYRICS_SOURCE_SUPER_ONLY.equalsIgnoreCase(lyricsSourceMode);
+    }
+
     private boolean shouldUseSuperLyricFallback() {
         return !VALUE_LYRICS_SOURCE_NETWORK_ONLY.equalsIgnoreCase(lyricsSourceMode);
+    }
+
+    /**
+     * 逐行歌词模式才启用逐字显示与 SuperLyric 逐字融合；分词 / 深渊镜 / 省电下关闭。
+     */
+    private boolean supportsWordByWordLyricsFeatures() {
+        return !powerSavingModeEnabled && !shuffleSplitEffectEnabled && !abyssalMirrorEnabled;
+    }
+
+    /**
+     * 智能切换：是否已有网络 API 歌词结构（≥1 行即可逐字融合，与 1.8.4 参考版一致）。
+     * 汽水等待 qsgc 期间走 {@link #superLyricFallbackModeActive} 单句模块，不算网络结构。
+     */
+    private boolean hasMixedModeNetworkLyricsStructure() {
+        if (!isMixedLyricsSourceMode()) {
+            return false;
+        }
+        if (isKuwoAwaitingNativeLyrics() && !kuwoAllowThirdPartyFallback) {
+            return false;
+        }
+        return currentLyricsSource == LyricsSource.NETWORK_API
+            && enhancedLyricLines != null
+            && !enhancedLyricLines.isEmpty()
+            && !superLyricFallbackModeActive;
+    }
+
+    /**
+     * 智能切换 SuperLyric 回调分发（参考 1.8.4）：无网络歌词 → 模块单句+逐字；有网络 → 仅融合逐字，不改行文本。
+     */
+    private boolean dispatchMixedModeSuperLyricPayload(SuperLyricApi.SuperLyricFallbackPayload payload,
+                                                       String sourcePkg,
+                                                       int requestSeq,
+                                                       String trackKey) {
+        // V3.17+: 先校验是否为当前曲目，再缓存逐字，防止切歌后旧回调缓存的数据污染新歌
+        if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
+            return false;
+        }
+        if (payload != null && payload.hasValidWords()) {
+            cacheSuperLyricWordFusionPayload(payload);
+        }
+        if (qishuiAwaitingNetworkLyrics
+            && MusicPlayerLyricsPolicy.allowsQishuiSuperLyricPreviewWhileNetworkPending(sourcePkg, true)) {
+            if (superLyricFallbackModeActive) {
+                return applySuperLyricFallbackPayload(payload, sourcePkg, requestSeq, trackKey);
+            }
+            return false;
+        }
+        boolean hasNetworkStructure = hasMixedModeNetworkLyricsStructure();
+        if (hasNetworkStructure && payload != null && payload.hasValidWords()) {
+            if (applyMixedModeWordFusionPayload(payload, sourcePkg, requestSeq, trackKey)) {
+                return true;
+            }
+            long playbackPosition = resolveLyricsAnchorPositionMs();
+            if (tryApplyStickyWordFusionOnPlaybackLine(
+                payload, sourcePkg, requestSeq, trackKey, playbackPosition)) {
+                return true;
+            }
+            if (BuildConfig.DEBUG) {
+                LogHelper.d(TAG, "⏭ 智能切换·网络在但未融合: text=" + safeShort(payload.text));
+            }
+            return false;
+        }
+        if (hasNetworkStructure) {
+            return false;
+        }
+        return applySuperLyricFallbackPayload(payload, sourcePkg, requestSeq, trackKey);
+    }
+
+    /** 仅 SuperLyric 模式：模块整曲 LRC 已就绪，可用实时推送逐字对齐到各行。 */
+    private boolean hasSuperLyricModuleMultiLineStructure() {
+        if (!isSuperLyricOnlySourceMode()) {
+            return false;
+        }
+        if (superLyricFallbackModeActive) {
+            return false;
+        }
+        return enhancedLyricLines != null && enhancedLyricLines.size() >= 2;
+    }
+
+    /** 当前显示模式与来源策略均允许 SuperLyric 逐字融合。 */
+    private boolean canUseSuperLyricWordFusion() {
+        if (!supportsWordByWordLyricsFeatures()) {
+            return false;
+        }
+        if (isMixedLyricsSourceMode()) {
+            return hasMixedModeNetworkLyricsStructure();
+        }
+        if (isSuperLyricOnlySourceMode()) {
+            return hasSuperLyricModuleMultiLineStructure();
+        }
+        return false;
+    }
+
+    private void markStructuredLyricsForWordFusion(String sourcePkg,
+                                                   LyricsRuntimeSource runtimeSource,
+                                                   String networkProvider) {
+        superLyricFallbackModeActive = false;
+        currentLyricsSource = LyricsSource.NETWORK_API;
+        currentLyricsSourcePkg = sourcePkg != null ? sourcePkg : "";
+        if (runtimeSource != null) {
+            lastNetworkLyricsRuntimeSource = runtimeSource;
+        }
+        if (networkProvider != null) {
+            lastNetworkLyricsProvider = networkProvider;
+        }
+    }
+
+    /** 仅 SuperLyric 模式：整曲 LRC 来自模块，逐字仅由 Binder 推送写入。 */
+    private void markStructuredLyricsFromSuperLyricModule(String sourcePkg) {
+        superLyricFallbackModeActive = false;
+        currentLyricsSource = LyricsSource.SUPER_LYRIC_FALLBACK;
+        currentLyricsSourcePkg = sourcePkg != null ? sourcePkg : "";
+        lastNetworkLyricsRuntimeSource = LyricsRuntimeSource.SUPER_LYRIC;
+        lastNetworkLyricsProvider = "";
+    }
+
+    /**
+     * 结构化多行歌词入库前整理逐字轴。
+     *
+     * @param clearWordTimestamps true：整曲来自 SuperLyric 模块、逐字由 Binder 推送（仅 SuperLyric / 智能切换占位）；
+     *                          false：来自网络 API / 通知 LRC，保留解析出的逐字时间戳（与 {@linkplain #isNetworkOnlyLyricsSourceMode 网络 API} 一致）。
+     */
+    private void prepareStructuredLyricLines(List<EnhancedLRCParser.EnhancedLyricLine> lines,
+                                             boolean clearWordTimestamps) {
+        if (lines == null) {
+            return;
+        }
+        for (EnhancedLRCParser.EnhancedLyricLine line : lines) {
+            if (line == null) {
+                continue;
+            }
+            line.moduleWordTimeline = false;
+            if (clearWordTimestamps && line.wordTimestamps != null) {
+                line.wordTimestamps.clear();
+            }
+        }
+    }
+
+    /** 与 {@link #prepareStructuredLyricLines(List, boolean)} 配套：网络 API 多行保留 LRC 内嵌逐字轴。 */
+    private void prepareNetworkApiLyricLines(List<EnhancedLRCParser.EnhancedLyricLine> lines) {
+        // V3.17+: 保留LRC内嵌逐字轴作为初始逐字数据，让逐字显示在模块就绪前即可用LRC时间戳工作。
+        // 模块逐字就绪后会通过 commitSuperLyricWordFusion 覆盖对应行，无需在入口清空。
+        prepareStructuredLyricLines(lines, false);
+        sanitizeNetworkLyricLines(lines);
+    }
+
+    /**
+     * 网络 LRC 入库前补齐空字段、保证行时间与索引安全，避免末句错位或 UI 异常。
+     */
+    private static void sanitizeNetworkLyricLines(List<EnhancedLRCParser.EnhancedLyricLine> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return;
+        }
+        for (int i = lines.size() - 1; i >= 0; i--) {
+            if (lines.get(i) == null) {
+                lines.remove(i);
+            }
+        }
+        if (lines.isEmpty()) {
+            return;
+        }
+        long prevTime = -1L;
+        for (int i = 0; i < lines.size(); i++) {
+            EnhancedLRCParser.EnhancedLyricLine line = lines.get(i);
+            if (line.text == null) {
+                line.text = "";
+            } else {
+                line.text = line.text.trim();
+            }
+            if (line.time < 0L) {
+                line.time = 0L;
+            }
+            if (line.time < prevTime) {
+                line.time = prevTime;
+            }
+            prevTime = line.time;
+            if (line.wordTimestamps == null) {
+                line.wordTimestamps = new ArrayList<>();
+            }
+            line.moduleWordTimeline = false;
+        }
+        EnhancedLRCParser.EnhancedLyricLine last = lines.get(lines.size() - 1);
+        if (last != null && last.time < 0L) {
+            last.time = 0L;
+        }
+    }
+
+    /** 0 ≤ index < size，否则 -1。 */
+    private static int clampLyricLineIndex(List<EnhancedLRCParser.EnhancedLyricLine> lines, int index) {
+        if (lines == null || lines.isEmpty() || index < 0 || index >= lines.size()) {
+            return -1;
+        }
+        return index;
+    }
+
+    /** SuperLyric 整曲结构：清空逐字，等待模块推送（与仅 SuperLyric 整曲一致）。 */
+    private void prepareSuperLyricModuleLyricLines(List<EnhancedLRCParser.EnhancedLyricLine> lines) {
+        prepareStructuredLyricLines(lines, true);
+    }
+
+    /**
+     * 仅 SuperLyric 多行逐字：对齐到网络/模块行文本的整曲绝对毫秒轴（与单句 {@link #applySuperLyricFallbackPayload} 中 alignToLineTime 同族，经 map 挂到行文本）。
+     */
+    private static ArrayList<EnhancedLRCParser.WordTimestamp> buildSuperLyricModuleLineWordTimestamps(
+        long lineTimeMs,
+        String lineText,
+        List<EnhancedLRCParser.WordTimestamp> moduleWords,
+        long nextLineTimeMs,
+        long moduleLineStartMs
+    ) {
+        return SuperLyricWordTimestamps.alignAndMapToLineText(
+            lineTimeMs, lineText, moduleWords, nextLineTimeMs, moduleLineStartMs);
+    }
+
+    /**
+     * 当前播放行是否已写入 SuperLyric 模块融合逐字（非 LRC 内嵌轴）。
+     * 智能切换入库时已清 LRC 内嵌轴，故当前行 {@code wordTimestamps} 非空即视为模块融合。
+     * 勿用 {@code lastWordFusionLineIndex} 比对：行边界进度抖动或融合行略滞后时会误判为「时间戳」导致 Debug 来源条来回跳。
+     */
+    private boolean currentLineHasSuperLyricWordFusion() {
+        if (enhancedLyricLines == null || enhancedLyricLines.isEmpty()) {
+            return false;
+        }
+        long position = resolveLyricsAnchorPositionMs();
+        int index = findCurrentLineIndexForAbyssal(enhancedLyricLines, position);
+        if (index < 0 || index >= enhancedLyricLines.size()) {
+            return false;
+        }
+        EnhancedLRCParser.EnhancedLyricLine line = enhancedLyricLines.get(index);
+        return line != null
+            && line.wordTimestamps != null
+            && !line.wordTimestamps.isEmpty();
     }
     
     // 按钮显示/隐藏控制
@@ -1006,10 +2061,114 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         view.setText(text);
     }
 
-    private void updateHookSourceStatusText(String text) {
+    private void updateHookSourceStatusText(LyricsRuntimeSource source) {
+        updateHookSourceStatusText(source, null);
+    }
+
+    /**
+     * Debug：标题下「来源」按歌词来源模式格式化。
+     * <ul>
+     *   <li>网络 API：网络API · 优先级 · 当前歌词来源</li>
+     *   <li>SuperLyric：仅 SuperLyric</li>
+     *   <li>智能切换：智能 · 优先级 · 当前歌词来源 · 逐字信息来源（逐字融合 / 时间戳）</li>
+     * </ul>
+     */
+    private void updateHookSourceStatusText(LyricsRuntimeSource source, String detail) {
         if (!BuildConfig.DEBUG) return;
         if (hookSourceStatusText == null) return;
-        setTextIfChanged(hookSourceStatusText, text != null ? text : "");
+        hookLastRuntimeSource = source != null ? source : LyricsRuntimeSource.IDLE;
+        hookLastRuntimeDetail = detail != null ? detail.trim() : "";
+        refreshHookSourceStatusDisplay();
+    }
+
+    /** 智能切换：逐字融合提交后刷新「逐字信息来源」段。 */
+    private void updateHookSourceStatusWordFusion() {
+        if (!BuildConfig.DEBUG) return;
+        refreshHookSourceStatusDisplay();
+    }
+
+    private void refreshHookSourceStatusDisplay() {
+        if (!BuildConfig.DEBUG || hookSourceStatusText == null) return;
+        if (isSuperLyricOnlySourceMode()) {
+            setTextIfChanged(hookSourceStatusText, "来源：SuperLyric");
+            return;
+        }
+        final String priority = resolveHookPriorityLabel(hookLastRuntimeDetail);
+        final String channel = resolveHookActiveLyricsChannelLabel(
+            hookLastRuntimeSource, hookLastRuntimeDetail);
+        if (isNetworkOnlyLyricsSourceMode()) {
+            setTextIfChanged(hookSourceStatusText,
+                "来源：网络API · " + priority + " · " + channel);
+            return;
+        }
+        if (isMixedLyricsSourceMode()) {
+            final String wordTimelineSource = currentLineHasSuperLyricWordFusion()
+                ? "逐字融合"
+                : "时间戳";
+            setTextIfChanged(hookSourceStatusText,
+                "来源：智能 · " + priority + " · " + channel + " · " + wordTimelineSource);
+        }
+    }
+
+    private String resolveHookPriorityLabel(String detail) {
+        if (detail != null && !detail.isEmpty()) {
+            if (detail.endsWith("汽水优先")) {
+                return "汽水优先";
+            }
+            if (detail.endsWith("酷狗优先")) {
+                return "酷狗优先";
+            }
+            if (detail.startsWith("兜底·")) {
+                return detail.substring("兜底·".length()).trim();
+            }
+            if (detail.startsWith("拉取中·")) {
+                return detail.substring("拉取中·".length()).trim();
+            }
+        }
+        final String pkg = resolveCurrentLyricsPackageName();
+        return MusicPlayerLyricsPolicy.strategyDisplayLabel(
+            MusicPlayerLyricsPolicy.resolvePrimaryStrategy(pkg));
+    }
+
+    private String resolveHookActiveLyricsChannelLabel(LyricsRuntimeSource source, String detail) {
+        if (source == null) {
+            return "—";
+        }
+        switch (source) {
+            case IDLE:
+                return "待机";
+            case ACQUIRING:
+                return "获取中";
+            case KUWO_PENDING:
+                return "等待 AUDIO_LYRIC";
+            case KUWO_AUDIO_LYRIC:
+                return "AUDIO_LYRIC";
+            case SUPER_LYRIC:
+                if (detail != null && !detail.isEmpty() && !isHookStrategyDetail(detail)) {
+                    return detail;
+                }
+                return "SuperLyric";
+            case NETWORK:
+            case NETWORK_KUGOU:
+            case NETWORK_QSGC:
+            case NETWORK_LRCLIB:
+            case NETWORK_LYRICS_OVH:
+                String api = LyricsRuntimeSource.shortApiLabel(lastNetworkLyricsProvider);
+                if (api == null || api.isEmpty() || "网络API".equals(api)) {
+                    api = LyricsRuntimeSource.shortApiLabel(source);
+                }
+                return api;
+            default:
+                return source.getDisplayLabel();
+        }
+    }
+
+    private static boolean isHookStrategyDetail(String detail) {
+        final String d = detail != null ? detail.trim() : "";
+        return "汽水优先".equals(d)
+            || "酷狗优先".equals(d)
+            || d.startsWith("兜底·")
+            || d.startsWith("拉取中·");
     }
 
     private static void setVisibilityIfChanged(View view, int visibility) {
@@ -1070,22 +2229,21 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         public void onServiceConnected(ComponentName name, IBinder service) {
             taskService = ITaskService.Stub.asInterface(service);
             LogHelper.d(TAG, "✅ TaskService已连接（用于屏蔽官方手势服务，RootTaskService）");
-            
-            // 连接成功后，尝试屏蔽官方手势服务，但失败时不再影响投屏生命周期
             checkAndDisableOfficialGesture();
+            RearMirootProjectionLifecycle.reinforceOfficialSubscreenDisabled(getApplicationContext());
+
             uiHandler.post(() -> {
                 if (!isFinishing()) {
                     applyMediaButtonBarInsets();
                 }
             });
             
-            // 延迟500ms再尝试一次，增加成功率
+            // 布局稳定后再应用一次媒体条 inset（与 TaskService 无关）
             if (taskServiceRecheckRunnable != null) {
                 uiHandler.removeCallbacks(taskServiceRecheckRunnable);
             }
             taskServiceRecheckRunnable = () -> {
                 if (taskService != null && !isFinishing()) {
-                    checkAndDisableOfficialGesture();
                     applyMediaButtonBarInsets();
                 }
             };
@@ -1117,6 +2275,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private static final String KEY_BACKGROUND_TEXTURE_ALPHA = "backgroundTextureAlpha";
     private static final String KEY_WORD_BY_WORD = "wordByWord";
     private static final String KEY_SHUFFLE_SPLIT_EFFECT = "shuffleSplitEffect";
+    private static final String KEY_SHUFFLE_SPLIT_MULTICOLOR = "shuffleSplitMulticolor";
     private static final String KEY_SHUFFLE_SPLIT_MODE = "shuffleSplitMode";
     private static final String KEY_SHUFFLE_SPLIT_ONLY_CURRENT_LINE = "shuffleSplitOnlyCurrentLine";
     private static final String KEY_SHUFFLE_SPLIT_SCALE_VARIANCE = "shuffleSplitScaleVariance";
@@ -1127,60 +2286,82 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private static final String KEY_LYRICS_NEON_GLOW_LEGACY = "lyricsNeonGlow";
     private static final String KEY_NEON_BORDER = "neonBorder";
     private static final String KEY_MARQUEE_LIGHT_SIZE = "marqueeLightSize";
+    private static final String KEY_MARQUEE_LIGHT_DURATION_MS = "marqueeLightDurationMs";
     private static final String KEY_GESTURE_CONTROL = "gestureControl";
     private static final String KEY_POWER_SAVING_MODE = "powerSavingMode";
+    private static final String KEY_BORDER_PERFORMANCE_GUARD = "borderPerformanceGuard";
+    private static final String KEY_BORDER_LIGHTWEIGHT_MODE = "borderLightweightMode";
     private static final String KEY_BACKGROUND_TEXTURE = "backgroundTexture";
+    private static final String KEY_ALBUM_ART_BACKGROUND = "albumArtBackground";
+    private static final String KEY_ALBUM_ART_ALPHA_PERCENT = "albumArtAlphaPercent";
+    private static final String KEY_ALBUM_ART_BLUR_RADIUS = "albumArtBlurRadius";
     private static final String KEY_AUTO_PROJECTION = "autoProjection";
-    private static final String KEY_BREATHING_RHYTHM_MS = "breathingRhythmMs";
+    private static final String KEY_BREATHING_ENABLED = "breathingEnabled";
+    private static final String KEY_BREATHING_BPM = "breathingBpm";
     private static final String KEY_BREATHING_SCALE_VARIANCE = "breathingScaleVariance";
     private static final String KEY_BREATHING_DISPLACEMENT_STRENGTH = "breathingDisplacementStrength";
     private static final String KEY_COLOR_CHANGE_INTERVAL_MS = "colorChangeIntervalMs";
-    private static final String KEY_SHUFFLE_LAYOUT_REBUILD_INTERVAL_MS = "shuffleLayoutRebuildIntervalMs";
+    private static final String KEY_RANDOM_COLOR_SWITCH_ENABLED = "randomColorSwitchEnabled";
     private static final String KEY_PROJECTION_SYNC_OFFSET_MS = "projectionSyncOffsetMs";
     private static final String KEY_LYRICS_SOURCE_MODE = "lyricsSourceMode";
     private static final String VALUE_LYRICS_SOURCE_NETWORK_ONLY = "NETWORK_ONLY";
     private static final String VALUE_LYRICS_SOURCE_SUPER_ONLY = "SUPER_LYRIC_ONLY";
     private static final String VALUE_LYRICS_SOURCE_MIXED = "MIXED";
     /** 与 [com.wmqc.miroot.ui.music.LyricsUiSettings] 中默认值一致（毫秒）。 */
-    private static final int DEFAULT_PROJECTION_SYNC_OFFSET_MS = 650;
+    private static final int DEFAULT_PROJECTION_SYNC_OFFSET_MS = 0;
     private static final String KEY_ABYSSAL_MIRROR = "abyssalMirror"; // 深渊镜效果开关
     private static final String KEY_ABYSSAL_GYRO_SENSITIVITY = "abyssalGyroSensitivity"; // 深渊镜陀螺仪跟随倍数
     private static final String KEY_ABYSSAL_MOVABLE_RANGE = "abyssalMovableRange"; // 深渊镜可移动范围倍率
     private static final String KEY_PROJECTION_LYRICS_FONT = "projectionLyricsFont";
     private static final String KEY_PROJECTION_LYRICS_CUSTOM_PATH = "projectionLyricsCustomPath";
-    private static final String KEY_ABYSSAL_LYRICS_FONT = "abyssalLyricsFont";
-    private static final String KEY_ABYSSAL_LYRICS_CUSTOM_PATH = "abyssalLyricsCustomPath";
     private static final float DEFAULT_ABYSSAL_GYRO_SENSITIVITY = 1.0f;
     private static final float DEFAULT_ABYSSAL_MOVABLE_RANGE = 2.5f;
     private static final float DEFAULT_TEXT_SIZE = 65f;  // 默认歌词文本大小65px
     private static final float DEFAULT_BACKGROUND_TEXTURE_SIZE = 1.3f;
     private static final int DEFAULT_NORMAL_LYRICS_ALPHA = 30;  // 30%透明度
     private static final int DEFAULT_BACKGROUND_TEXTURE_ALPHA = 20;  // 20%透明度
-    private static final int DEFAULT_BREATHING_RHYTHM_MS = 2000;
-    private static final float DEFAULT_BREATHING_SCALE_VARIANCE = 0.055f;
+    private static final int DEFAULT_BREATHING_BPM = 15;
+    private static final float DEFAULT_BREATHING_SCALE_VARIANCE = 0.10f;
     private static final float DEFAULT_BREATHING_DISPLACEMENT_STRENGTH = 1f;
-    private static final int DEFAULT_COLOR_CHANGE_INTERVAL_MS = 1500;
-    private static final int DEFAULT_SHUFFLE_LAYOUT_REBUILD_INTERVAL_MS = 0;
+    private static final int DEFAULT_COLOR_CHANGE_INTERVAL_MS = 5000;
+    private static final int MIN_COLOR_CHANGE_INTERVAL_MS = 1000;
+    private static final int MAX_COLOR_CHANGE_INTERVAL_MS = 10000;
+    private static final int DEFAULT_MARQUEE_LIGHT_DURATION_MS = 5000;
+    /**
+     * 背屏左侧条带（摄像头/装饰区）：歌名、控制条与歌词绘制均从此宽度之后开始；
+     * rootLayout 不再做横向 padding，专辑底图仍满屏铺满。
+     */
+    private static final int REAR_LYRICS_LEFT_CLEAR_PX = 277;
     private float currentTextSize = DEFAULT_TEXT_SIZE;
     private float backgroundTextureSize = DEFAULT_BACKGROUND_TEXTURE_SIZE;
     private int normalLyricsAlpha = DEFAULT_NORMAL_LYRICS_ALPHA;
     private int backgroundTextureAlpha = DEFAULT_BACKGROUND_TEXTURE_ALPHA;
     private boolean wordByWordEnabled = false;  // 默认关闭逐字显示
     private boolean shuffleSplitEffectEnabled = false;
+    private boolean shuffleSplitMulticolorEnabled = false;
     private String shuffleSplitMode = "WORD";
     private boolean shuffleSplitOnlyCurrentLine = true;
     private boolean marqueeLightEnabled = true;  // 默认开启跑马灯
     private boolean neonDisplayEnabled = true;  // 霓虹总开关（歌词发光 + 边框受 neonBorder 约束）
     private boolean neonBorderEnabled = true;  // 「边框显示」：是否绘制边缘边框（无霓虹时为纯描边）
     private float marqueeLightSize = 17f;  // 默认跑马灯线条宽度17px
+    private int marqueeLightDurationMs = DEFAULT_MARQUEE_LIGHT_DURATION_MS;
     private boolean gestureControlEnabled = false;  // 默认关闭手势控制
     private boolean powerSavingModeEnabled = false;  // 默认关闭省电模式
+    private boolean borderPerformanceGuardEnabled = false;
+    private boolean borderLightweightModeEnabled = false;
     private boolean backgroundTextureEnabled = false;  // 默认关闭歌词底图显示
-    private int breathingRhythmMs = DEFAULT_BREATHING_RHYTHM_MS;
+    private boolean albumArtBackgroundEnabled = false;
+    private int albumArtAlphaPercent = DEFAULT_ALBUM_ART_ALPHA_PERCENT;
+    private float albumArtBlurRadiusPx = DEFAULT_ALBUM_ART_BLUR_RADIUS_PX;
+    private Bitmap currentAlbumArtBitmap;
+    private boolean breathingEnabled = false;
+    private int breathingBpm = DEFAULT_BREATHING_BPM;
     private float breathingScaleVariance = DEFAULT_BREATHING_SCALE_VARIANCE;
     private float breathingDisplacementStrength = DEFAULT_BREATHING_DISPLACEMENT_STRENGTH;
+    
     private int colorChangeIntervalMs = DEFAULT_COLOR_CHANGE_INTERVAL_MS;
-    private int shuffleLayoutRebuildIntervalMs = DEFAULT_SHUFFLE_LAYOUT_REBUILD_INTERVAL_MS;
+    private boolean randomColorSwitchEnabled = true;
     /** 与 [com.wmqc.miroot.ui.music.LyricsSettingsRepository] 键名一致；正数表示歌词相对媒体进度提前显示（毫秒）。 */
     private int projectionSyncOffsetMs = DEFAULT_PROJECTION_SYNC_OFFSET_MS;
     private boolean abyssalMirrorEnabled = false;  // 默认关闭深渊镜效果
@@ -1188,19 +2369,16 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private float abyssalMovableRange = DEFAULT_ABYSSAL_MOVABLE_RANGE;  // 深渊镜可移动范围倍率
     private String projectionLyricsFontId = LyricsFontHelper.DEFAULT_ID;
     private String projectionLyricsCustomPath;
-    private String abyssalLyricsFontId = LyricsFontHelper.DEFAULT_ID;
-    private String abyssalLyricsCustomPath;
     private String lyricsSourceMode = VALUE_LYRICS_SOURCE_MIXED;
     private String lastAppliedSettingsFingerprint = "";
+    private static final int DEFAULT_ALBUM_ART_ALPHA_PERCENT = 35;
+    private static final float DEFAULT_ALBUM_ART_BLUR_RADIUS_PX = 12f;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         // 禁用转场动画（去掉背屏切换界面的动画）
         overridePendingTransition(0, 0);
-        
-        // 固定黑底，避免退出/切换瞬间透出系统底色导致闪白
-        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
         
         // 检查是否是点击通知结束投屏
         if (getIntent() != null && "ACTION_STOP_PROJECTION".equals(getIntent().getAction())) {
@@ -1213,7 +2391,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
                 
                 // 统一防闪白退出流程：淡出->隐藏->恢复->销毁
-                requestProjectionExitSequence("onCreate-stop-intent");
+                finishProjectionFromUser("onCreate-stop-intent");
                 // 确保立即返回，不执行后续代码
                 return;
             } catch (Exception e) {
@@ -1221,7 +2399,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 // 即使发生异常，也尝试清理资源并销毁Activity
                 try {
                     getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
-                    requestProjectionExitSequence("onCreate-stop-intent-error");
+                    finishProjectionFromUser("onCreate-stop-intent-error");
                 } catch (Exception e2) {
                     LogHelper.e(TAG, "❌ 销毁Activity时发生异常", e2);
                 }
@@ -1232,11 +2410,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         // 兜底校验：防止磁贴/外部组件直接 am start 该 Activity 从而绕过 MainActivity 的激活门禁。
         if (!OfflineActivationRepository.INSTANCE.isActivated(this)) {
             try {
-                android.widget.Toast.makeText(
+                MainDisplayUi.showToast(
                     this,
                     getString(R.string.activation_required_to_use),
                     android.widget.Toast.LENGTH_SHORT
-                ).show();
+                );
             } catch (Throwable ignored) {
             }
             Intent i = new Intent(this, MainActivity.class);
@@ -1251,6 +2429,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
 
         registerLyricsProjectionBackPressedCallback();
+        RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+        RootTaskServiceConnector.prewarm(this);
 
         // 检查是否通过广播启动（通过Intent的extra参数判断）
         Intent intent = getIntent();
@@ -1338,6 +2518,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         if (displayId == 1) {
             initialDisplayId = displayId;
             LogHelper.d(TAG, "🎯 在背屏执行，开始设置歌词显示");
+            RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
 
             setupWindow();
 
@@ -1368,7 +2549,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
 
         LogHelper.d(TAG, "💤 在主屏占位等待迁往背屏（最长 " + MAIN_SCREEN_PLACEHOLDER_TIMEOUT_MS + "ms）");
+        RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(
+                this, RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_TRANSPARENT_PLACEHOLDER);
         scheduleMainScreenPlaceholderTimeout();
+        schedulePollRearLyricsUiInitAfterMove();
+        RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
         return;
     }
 
@@ -1382,45 +2567,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 @Override
                 public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
                     if ("flutter.keep_screen_on_enabled".equals(key)) {
-                        // 开关状态变化，实时响应
-                        boolean keepScreenOnEnabled = sharedPreferences.getBoolean(key, true);
-                        LogHelper.d(TAG, "🔆 背屏常亮开关状态变化: " + (keepScreenOnEnabled ? "开启" : "关闭"));
-                        
-                        // 在主线程中处理
-                        uiHandler.post(() -> {
-                            try {
-                                // 检查是否在背屏
-                                int displayId = 0;
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                    try {
-                                        displayId = getDisplay().getDisplayId();
-                                    } catch (Exception e) {
-                                        // 忽略错误
-                                    }
-                                }
-                                
-                                // 检查UI是否已创建
-                                boolean hasUI = hasLyricsView();
-                                
-                                if (displayId == 1 && hasUI && !isFinishing() && !isDestroyed()) {
-                                    if (keepScreenOnEnabled) {
-                                        ProjectionOnlyNotificationHelper.cancelMusic(RearScreenLyricsActivity.this);
-                                        RearScreenWakeManager.getInstance().startWakeService(
-                                                getApplicationContext(),
-                                                RearScreenLyricsActivity.class);
-                                        RearScreenWakeService.requestNotificationRefresh(RearScreenLyricsActivity.this);
-                                    } else {
-                                        RearScreenWakeManager.getInstance().stopWakeService(
-                                                getApplicationContext(),
-                                                RearScreenLyricsActivity.class);
-                                        ProjectionOnlyNotificationHelper.showMusic(RearScreenLyricsActivity.this);
-                                    }
-                                    setupWindow();
-                                }
-                            } catch (Exception e) {
-                                LogHelper.e(TAG, "❌ 处理背屏常亮开关状态变化失败", e);
-                            }
-                        });
+                        LogHelper.d(TAG, "🔆 背屏常亮(Flutter)偏好变化 -> 同步 Wake 注册");
+                        uiHandler.post(RearScreenLyricsActivity.this::applyMusicProjectionKeepScreenWakeFromPrefs);
                     }
                 }
             };
@@ -1443,6 +2591,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
                     if (RearAssistPrefs.KEY_PROXIMITY.equals(key)) {
                         uiHandler.post(RearScreenLyricsActivity.this::updateProjectionProximitySession);
+                    } else if (RearAssistPrefs.KEY_KEEP_SCREEN_ON.equals(key)) {
+                        LogHelper.d(TAG, "🔆 背屏常亮(miroot_rear_assist)变化 -> 同步 Wake 注册");
+                        uiHandler.post(RearScreenLyricsActivity.this::applyMusicProjectionKeepScreenWakeFromPrefs);
                     }
                 }
             };
@@ -1491,20 +2642,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
      * 设置窗口属性（统一管理窗口flags）
      */
     private void setupWindow() {
-        // 固定黑底，避免切换/退出瞬间闪白
-        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
-        // 结束投屏等路径会临时加 FLAG_NOT_TOUCHABLE；正常显示时必须可触摸、可聚焦
-        RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+        RearMirootProjectionLifecycle.applyRearOpaqueWindowBase(this, 0xFF000000);
 
-        // 音乐投屏时保持常亮（根据用户设置决定）
-        boolean keepScreenOnEnabled = true; // 默认开启
-        try {
-            SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-            keepScreenOnEnabled = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-        } catch (Exception e) {
-            LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-        }
-        
+        // 音乐投屏时保持常亮（与功能页「投屏常亮」一致）
+        boolean keepScreenOnEnabled = isProjectionKeepScreenOnEnabled();
+
         if (keepScreenOnEnabled) {
             // 保持常亮 + 锁屏显示 + 点亮屏幕
             getWindow().addFlags(
@@ -1575,16 +2717,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     LogHelper.d(TAG, "📱 检测到屏幕关闭（双击息屏），立即重新点亮屏幕");
                     uiHandler.post(() -> {
                         try {
+                            pauseRearStopExitGraceForScreenOff();
                             if (!isFinishing() && !isDestroyed() && getWindow() != null) {
-                                // 检查背屏常亮开关
-                                boolean keepScreenOnEnabled = true; // 默认开启
-                                try {
-                                    SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                                    keepScreenOnEnabled = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                                } catch (Exception e) {
-                                    // 忽略错误
-                                }
-                                
+                                boolean keepScreenOnEnabled = isProjectionKeepScreenOnEnabled();
+
                                 // 将变量声明为final，以便在内部lambda中使用
                                 final boolean keepScreenOnEnabledFinal = keepScreenOnEnabled;
                                 
@@ -1648,6 +2784,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                                     uiHandler.postDelayed(screenOffWakeRetryRunnable, 100); // 100ms延迟
                                     
                                     LogHelper.d(TAG, "✅ 已重新应用常亮flags（双击息屏后）");
+                                    ensureProjectionWakeServiceAfterScreenOff();
                                 }
                             }
                         } catch (Exception e) {
@@ -1659,16 +2796,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     LogHelper.d(TAG, "📱 屏幕点亮/解锁，立即重新应用常亮flags");
                     uiHandler.post(() -> {
                         try {
+                            handleProjectionForegroundAfterStopGrace();
                             if (!isFinishing() && !isDestroyed() && getWindow() != null) {
-                                // 检查背屏常亮开关
-                                boolean keepScreenOnEnabled = true; // 默认开启
-                                try {
-                                    SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                                    keepScreenOnEnabled = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                                } catch (Exception e) {
-                                    // 忽略错误
-                                }
-                                
+                                // 检查背屏常亮开关（与功能页一致）
+                                boolean keepScreenOnEnabled = isProjectionKeepScreenOnEnabled();
+
                                 if (keepScreenOnEnabled) {
                                     // 立即重新应用常亮flags（与未投屏时常亮实现方式一致）
                                     getWindow().addFlags(
@@ -1731,7 +2863,26 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             android.widget.FrameLayout frameLayout = new android.widget.FrameLayout(this);
             mainFrameLayout = frameLayout;
             frameLayout.setBackgroundColor(0xFF000000); // 纯黑色背景
+            frameLayout.setClipToPadding(false);
+            frameLayout.setClipChildren(false);
             applyRenderFrameRateBudget(frameLayout);
+            albumArtBackgroundView = new ImageView(this);
+            // 专辑图背景不固定分辨率（如 976x596）；始终按当前设备背屏实际尺寸铺满，
+            // 保持 CENTER_CROP + 居中：无黑边、无拉伸、等比裁剪填充。
+            albumArtBackgroundView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            albumArtBackgroundView.setAdjustViewBounds(false);
+            albumArtBackgroundView.setCropToPadding(false);
+            albumArtBackgroundView.setAlpha(albumArtAlphaPercent / 100f);
+            setVisibilityIfChanged(albumArtBackgroundView, View.GONE);
+            android.widget.FrameLayout.LayoutParams albumBgParams = new android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            );
+            albumBgParams.gravity = android.view.Gravity.CENTER;
+            frameLayout.addView(
+                albumArtBackgroundView,
+                albumBgParams
+            );
             if (abyssalMirrorEnabled) {
                 frameLayout.setPadding(0, 0, 0, 0);
                 frameLayout.setFitsSystemWindows(false); // 深渊镜：左右铺满，不消费 insets
@@ -1757,7 +2908,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         songTitleText.setTextSize(songTitleTextSize);
         songTitleText.setTypeface(null, android.graphics.Typeface.NORMAL);
         songTitleText.setGravity(android.view.Gravity.CENTER | android.view.Gravity.BOTTOM); // 水平居中，垂直底部对齐
-        songTitleText.setPadding(0, 8, 0, 15);
+        songTitleText.setPadding(0, 8, songTitleRightPaddingPx(), 15);
         
         // 启用滚动显示（marquee）
         songTitleText.setEllipsize(android.text.TextUtils.TruncateAt.MARQUEE);
@@ -1765,17 +2916,47 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         songTitleText.setSingleLine(true);
         songTitleText.setSelected(true); // 必须设置为selected才能滚动
         
-        // 为歌曲名称区域添加点击监听器，切换按钮显示/隐藏
-        songTitleText.setOnClickListener(v -> {
-            toggleButtonsVisibility();
+        // 歌名区域统一手势：单击显隐按钮、长按开关跑马灯、左右滑切歌（互斥处理，避免冲突）
+        final int titleSwipeMinDistancePx = dp(84);
+        final int titleSwipeMinVelocityPx = dp(48);
+        final float titleSwipeDirectionRatio = 1.35f;
+        final GestureDetector titleGestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDown(MotionEvent e) {
+                return true;
+            }
+
+            @Override
+            public boolean onSingleTapConfirmed(MotionEvent e) {
+                toggleButtonsVisibility();
+                return true;
+            }
+
+            @Override
+            public void onLongPress(MotionEvent e) {
+                toggleMarqueeLight();
+            }
+
+            @Override
+            public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                if (e1 == null || e2 == null) return false;
+                float dx = e2.getX() - e1.getX();
+                float dy = e2.getY() - e1.getY();
+                float absDx = Math.abs(dx);
+                float absDy = Math.abs(dy);
+                if (absDx < titleSwipeMinDistancePx) return false;
+                if (absDx <= absDy * titleSwipeDirectionRatio) return false;
+                if (Math.abs(velocityX) < titleSwipeMinVelocityPx || Math.abs(velocityX) <= Math.abs(velocityY)) {
+                    return false;
+                }
+                if (dx < 0) {
+                    executeMediaSkip(false, "歌名区左滑上一首");
+                } else {
+                    executeMediaSkip(true, "歌名区右滑下一首");
+                }
+                return true;
+            }
         });
-        
-        // 长按歌曲名称切换跑马灯显示/隐藏
-        songTitleText.setOnLongClickListener(v -> {
-            toggleMarqueeLight();
-            return true;
-        });
-        
         // 计算顶部距离：跑马灯宽度 + 2px
         int topMargin = (int) (marqueeLightSize + dp(2));
         int leftMargin = dp(20);
@@ -1796,7 +2977,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             hookSourceStatusText.setTextSize(isMainScreenLandscapeMode ? 11f * 1.3f : 11f);
             hookSourceStatusText.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
             hookSourceStatusText.setPadding(0, 0, 0, 10);
-            setTextIfChanged(hookSourceStatusText, "来源：待机");
+            updateHookSourceStatusText(LyricsRuntimeSource.IDLE);
             LinearLayout.LayoutParams hookStatusParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
@@ -1819,22 +3000,27 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             // 深渊镜模式：隐藏歌词名称，全屏显示
             if (songTitleText != null) {
                 setVisibilityIfChanged(songTitleText, View.GONE);
+                setVisibilityIfChanged(gestureTitleLayer, View.GONE);
                 LogHelper.d(TAG, "✅ 深渊镜模式：已隐藏歌词名称");
             }
             
             // 深渊镜模式（使用新的ViewGroup版本，多层边框效果）
-            // 广播启动时通过构造函数传入固定 101px，在 init() 里最先设置，避免与 onSizeChanged 竞态导致圆角有时对有时错
+            // 广播启动时通过构造函数传入固定圆角，在 init() 里最先设置，避免与 onSizeChanged 竞态导致圆角有时对有时错
             try {
-                abyssalMirrorLyricsViewGroup = new AbyssalMirrorLyricsViewGroup(this, shouldUseFixedCornerRadius101());
+                abyssalMirrorLyricsViewGroup = new AbyssalMirrorLyricsViewGroup(this, shouldUseFixedRearProjectionCornerRadius());
                 // 设置是否为主屏横屏模式（用于调整圆角半径）
                 abyssalMirrorLyricsViewGroup.setMainScreenLandscapeMode(isMainScreenLandscapeMode);
                 // 使用调整后的字体大小（主屏横屏模式已x2）
                 abyssalMirrorLyricsViewGroup.setTextSize(currentTextSize);
-                abyssalMirrorLyricsViewGroup.setTextColor(0xFFFFFFFF); // 白色
+                abyssalMirrorLyricsViewGroup.setTextColor(randomColorSwitchEnabled ? randomHighSaturationColor() : 0xFFFFFFFF);
                 abyssalMirrorLyricsViewGroup.setFitsSystemWindows(false); // 不避系统栏，真正全屏
                 abyssalMirrorLyricsViewGroup.setGyroSensitivityMultiplier(abyssalGyroSensitivity);
                 abyssalMirrorLyricsViewGroup.setMovableRangeMultiplier(abyssalMovableRange);
-                abyssalMirrorLyricsViewGroup.setLyricsTypeface(LyricsFontHelper.resolveTypeface(this, abyssalLyricsFontId, abyssalLyricsCustomPath));
+                abyssalMirrorLyricsViewGroup.setColorChangeIntervalMs(colorChangeIntervalMs);
+                abyssalMirrorLyricsViewGroup.setRandomColorSwitchEnabled(randomColorSwitchEnabled);
+                abyssalMirrorLyricsViewGroup.setPerformanceGuardEnabled(borderPerformanceGuardEnabled);
+                abyssalMirrorLyricsViewGroup.setLightweightModeEnabled(powerSavingModeEnabled || borderLightweightModeEnabled);
+                abyssalMirrorLyricsViewGroup.setLyricsTypeface(LyricsFontHelper.resolveTypeface(this, projectionLyricsFontId, projectionLyricsCustomPath));
                 // 深渊镜不加入 rootLayout，在后面直接加入 frameLayout（MATCH_PARENT），避免在上层被约束导致不全屏
                 
                 // 如果已有歌词数据，立即设置到视图
@@ -1860,6 +3046,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 // 恢复歌词名称显示
                 if (songTitleText != null) {
                     setVisibilityIfChanged(songTitleText, View.VISIBLE);
+                    setVisibilityIfChanged(gestureTitleLayer, View.VISIBLE);
                 }
                 // 继续执行普通模式的创建
             }
@@ -1869,7 +3056,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     @Override
                     public void onPrevious() {
                         if (!checkNotificationListenerPermission()) {
-                            android.widget.Toast.makeText(getApplicationContext(), "需要通知监听权限才能控制音乐", android.widget.Toast.LENGTH_LONG).show();
+                            MainDisplayUi.showToast(getApplicationContext(), "需要通知监听权限才能控制音乐", android.widget.Toast.LENGTH_LONG);
                             openNotificationListenerSettings();
                             return;
                         }
@@ -1877,7 +3064,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                         if (mediaController == null) {
                             setupMediaController();
                             if (mediaController == null) {
-                                android.widget.Toast.makeText(getApplicationContext(), "无法获取音乐控制器", android.widget.Toast.LENGTH_SHORT).show();
+                                MainDisplayUi.showToast(getApplicationContext(), "无法获取音乐控制器", android.widget.Toast.LENGTH_SHORT);
                                 return;
                             }
                         }
@@ -1889,14 +3076,14 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     @Override
                     public void onNext() {
                         if (!checkNotificationListenerPermission()) {
-                            android.widget.Toast.makeText(getApplicationContext(), "需要通知监听权限才能控制音乐", android.widget.Toast.LENGTH_LONG).show();
+                            MainDisplayUi.showToast(getApplicationContext(), "需要通知监听权限才能控制音乐", android.widget.Toast.LENGTH_LONG);
                             openNotificationListenerSettings();
                             return;
                         }
                         if (mediaController == null) {
                             setupMediaController();
                             if (mediaController == null) {
-                                android.widget.Toast.makeText(getApplicationContext(), "无法获取音乐控制器", android.widget.Toast.LENGTH_SHORT).show();
+                                MainDisplayUi.showToast(getApplicationContext(), "无法获取音乐控制器", android.widget.Toast.LENGTH_SHORT);
                                 return;
                             }
                         }
@@ -1915,16 +3102,22 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             lyricsView = new ModernLyricsView(this);
             applyRenderFrameRateBudget(lyricsView);
             lyricsView.setShowTranslation(true);     // 显示翻译
-            lyricsView.setEnableWordByWord(wordByWordEnabled);    // 使用保存的设置
+            lyricsView.setEnableWordByWord(effectiveWordByWordForSuperLyric(null));
             lyricsView.setShowProgress(false);       // 不显示进度条
             lyricsView.setEnableGesture(gestureControlEnabled);  // 使用保存的手势控制设置
             lyricsView.setTextSize(currentTextSize);  // 使用保存的字体大小（主屏横屏模式已x2）
-            lyricsView.setBreathingRhythmMs(breathingRhythmMs);
-            lyricsView.setBreathingScaleVariance(breathingScaleVariance);
-            lyricsView.setBreathingDisplacementStrength(breathingDisplacementStrength);
+            lyricsView.setBreathingRhythmMs(breathingBpmToRhythmMs(breathingBpm));
+            lyricsView.setBreathingScaleVariance(
+                (powerSavingModeEnabled || !breathingEnabled) ? 0f : breathingScaleVariance
+            );
+            lyricsView.setBreathingDisplacementStrength(
+                (powerSavingModeEnabled || !breathingEnabled) ? 0f : breathingDisplacementStrength
+            );
+            // 与 SharedPreferences 中 breathingEnabled 对齐：未调用则 ModernLyricsView 默认不启动呼吸 ValueAnimator
+            lyricsView.setBreathingScaleEnabled(breathingEnabled && !powerSavingModeEnabled);
             lyricsView.setColorChangeIntervalMs(colorChangeIntervalMs);
-            lyricsView.setShuffleLayoutRebuildIntervalMs(shuffleLayoutRebuildIntervalMs);
-            
+            lyricsView.setShuffleLayoutRebuildIntervalMs(0L);
+
             // 主屏横屏模式：调大行间距（1.5倍，因为主屏幕可用分辨率大）
             if (isMainScreenLandscapeMode) {
                 float defaultLineSpacing = 160f; // 默认行间距
@@ -1936,8 +3129,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             lyricsView.setBackgroundTextureSize(backgroundTextureSize);  // 使用保存的底图字体大小倍数（跟随字体大小）
             lyricsView.setShowBackgroundTexture(backgroundTextureEnabled);  // 使用保存的底图显示设置
             
-            // 歌词使用随机颜色，不跟随跑马灯
-            lyricsView.setColorSyncEnabled(false);  // 禁用颜色联动，让歌词使用自己的随机颜色
+            // 歌词颜色由调试开关控制：随机节奏变色或固定高可读黑白配色；跑马灯/边框跟随歌词当前色。
+            lyricsView.setColorSyncEnabled(true);
+            lyricsView.setRandomColorSwitchEnabled(randomColorSwitchEnabled);
             lyricsView.setNeonLyricsEnabled(neonDisplayEnabled);
             lyricsView.setLyricsFont(projectionLyricsFontId, projectionLyricsCustomPath);
             lyricsView.setTimeAdjustOffset(projectionSyncOffsetMs);
@@ -1949,20 +3143,21 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 1.0f  // 占据剩余空间
             );
             lyricsView.setLayoutParams(lyricsParams);
-            
+            lyricsView.setLyricsHorizontalInsetPx(isMainScreenLandscapeMode ? 0 : REAR_LYRICS_LEFT_CLEAR_PX);
+
             // 设置歌词行点击监听器（点击行可跳转）
             lyricsView.setOnLyricLineClickListener(new ModernLyricsView.OnLyricLineClickListener() {
                 @Override
                 public void onLyricLineClick(int lineIndex) {
                     if (!checkNotificationListenerPermission()) {
-                        android.widget.Toast.makeText(getApplicationContext(), "需要通知监听权限才能跳转进度", android.widget.Toast.LENGTH_LONG).show();
+                        MainDisplayUi.showToast(getApplicationContext(), "需要通知监听权限才能跳转进度", android.widget.Toast.LENGTH_LONG);
                         openNotificationListenerSettings();
                         return;
                     }
                     if (mediaController == null) {
                         setupMediaController();
                         if (mediaController == null) {
-                            android.widget.Toast.makeText(getApplicationContext(), "无法获取音乐控制器", android.widget.Toast.LENGTH_SHORT).show();
+                            MainDisplayUi.showToast(getApplicationContext(), "无法获取音乐控制器", android.widget.Toast.LENGTH_SHORT);
                             return;
                         }
                     }
@@ -1986,40 +3181,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             LogHelper.d(TAG, "✅ 已创建普通歌词视图");
         }
 
-        // MV layer: full-screen video + bottom 1-line lyric (only shown when MV url is available)
-        mvLayer = new android.widget.FrameLayout(this);
-        mvLayer.setBackgroundColor(0xFF000000);
-        applyRenderFrameRateBudget(mvLayer);
-        setVisibilityIfChanged(mvLayer, View.GONE);
-
-        mvPlayerView = new PlayerView(this);
-        mvPlayerView.setUseController(false);
-        mvPlayerView.setKeepScreenOn(true);
-        android.widget.FrameLayout.LayoutParams pvParams = new android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
-        );
-        mvLayer.addView(mvPlayerView, pvParams);
-
-        mvLyricLineView = new TextView(this);
-        setTextIfChanged(mvLyricLineView, "");
-        mvLyricLineView.setTextColor(0xFFFFFFFF);
-        mvLyricLineView.setTextSize(18f);
-        mvLyricLineView.setMaxLines(1);
-        mvLyricLineView.setEllipsize(TextUtils.TruncateAt.END);
-        mvLyricLineView.setPadding(dp(20), dp(10), dp(20), dp(22));
-        mvLyricLineView.setBackgroundColor(0x66000000);
-        android.widget.FrameLayout.LayoutParams mvLineParams = new android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
-        );
-        mvLineParams.gravity = android.view.Gravity.BOTTOM;
-        mvLayer.addView(mvLyricLineView, mvLineParams);
-
-        // tap to exit MV back to lyrics view
-        mvLayer.setOnClickListener(v -> switchToLyricsMode(false));
-        
-        // 控制按钮容器：左侧避让由 applyMediaButtonBarInsets() 根据系统 cutout 计算；三键 weight 均分条内宽度
+        // 控制按钮容器：左侧与歌词区一致的背屏留白，三键在条内均分
         buttonLayout = new LinearLayout(this);
         buttonLayout.setOrientation(LinearLayout.HORIZONTAL);
         buttonLayout.setGravity(android.view.Gravity.CENTER);
@@ -2027,7 +3189,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         setVisibilityIfChanged(buttonLayout, View.GONE);
         buttonsVisible = false;
 
-        int btnGap = dp(10);
+        int btnGap = dp(8);
+        final int compactBtnWidth = dp(44);
+        final int compactBtnHeight = dp(34);
 
         // 上一首按钮
         prevButton = new Button(this);
@@ -2035,33 +3199,13 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         android.graphics.drawable.GradientDrawable prevBg = new android.graphics.drawable.GradientDrawable();
         styleMediaTransportButton(prevButton, prevBg);
         LinearLayout.LayoutParams prevParams = new LinearLayout.LayoutParams(
-            0,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            1f
+            compactBtnWidth,
+            compactBtnHeight
         );
         prevParams.setMarginEnd(btnGap / 2);
         prevButton.setLayoutParams(prevParams);
         prevButton.setOnClickListener(v -> {
-            if (!checkNotificationListenerPermission()) {
-                android.widget.Toast.makeText(getApplicationContext(), "需要通知监听权限才能控制音乐", android.widget.Toast.LENGTH_LONG).show();
-                openNotificationListenerSettings();
-                return;
-            }
-            if (mediaController == null) {
-                setupMediaController();
-                if (mediaController == null) {
-                    android.widget.Toast.makeText(getApplicationContext(), "无法获取音乐控制器", android.widget.Toast.LENGTH_SHORT).show();
-                    return;
-                }
-            }
-            android.media.session.MediaController.TransportControls controls = mediaController.getTransportControls();
-            if (controls != null) {
-                try {
-                    controls.skipToPrevious();
-                } catch (Exception e) {
-                    LogHelper.e(TAG, "发送上一首命令失败", e);
-                }
-            }
+            executeMediaSkip(false, "发送上一首命令");
         });
         buttonLayout.addView(prevButton);
         
@@ -2071,23 +3215,22 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         android.graphics.drawable.GradientDrawable playBg = new android.graphics.drawable.GradientDrawable();
         styleMediaTransportButton(playPauseButton, playBg);
         LinearLayout.LayoutParams playParams = new LinearLayout.LayoutParams(
-            0,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            1f
+            compactBtnWidth,
+            compactBtnHeight
         );
         playParams.setMarginStart(btnGap / 2);
         playParams.setMarginEnd(btnGap / 2);
         playPauseButton.setLayoutParams(playParams);
         playPauseButton.setOnClickListener(v -> {
             if (!checkNotificationListenerPermission()) {
-                android.widget.Toast.makeText(getApplicationContext(), "需要通知监听权限才能控制音乐", android.widget.Toast.LENGTH_LONG).show();
+                MainDisplayUi.showToast(getApplicationContext(), "需要通知监听权限才能控制音乐", android.widget.Toast.LENGTH_LONG);
                 openNotificationListenerSettings();
                 return;
             }
             if (mediaController == null) {
                 setupMediaController();
                 if (mediaController == null) {
-                    android.widget.Toast.makeText(getApplicationContext(), "无法获取音乐控制器", android.widget.Toast.LENGTH_SHORT).show();
+                    MainDisplayUi.showToast(getApplicationContext(), "无法获取音乐控制器", android.widget.Toast.LENGTH_SHORT);
                     return;
                 }
             }
@@ -2115,33 +3258,13 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         android.graphics.drawable.GradientDrawable nextBg = new android.graphics.drawable.GradientDrawable();
         styleMediaTransportButton(nextButton, nextBg);
         LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(
-            0,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            1f
+            compactBtnWidth,
+            compactBtnHeight
         );
         nextParams.setMarginStart(btnGap / 2);
         nextButton.setLayoutParams(nextParams);
         nextButton.setOnClickListener(v -> {
-            if (!checkNotificationListenerPermission()) {
-                android.widget.Toast.makeText(getApplicationContext(), "需要通知监听权限才能控制音乐", android.widget.Toast.LENGTH_LONG).show();
-                openNotificationListenerSettings();
-                return;
-            }
-            if (mediaController == null) {
-                setupMediaController();
-                if (mediaController == null) {
-                    android.widget.Toast.makeText(getApplicationContext(), "无法获取音乐控制器", android.widget.Toast.LENGTH_SHORT).show();
-                    return;
-                }
-            }
-            android.media.session.MediaController.TransportControls controls = mediaController.getTransportControls();
-            if (controls != null) {
-                try {
-                    controls.skipToNext();
-                } catch (Exception e) {
-                    LogHelper.e(TAG, "发送下一首命令失败", e);
-                }
-            }
+            executeMediaSkip(true, "发送下一首命令");
         });
         buttonLayout.addView(nextButton);
         
@@ -2159,22 +3282,19 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             LogHelper.d(TAG, "✅ 内容布局已添加到FrameLayout");
         }
 
-        // MV layer sits above content, below marquee overlay.
-        frameLayout.addView(mvLayer, contentParams);
-        
         mediaButtonBarLayoutParams = new android.widget.FrameLayout.LayoutParams(
             android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
             android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
         );
         mediaButtonBarLayoutParams.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.START;
         frameLayout.addView(buttonLayout, mediaButtonBarLayoutParams);
-        LogHelper.d(TAG, "✅ 控制按钮条已加入根布局（边距由 applyMediaButtonBarInsets 按系统 cutout 更新）");
+        LogHelper.d(TAG, "✅ 控制按钮条已加入根布局（边距由 applyMediaButtonBarInsets 更新）");
 
         
         // 添加跑马灯视图（放在最上层，但设置不拦截触摸事件）
-        // 广播启动时通过构造函数传入固定 101px，避免与 onSizeChanged 竞态导致圆角有时对有时错
+        // 广播启动时通过构造函数传入固定圆角，避免与 onSizeChanged 竞态导致圆角有时对有时错
         try {
-            marqueeLightView = new MarqueeLightView(this, shouldUseFixedCornerRadius101());
+            marqueeLightView = new MarqueeLightView(this, shouldUseFixedRearProjectionCornerRadius());
             // 设置是否为主屏横屏模式（用于重新检测圆角半径）
             marqueeLightView.setMainScreenLandscapeMode(isMainScreenLandscapeMode);
             android.widget.FrameLayout.LayoutParams marqueeParams = new android.widget.FrameLayout.LayoutParams(
@@ -2189,6 +3309,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             marqueeLightView.setNeonEffectsEnabled(neonDisplayEnabled);
             marqueeLightView.setMarqueeLightEnabled(marqueeLightEnabled);  // 设置跑马灯是否启用
             marqueeLightView.setLightSize(marqueeLightSize);  // 设置跑马灯线条宽度（主屏横屏模式已x2.3）
+            marqueeLightView.setAnimationDuration(marqueeLightDurationMs);
+            marqueeLightView.setPerformanceGuardEnabled(borderPerformanceGuardEnabled);
+            marqueeLightView.setLightweightModeEnabled(powerSavingModeEnabled || borderLightweightModeEnabled);
+            marqueeLightView.setColorChangeIntervalMs(colorChangeIntervalMs);
             marqueeLightView.setClickable(false);
             marqueeLightView.setFocusable(false);
             
@@ -2203,6 +3327,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                         // 旧版3D旋转版本（兼容）
                         return abyssalMirrorLyricsView.getTextColor();
                     } else if (lyricsView != null) {
+                        // 关闭随机变色时：逐字橘色仅用于歌词，边框/跑马灯保持浅色联动（经 MarqueeLightView 柔化为偏白灰）
+                        if (!randomColorSwitchEnabled) {
+                            return 0xFFFFFFFF;
+                        }
                         return lyricsView.getCurrentTextColor();
                     }
                     // 如果视图为null，返回默认颜色（白色）
@@ -2220,7 +3348,38 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             // 跑马灯失败不影响主界面显示
         }
 
+        // 顶层透明手势层：放在跑马灯之上，避免边框动画区域影响歌名手势识别
+        gestureTitleLayer = new android.widget.FrameLayout(this);
+        gestureTitleLayer.setBackgroundColor(0x00000000);
+        gestureTitleLayer.setClickable(true);
+        gestureTitleLayer.setFocusable(false);
+        gestureTitleLayer.setOnTouchListener((v, event) -> titleGestureDetector.onTouchEvent(event));
+        final int gestureExtraTop = dp(GESTURE_TITLE_LAYER_EXTRA_TOP_DP);
+        int titleTouchBaseHeight = dp(GESTURE_TITLE_LAYER_BASE_HEIGHT_DP);
+        if (songTitleText != null) {
+            int measured = songTitleText.getMeasuredHeight();
+            int current = songTitleText.getHeight();
+            int raw = Math.max(measured, current);
+            if (raw > 0) {
+                titleTouchBaseHeight = raw;
+            }
+        }
+        final int gestureExtraBottom = dp(GESTURE_TITLE_LAYER_EXTRA_BOTTOM_DP);
+        final int gestureHeight = titleTouchBaseHeight + gestureExtraTop + gestureExtraBottom;
+        final int gestureTopMargin = Math.max(0, topMargin - gestureExtraTop);
+        gestureTitleLayerLayoutParams = new android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+            gestureHeight
+        );
+        gestureTitleLayerLayoutParams.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+        gestureTitleLayerLayoutParams.setMargins(leftMargin, gestureTopMargin, rightMargin, 0);
+        frameLayout.addView(gestureTitleLayer, gestureTitleLayerLayoutParams);
+        if (abyssalMirrorEnabled) {
+            setVisibilityIfChanged(gestureTitleLayer, View.GONE);
+        }
+
         setContentView(frameLayout);
+        applyProjectionBackgroundMode();
         LogHelper.d(TAG, "✅ UI布局创建完成，已设置ContentView");
         
         // 应用安全区域（避开摄像头）
@@ -2228,12 +3387,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         applyMediaButtonBarInsets();
         getWindow().getDecorView().post(this::applyMediaButtonBarInsets);
         
-        // 立即设置系统UI可见性（在setContentView之后，避免闪烁）
-        // 使用post确保decorView已创建
-        // 参考充电动画实现：根据当前所在屏幕决定是否隐藏状态栏（主屏显示，背屏隐藏）
-        getWindow().getDecorView().post(() -> {
-            hideSystemUI(); // 内部会检查displayId，只在背屏时隐藏
-        });
+        // 首帧即应用 insets（内部按 displayId 区分主/背屏），再 post 一次以贴合 layout 稳定后
+        hideSystemUI();
+        getWindow().getDecorView().post(this::hideSystemUI);
         
         } catch (Exception e) {
             LogHelper.e(TAG, "❌ 创建UI布局时发生异常", e);
@@ -2243,10 +3399,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 errorView.setBackgroundColor(0xFF000000);
                 setContentView(errorView);
                 LogHelper.d(TAG, "✅ 已设置错误占位视图");
-                // 错误视图也需要设置系统UI可见性
-                getWindow().getDecorView().post(() -> {
-                    hideSystemUI();
-                });
+                hideSystemUI();
+                getWindow().getDecorView().post(this::hideSystemUI);
             } catch (Exception e2) {
                 LogHelper.e(TAG, "❌ 设置错误占位视图也失败", e2);
             }
@@ -2308,6 +3462,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 @Override
                 public void run() {
                     try {
+                        maybeRefreshMediaControllerForActivePlayer();
                         // 从MediaController同步播放位置
                         if (mediaController != null && mediaController.getPlaybackState() != null) {
                             android.media.session.PlaybackState state = mediaController.getPlaybackState();
@@ -2320,7 +3475,6 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                                 if (lyricsAnimator != null && position >= 0) {
                                     lyricsAnimator.calibratePosition(position, updateTime);
                                 }
-                                
                                 // 播放时每1000ms同步一次（降低频率提升性能）
                                 if (positionSyncHandler != null) {
                                     positionSyncHandler.postDelayed(this, 1000);
@@ -2364,10 +3518,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     }
     
     /**
-     * 背屏常亮总开关开启时注册 {@link RearScreenWakeService}（合并通知）；关闭时仅显示「投屏」通知。
+     * 背屏常亮总开关（与 [RearAssistPrefs] / 功能页一致）开启时注册 {@link RearScreenWakeService}（合并通知）；关闭时仅显示「投屏」通知。
      */
-    private void startMusicProjectionWakeService() {
-        registerRearAssistProximityPreferenceListener();
+    private void applyMusicProjectionKeepScreenWakeFromPrefs() {
         if (isMainScreenLandscapeMode) {
             LogHelper.d(TAG, "⏸️ 主屏横屏模式：不注册背屏前台服务");
             updateProjectionProximitySession();
@@ -2382,13 +3535,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             }
         }
         boolean hasUI = hasLyricsView();
-        boolean keepOn = true;
-        try {
-            SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-            keepOn = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-        } catch (Exception e) {
-            LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-        }
+        boolean keepOn = RearAssistPrefs.INSTANCE.isKeepScreenOnEnabled(this);
         if (displayId == 1 && hasUI && !isFinishing()) {
             try {
                 if (keepOn) {
@@ -2407,7 +3554,18 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         } else {
             LogHelper.d(TAG, "⏸️ 未注册背屏前台服务 (displayId=" + displayId + ", hasUI=" + hasUI + ", isFinishing=" + isFinishing() + ")");
         }
+        if (displayId == 1 && hasUI && !isFinishing() && !isDestroyed()) {
+            setupWindow();
+        }
         updateProjectionProximitySession();
+    }
+
+    /**
+     * 背屏常亮总开关开启时注册 {@link RearScreenWakeService}（合并通知）；关闭时仅显示「投屏」通知。
+     */
+    private void startMusicProjectionWakeService() {
+        registerRearAssistProximityPreferenceListener();
+        applyMusicProjectionKeepScreenWakeFromPrefs();
     }
     
     /**
@@ -2434,7 +3592,12 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private void stopMusicProjectionWakeService() {
         stopMusicProjectionWakeService(false);
     }
-    
+
+    /** 功能页「投屏常亮」与 [RearAssistPrefs] 一致（手势/广播/磁贴入口共用）。 */
+    private boolean isProjectionKeepScreenOnEnabled() {
+        return RearAssistPrefs.INSTANCE.isKeepScreenOnEnabled(this);
+    }
+
     /**
      * 绑定 TaskService（通过 RootTaskService，用于屏蔽/恢复官方手势服务）
      */
@@ -2469,12 +3632,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     }
 
     /**
-     * 仅当「禁用官方背屏服务」开关开启时才屏蔽 {@code com.xiaomi.subscreencenter}（{@link OfficialSubscreenServiceGate}）。
+     * 与 3.4 {@code ProjectionHelper#waitAndDisableGesture} 对齐：TaskService 就绪后再次 force-stop 官方背屏中心，
+     * 与 {@link com.wmqc.miroot.rear.OfficialSubscreenMiRootProjectionSession} 前置禁用互补（迁屏窗口后巩固）。
      */
     private void checkAndDisableOfficialGesture() {
-        if (!OfficialSubscreenServiceGate.isDisableEnabled(this)) {
-            return;
-        }
         disableOfficialGesture();
     }
     
@@ -2487,20 +3648,25 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return;
         }
         
-        if (taskService == null) {
+        ITaskService ts = taskService;
+        if (ts == null) {
+            ts = RootTaskServiceConnector.getIfConnected();
+        }
+        if (ts == null) {
             LogHelper.w(TAG, "⚠️ TaskService未连接，暂无法屏蔽官方手势服务（不影响投屏本身）");
             return;
         }
         
         try {
             LogHelper.d(TAG, "🚫 开始屏蔽官方手势服务（com.xiaomi.subscreencenter）");
-            // 使用disableSubScreenLauncher方法（与其他界面保持一致，使用am force-stop命令）
-            boolean success = taskService.disableSubScreenLauncher();
+            boolean success = ts.disableSubScreenLauncher();
             if (success) {
                 isOfficialGestureDisabled = true;
+                if (taskService == null) {
+                    taskService = ts;
+                }
                 LogHelper.d(TAG, "✅ 已屏蔽官方手势服务（com.xiaomi.subscreencenter）");
                 
-                // 验证是否成功（延迟检查进程是否还在运行，仅记录日志，不显示Toast）
                 if (taskServiceRecheckRunnable != null) {
                     uiHandler.removeCallbacks(taskServiceRecheckRunnable);
                 }
@@ -2644,7 +3810,30 @@ public class RearScreenLyricsActivity extends ComponentActivity {
      * 设置MediaController
      * 每次调用前先注销旧回调，避免 onConfigurationChanged/onDisplayChanged/onResume 多次调用导致重复回调、元数据/播放状态反复触发 loadLyrics 与 updatePositionToView 引起歌词闪烁
      */
+    private void refreshMediaControllerBinding() {
+        setupMediaController();
+        updateMediaInfo();
+        updatePlaybackState();
+    }
+
+    /**
+     * 周期性/播放态回调中校验「当前出声」的 MediaSession；列表未变但播放应用已切换时重绑。
+     */
+    private void maybeRefreshMediaControllerForActivePlayer() {
+        long now = System.currentTimeMillis();
+        if (now - lastMediaControllerRefreshCheckMs < MEDIA_CONTROLLER_REFRESH_CHECK_THROTTLE_MS) {
+            return;
+        }
+        lastMediaControllerRefreshCheckMs = now;
+        KuwoCarLyricsPolicy.maybeRefreshIfNeeded(
+                this,
+                mediaController,
+                kuwoCarLyricsSessionActive,
+                this::refreshMediaControllerBinding);
+    }
+
     private void setupMediaController() {
+        final String previousBoundPkg = lastBoundMediaPackage;
         try {
             if (!checkNotificationListenerPermission()) {
                 LogHelper.wThrottled(TAG, "通知使用权未开启或被系统限制：跳过 MediaController 初始化（MIUI 请检查自启动/后台限制）", 10 * 60 * 1000L);
@@ -2694,6 +3883,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 // 先用活跃会话首位同步挂上 controller；MediaBrowser 连接 KwMediaSession 为异步，否则此期间手势/点击会得到 null
                 mediaController = first;
                 registerMediaControllerCallbacks();
+                noteMediaControllerPackageBound(previousBoundPkg);
                 updateMediaInfo();
                 kuwoCarMediaSessionHelper.connect(
                     controller -> {
@@ -2708,6 +3898,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                         }
                         mediaController = controller;
                         registerMediaControllerCallbacks();
+                        noteMediaControllerPackageBound(lastBoundMediaPackage);
                         LogHelper.d(TAG, "✅ MediaController已设置（酷我车载播放中，直连 KwMediaSession）");
                         updateMediaInfo();
                         tryApplyKuwoLyricsFromCurrentExtras();
@@ -2721,6 +3912,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                                 if (fb != null) {
                                     mediaController = fb;
                                     registerMediaControllerCallbacks();
+                                    noteMediaControllerPackageBound(lastBoundMediaPackage);
                                 }
                             }
                             LogHelper.w(TAG, "⚠ 酷我 MediaBrowser 未连接，回退使用优先活跃会话");
@@ -2737,6 +3929,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             kuwoCarMediaSessionHelper.disconnect();
             mediaController = first;
             registerMediaControllerCallbacks();
+            noteMediaControllerPackageBound(previousBoundPkg);
 
             LogHelper.d(TAG, "✅ MediaController已设置");
         } catch (SecurityException e) {
@@ -2754,9 +3947,55 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
     }
 
-    /** 播放状态与「是否应对酷我走 MediaBrowser」不一致时重绑（如暂停、切应用）。 */
-    private void maybeRefreshMediaControllerForKuwoPolicy() {
-        KuwoCarLyricsPolicy.maybeRefreshIfNeeded(this, kuwoCarLyricsSessionActive, this::setupMediaController);
+    private void noteMediaControllerPackageBound(String previousBoundPkg) {
+        if (mediaController == null) {
+            return;
+        }
+        String newPkg;
+        try {
+            newPkg = mediaController.getPackageName();
+        } catch (Throwable t) {
+            return;
+        }
+        if (newPkg == null || newPkg.isEmpty()) {
+            return;
+        }
+        if (!newPkg.equals(previousBoundPkg) && previousBoundPkg != null && !previousBoundPkg.isEmpty()) {
+            resetLyricsStateForPlayerSwitch(previousBoundPkg, newPkg);
+        }
+        lastBoundMediaPackage = newPkg;
+    }
+
+    /** 用户切换音乐 App：清空旧歌词/去重状态，避免继续显示上一播放器的歌词。 */
+    private void resetLyricsStateForPlayerSwitch(String fromPkg, String toPkg) {
+        LogHelper.d(TAG, "🔄 切换播放器 " + fromPkg + " -> " + toPkg + "，重置歌词状态");
+        lastLyricsLoadTrackSignature = "";
+        stableTrackSignature = "";
+        stableTitle = "";
+        stableArtist = "";
+        stableDurationMs = 0L;
+        lastKuwoAudioLyricTrackKey = "";
+        lastKuwoAudioLyricPayload = "";
+        apiAttemptedTrackKey = "";
+        cancelPendingKuwoNativeFallbackWait();
+        kuwoPostNativeFallbackScheduled = false;
+        kuwoAllowThirdPartyFallback = false;
+        lyricsRequestSeq++;
+        cancelPendingNoLyrics();
+        try {
+            enhancedLyricLines = new ArrayList<>();
+            lastAbyssalRenderedLineIndex = -1;
+            lastAppliedLyricsTrackKey = "";
+            lastAppliedLyricsFingerprint = "";
+            // V3.17+: 先清空歌词视图再置 trackLoading
+            setLyricsToView(null);
+            if (lyricsView != null) {
+                lyricsView.setTrackLoading(true);
+                lyricsView.clearTokenizationCache();
+            }
+            updateHookSourceStatusText(LyricsRuntimeSource.ACQUIRING);
+        } catch (Exception ignored) {
+        }
     }
 
     private void registerMediaControllerCallbacks() {
@@ -2799,7 +4038,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
 
     private void tryApplyKuwoLyricsFromExtrasBundle(Bundle extras) {
         if (extras == null) {
-            maybeKuwoExtrasFallbackToApi("extras=null");
+            LogHelper.d(TAG, "酷我 extras 为空，继续等待 AUDIO_LYRIC（由超时任务兜底）");
             return;
         }
         String json = extras.getString(KuwoAudioLyricParser.EXTRA_AUDIO_LYRIC);
@@ -2821,17 +4060,16 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             cancelPendingNoLyrics();
             superLyricFallbackModeActive = false;
             applyFallbackRenderingModeIfNeeded();
-            if (lyricsView != null) {
-                setLyricsToView(enhancedLyricLines);
-            }
+            setLyricsToView(enhancedLyricLines);
             lastKuwoAudioLyricTrackKey = kuwoTrackKey;
             lastKuwoAudioLyricPayload = json != null ? json : "";
+            markKuwoAudioLyricApplied();
             LogHelper.d(TAG, "✅ 已应用酷我 AUDIO_LYRIC，行数=" + enhancedLyricLines.size());
         });
     }
 
     /**
-     * 酷我 extras 无有效逐行歌词时，使用与 {@link #loadLyrics} 策略 3 相同的第三方 API 兜底（避免仅依赖 onExtrasChanged 时永不触发 API）。
+     * 酷我 extras 无有效逐行歌词时，在专用解析确认失败后走网络 API / 逐字融合兜底。
      */
     private void maybeKuwoExtrasFallbackToApi(String reason) {
         if (!kuwoCarLyricsSessionActive) {
@@ -2842,6 +4080,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 return;
             }
             if (enhancedLyricLines != null && !enhancedLyricLines.isEmpty()) {
+                cancelPendingKuwoNativeFallbackWait();
+                kuwoPostNativeFallbackScheduled = false;
                 return;
             }
             String title = stableTitle;
@@ -2849,8 +4089,14 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 LogHelper.d(TAG, "酷我 extras 无有效歌词，等待下一次 AUDIO_LYRIC（无有效曲名）: " + reason);
                 return;
             }
+            if ("extras=null".equals(reason)) {
+                LogHelper.d(TAG, "酷我 extras 仍为空，继续等待 AUDIO_LYRIC");
+                return;
+            }
             String artist = stableArtist != null ? stableArtist : "";
-            LogHelper.d(TAG, "酷我歌词未就绪（" + reason + "），仅保留酷我专用解析链: " + title + " - " + artist);
+            final int requestSeq = lyricsRequestSeq;
+            final String trackKey = currentTrackKey != null ? currentTrackKey : "";
+            beginKuwoLyricsFallbackAfterNativeFailed(reason, requestSeq, trackKey, title, artist);
         });
     }
 
@@ -2858,14 +4104,64 @@ public class RearScreenLyricsActivity extends ComponentActivity {
      * 酷我 extras 等独立场景：自增请求序号后拉取第三方 API。
      */
     private void fetchLyricsFromSuperLyricApi(String title, String artist, int requestSeq, String trackKey) {
+        // NETWORK_ONLY：任何路径都不允许触发 SuperLyric 拉取。
+        if (isNetworkOnlyLyricsSourceMode()) {
+            return;
+        }
+        if (isKuwoAwaitingNativeLyrics() && !kuwoAllowThirdPartyFallback) {
+            LogHelper.d(TAG, "酷我 AUDIO_LYRIC 等待中，忽略 SuperLyric 拉取");
+            return;
+        }
         if (title == null || title.isEmpty()) return;
         final String finalTitle = title;
         final String finalArtist = artist != null ? artist : "";
         final String sourcePkg = resolveCurrentLyricsPackageName();
         new Thread(() -> {
             try {
-                SuperLyricApi.SuperLyricFallbackPayload payload =
-                    SuperLyricApi.fetchFallbackPayload(finalTitle, finalArtist, sourcePkg);
+                // 先尝试 SuperLyric 模块 Binder 整曲歌词；仅 SuperLyric 模式禁止回落 MediaSession extras。
+                String superLyrics = isSuperLyricOnlySourceMode()
+                    ? SuperLyricApi.fetchLyricsFromModuleBinderOnly(finalTitle, finalArtist, sourcePkg)
+                    : SuperLyricApi.fetchLyrics(
+                        RearScreenLyricsActivity.this,
+                        mediaController,
+                        finalTitle,
+                        finalArtist,
+                        sourcePkg
+                    );
+                if (superLyrics != null && !superLyrics.trim().isEmpty()) {
+                    EnhancedLRCParser.ParseResult parsed = parseLyricsContent(superLyrics);
+                    if (parsed != null && parsed.lines != null && !parsed.lines.isEmpty()) {
+                        runOnUiThread(() -> {
+                            if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
+                                return;
+                            }
+                            prepareSuperLyricModuleLyricLines(parsed.lines);
+                            enhancedLyricLines = parsed.lines;
+                            cancelPendingNoLyrics();
+                            // 有整曲歌词时用正常渲染链路，逐字由后续 SuperLyric 模块回调写入。
+                            if (isMixedLyricsSourceMode()) {
+                                markStructuredLyricsForWordFusion(sourcePkg, LyricsRuntimeSource.SUPER_LYRIC, "");
+                                updateHookSourceStatusText(LyricsRuntimeSource.SUPER_LYRIC, "整曲·待逐字");
+                            } else {
+                                markStructuredLyricsFromSuperLyricModule(sourcePkg);
+                                updateHookSourceStatusText(LyricsRuntimeSource.SUPER_LYRIC, "整曲·待逐字");
+                            }
+                            applyFallbackRenderingModeIfNeeded();
+                            setLyricsToView(enhancedLyricLines);
+                            if (lyricsView != null) {
+                                lyricsView.refreshAllLines();
+                                lyricsView.postInvalidateOnAnimation();
+                            }
+                            tryFlushCachedSuperLyricWordFusion();
+                            LogHelper.d(TAG, "✅ SuperLyric 整曲歌词命中: " + enhancedLyricLines.size() + " 行"
+                                + (isMixedLyricsSourceMode() ? "（智能切换·可逐字融合）" : "（仅模块·可逐字）"));
+                        });
+                        return;
+                    }
+                }
+                SuperLyricApi.SuperLyricFallbackPayload payload = isSuperLyricOnlySourceMode()
+                    ? SuperLyricApi.fetchFallbackPayloadForModuleOnly(finalTitle, finalArtist, sourcePkg)
+                    : SuperLyricApi.fetchFallbackPayload(finalTitle, finalArtist, sourcePkg);
                 if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
                     return;
                 }
@@ -2874,23 +4170,161 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     return;
                 }
                 runOnUiThread(() -> {
-                    if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
-                        return;
+                    if (superLyricRealtimeListener != null) {
+                        tryFlushCachedSuperLyricFallback();
                     }
-                    updateHookSourceStatusText("来源：SuperLyricApi未命中");
-                    scheduleNoLyrics(requestSeq, trackKey);
+                    scheduleNoLyricsIfStillEmpty(
+                        requestSeq, trackKey, LyricsRuntimeSource.SUPER_LYRIC, "未命中");
                 });
             } catch (Exception e) {
                 LogHelper.w(TAG, "SuperLyricApi 读取失败: " + e.getMessage());
-                runOnUiThread(() -> {
-                    if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
-                        return;
-                    }
-                    updateHookSourceStatusText("来源：SuperLyricApi异常");
-                    scheduleNoLyrics(requestSeq, trackKey);
-                });
+                runOnUiThread(() -> scheduleNoLyricsIfStillEmpty(
+                    requestSeq, trackKey, LyricsRuntimeSource.SUPER_LYRIC, "异常"));
             }
         }).start();
+    }
+
+    /**
+     * 在工作线程拉取并解析网络歌词；成功则 post 到主线程应用。
+     *
+     * @return true 表示解析出非空行并已投递 UI（不等待主线程执行完毕）
+     */
+    private boolean fetchAndApplyNetworkLyricsOnWorkerThread(
+            String finalTitle,
+            String finalArtist,
+            long finalDurationMs,
+            boolean strictTitleArtistMatch,
+            boolean enableSecondaryNetworkFallback,
+            int requestSeq,
+            String trackKey,
+            String okLogPrefix) {
+        String sourcePkg = kuwoCarLyricsSessionActive
+            ? KuwoCarMediaSessionHelper.KUWO_PACKAGE
+            : resolveCurrentLyricsPackageName();
+        NetworkLyricsOrchestrator.Payload networkPayload = MusicInfoHelper.fetchNetworkLyricsPayload(
+            RearScreenLyricsActivity.this,
+            finalTitle,
+            finalArtist,
+            finalDurationMs,
+            null,
+            sourcePkg,
+            strictTitleArtistMatch,
+            enableSecondaryNetworkFallback,
+            false
+        );
+        if (networkPayload == null || !networkPayload.success
+            || networkPayload.lyrics == null || networkPayload.lyrics.isEmpty()) {
+            return false;
+        }
+        final String networkProvider = networkPayload.provider != null ? networkPayload.provider : "";
+        final MusicPlayerLyricsPolicy.PrimaryStrategy networkStrategy = networkPayload.strategy;
+        EnhancedLRCParser.ParseResult parsedResult = parseLyricsContent(networkPayload.lyrics);
+        if (parsedResult == null || parsedResult.lines == null || parsedResult.lines.isEmpty()) {
+            LogHelper.w(TAG, "⚠ 歌词解析后为空，原始歌词长度: " + networkPayload.lyrics.length()
+                + " 字符, strictMatch=" + strictTitleArtistMatch
+                + ", provider=" + networkProvider);
+            return false;
+        }
+        final EnhancedLRCParser.ParseResult prFinal = parsedResult;
+        final LyricsRuntimeSource networkRuntimeSource = resolveNetworkRuntimeSource(networkProvider);
+        final String strategyLabel = MusicPlayerLyricsPolicy.strategyDisplayLabel(networkStrategy);
+        runOnUiThread(() -> {
+            try {
+                if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
+                    return;
+                }
+                String curPkg = resolveCurrentLyricsPackageName();
+                if (!shouldAcceptApiResultForTrack(curPkg)) {
+                    LogHelper.d(TAG, "🛡️ API 结果被优先级机制拦截（避免覆盖/闪烁）");
+                    return;
+                }
+                unlockFromSuperLyricFallbackAndApplyNetworkLyrics(
+                    prFinal.lines,
+                    curPkg,
+                    networkRuntimeSource,
+                    strategyLabel,
+                    networkProvider
+                );
+                LogHelper.d(TAG, okLogPrefix + enhancedLyricLines.size() + " 行, provider="
+                    + networkProvider + ", strategy=" + strategyLabel);
+            } catch (Exception e) {
+                LogHelper.e(TAG, "解析API歌词时发生异常: " + e.getMessage(), e);
+            }
+        });
+        return true;
+    }
+
+    /**
+     * 网络 API · 逐字融合（MIXED）：首轮严格匹配；失败后再宽松网络 + 开放兜底。
+     * 网络优先（NETWORK_ONLY）：单次走完编排器全链路。
+     */
+    private boolean tryNetworkLyricsStrictThenLoose(
+            String finalTitle,
+            String finalArtist,
+            long finalDurationMs,
+            int requestSeq,
+            String trackKey) {
+        final boolean mixedMode = isMixedLyricsSourceMode();
+        final boolean networkOnly = isNetworkOnlyLyricsSourceMode();
+        final String networkPkg = kuwoCarLyricsSessionActive
+            ? KuwoCarMediaSessionHelper.KUWO_PACKAGE
+            : resolveCurrentLyricsPackageName();
+        if (MusicPlayerLyricsPolicy.appliesQishuiStrictNetworkFetch(networkPkg, mixedMode, networkOnly)) {
+            LogHelper.d(TAG, "汽水：网络 API 严格匹配 qsgc → 酷狗，不模糊搜索");
+            return fetchAndApplyNetworkLyricsOnWorkerThread(
+                finalTitle,
+                finalArtist,
+                finalDurationMs,
+                true,
+                true,
+                requestSeq,
+                trackKey,
+                "✅ 网络API·汽水严格(qsgc→酷狗)："
+            );
+        }
+
+        if (mixedMode && (finalArtist == null || finalArtist.trim().isEmpty())) {
+            LogHelper.d(TAG, "网络API·逐字融合：歌手元数据为空，跳过严格匹配，尝试宽松网络（含次级 API）");
+            return fetchAndApplyNetworkLyricsOnWorkerThread(
+                finalTitle,
+                finalArtist,
+                finalDurationMs,
+                false,
+                true,
+                requestSeq,
+                trackKey,
+                "✅ 网络API·逐字融合(宽松网络)："
+            );
+        }
+
+        boolean strict = mixedMode;
+        boolean secondary = networkOnly;
+        if (fetchAndApplyNetworkLyricsOnWorkerThread(
+                finalTitle,
+                finalArtist,
+                finalDurationMs,
+                strict,
+                secondary,
+                requestSeq,
+                trackKey,
+                "✅ 从第三方API获取到歌词: "
+            )) {
+            return true;
+        }
+        if (mixedMode && strict) {
+            LogHelper.d(TAG, "网络API·逐字融合：严格匹配无有效歌词，尝试宽松网络（酷狗 + 开放兜底）");
+            return fetchAndApplyNetworkLyricsOnWorkerThread(
+                finalTitle,
+                finalArtist,
+                finalDurationMs,
+                false,
+                true,
+                requestSeq,
+                trackKey,
+                "✅ 网络API·逐字融合(宽松网络)："
+            );
+        }
+        return false;
     }
 
     /**
@@ -2914,130 +4348,83 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         if (title == null || title.isEmpty()) {
             return;
         }
+        if (isKuwoAwaitingNativeLyrics() && !kuwoAllowThirdPartyFallback) {
+            LogHelper.d(TAG, "酷我 AUDIO_LYRIC 等待中，忽略第三方 API: " + logTag);
+            return;
+        }
         if (!shouldUseNetworkApiSource()) {
-            if (shouldUseSuperLyricFallback()) {
-                fetchLyricsFromSuperLyricApi(title, artist, requestSeq, trackKey);
-            } else {
-                scheduleNoLyrics(requestSeq, trackKey);
-            }
+            // SUPER_ONLY：仅走 SuperLyric；NETWORK_ONLY 不会进入这个分支。
+            fetchLyricsFromSuperLyricApi(title, artist, requestSeq, trackKey);
             return;
         }
         if (trackKey != null && !trackKey.isEmpty() && trackKey.equals(inflightApiTrackKey)) {
             LogHelper.d(TAG, "🛡️ API 防重：同曲目请求进行中，跳过重复调用");
             return;
         }
+        if (trackKey != null && !trackKey.isEmpty() && trackKey.equals(apiAttemptedTrackKey)) {
+            LogHelper.d(TAG, "🛡️ API 防重：同曲目已拉取过网络歌词，跳过重复调用");
+            return;
+        }
         inflightApiTrackKey = trackKey != null ? trackKey : "";
+        apiAttemptedTrackKey = inflightApiTrackKey;
         final String finalTitle = title;
         final String finalArtist = artist != null ? artist : "";
         final long finalDurationMs = stableDurationMs;
-        final String finalLyrics = "";
-        final boolean mixedMode = isMixedLyricsSourceMode();
-        final boolean strictTitleArtistMatch = mixedMode;
-        final boolean enableSecondaryNetworkFallback = isNetworkOnlyLyricsSourceMode();
 
         LogHelper.d(TAG, logTag + "，尝试从第三方API获取: " + finalTitle + " - " + finalArtist);
 
         new Thread(() -> {
             try {
-                if (strictTitleArtistMatch && (finalArtist == null || finalArtist.trim().isEmpty())) {
-                    LogHelper.w(TAG, "⚠ 混合模式要求歌名+歌手严格匹配，当前歌手为空，直接切 SuperLyric 兜底");
-                    runOnUiThread(() -> {
-                        if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
-                            return;
+                boolean networkOk = false;
+                try {
+                    networkOk = tryNetworkLyricsStrictThenLoose(
+                        finalTitle, finalArtist, finalDurationMs, requestSeq, trackKey);
+                } catch (Exception e) {
+                    LogHelper.e(TAG, "从第三方API获取歌词失败: " + e.getMessage(), e);
+                    if (isMixedLyricsSourceMode()
+                        && !MusicPlayerLyricsPolicy.appliesQishuiStrictNetworkFetch(
+                            resolveCurrentLyricsPackageName(), true, false)) {
+                        try {
+                            networkOk = fetchAndApplyNetworkLyricsOnWorkerThread(
+                                finalTitle,
+                                finalArtist,
+                                finalDurationMs,
+                                false,
+                                true,
+                                requestSeq,
+                                trackKey,
+                                "✅ 网络API·逐字融合(宽松网络异常恢复)："
+                            );
+                        } catch (Exception e2) {
+                            LogHelper.e(TAG, "网络API·逐字融合宽松网络兜底失败: " + e2.getMessage(), e2);
                         }
-                        if (shouldUseSuperLyricFallback()) {
-                            fetchLyricsFromSuperLyricApi(finalTitle, finalArtist, requestSeq, trackKey);
-                        } else {
-                            scheduleNoLyrics(requestSeq, trackKey);
-                        }
-                    });
+                    }
+                }
+                if (networkOk) {
                     return;
                 }
-                String apiLyrics = MusicInfoHelper.getLyricsFromAPI(
-                    RearScreenLyricsActivity.this,
-                    finalTitle,
-                    finalArtist,
-                    finalDurationMs,
-                    null,
-                    resolveCurrentLyricsPackageName(),
-                    strictTitleArtistMatch,
-                    enableSecondaryNetworkFallback
-                );
-
-                if (apiLyrics != null && !apiLyrics.isEmpty()) {
-                    EnhancedLRCParser.ParseResult parsedResult = parseLyricsContent(apiLyrics);
-                    runOnUiThread(() -> {
-                        try {
-                            if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
-                                return;
-                            }
-                            String curPkg = resolveCurrentLyricsPackageName();
-                            if (!shouldAcceptApiResultForTrack(curPkg)) {
-                                LogHelper.d(TAG, "🛡️ API 结果被优先级机制拦截（避免覆盖/闪烁）");
-                                return;
-                            }
-                            if (parsedResult == null || parsedResult.lines == null || parsedResult.lines.isEmpty()) {
-                                LogHelper.w(TAG, "⚠ 歌词解析后为空，原始歌词长度: " + apiLyrics.length() + " 字符");
-                                if (shouldUseSuperLyricFallback()) {
-                                    fetchLyricsFromSuperLyricApi(finalTitle, finalArtist, requestSeq, trackKey);
-                                } else {
-                                    scheduleNoLyrics(requestSeq, trackKey);
-                                }
-                                return;
-                            }
-
-                            enhancedLyricLines = parsedResult.lines;
-                            cancelPendingNoLyrics();
-                            // 深渊镜模式不创建 lyricsView，仍需同步到 abyssalMirrorLyricsViewGroup
-                            setLyricsToView(enhancedLyricLines);
-                            superLyricFallbackModeActive = false;
-                            applyFallbackRenderingModeIfNeeded();
-                            currentLyricsSource = LyricsSource.NETWORK_API;
-                            currentLyricsSourcePkg = curPkg != null ? curPkg : "";
-                            updateHookSourceStatusText("来源：网络API");
-
-                            LogHelper.d(TAG, "✅ 从第三方API获取到歌词: " + enhancedLyricLines.size() + " 行");
-                        } catch (Exception e) {
-                            LogHelper.e(TAG, "解析API歌词时发生异常: " + e.getMessage(), e);
-                        }
-                    });
-                } else {
-                    runOnUiThread(() -> {
-                        if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
-                            return;
-                        }
-                        String curPkg = resolveCurrentLyricsPackageName();
-                        if (!shouldAcceptApiResultForTrack(curPkg)) {
-                            return;
-                        }
-                        if (finalLyrics == null || finalLyrics.isEmpty()) {
-                            if (shouldUseSuperLyricFallback()) {
-                                fetchLyricsFromSuperLyricApi(finalTitle, finalArtist, requestSeq, trackKey);
-                                LogHelper.d(TAG, "⚠ 网络API未命中，尝试 SuperLyricApi 3.4 兜底");
-                            } else {
-                                updateHookSourceStatusText("来源：网络API未命中");
-                                scheduleNoLyrics(requestSeq, trackKey);
-                            }
-                        }
-                    });
-                }
-            } catch (Exception e) {
-                LogHelper.e(TAG, "从第三方API获取歌词失败: " + e.getMessage(), e);
                 runOnUiThread(() -> {
                     if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
                         return;
                     }
+                    cancelPendingQishuiSuperLyricPreviewWait();
+                    qishuiAwaitingNetworkLyrics = false;
                     String curPkg = resolveCurrentLyricsPackageName();
                     if (!shouldAcceptApiResultForTrack(curPkg)) {
                         return;
                     }
-                    if (finalLyrics == null || finalLyrics.isEmpty()) {
-                        if (shouldUseSuperLyricFallback()) {
-                            fetchLyricsFromSuperLyricApi(finalTitle, finalArtist, requestSeq, trackKey);
-                        } else {
-                            updateHookSourceStatusText("来源：网络API异常");
-                            scheduleNoLyrics(requestSeq, trackKey);
-                        }
+                    if (shouldUseSuperLyricFallback()) {
+                        fetchLyricsFromSuperLyricApi(finalTitle, finalArtist, requestSeq, trackKey);
+                        LogHelper.d(TAG, "⚠ 网络API未命中，尝试 SuperLyricApi 3.4 兜底");
+                    } else {
+                        scheduleNoLyricsIfStillEmpty(
+                            requestSeq, trackKey, LyricsRuntimeSource.NETWORK, "未命中");
+                    }
+                });
+            } finally {
+                runOnUiThread(() -> {
+                    if (trackKey != null && trackKey.equals(inflightApiTrackKey)) {
+                        inflightApiTrackKey = "";
                     }
                 });
             }
@@ -3061,8 +4448,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 songTitleText.post(this::applySongTitleSafeInsets);
             }
             setTextIfChanged(artistText, "");
+            updateAlbumArtBackground(null);
             return;
         }
+        updateAlbumArtBackground(metadata);
         
         // 更新歌名和歌手（合并为一个整体显示）
         final String pkg = mediaController != null ? mediaController.getPackageName() : "";
@@ -3096,8 +4485,15 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         final String signature = buildTrackSignature(metadata, pkg);
         final long now = System.currentTimeMillis();
 
-        // 判斷是否「同一首歌」：簽名相同則視為同曲目
-        final boolean sameTrack = signature != null && !signature.isEmpty() && signature.equals(stableTrackSignature);
+        // 判斷是否「同一首歌」：簽名相同，或僅酷狗等後補的 mediaId/时长（避免二次拉词）
+        final boolean sameTrack = isSameTrackMetadataSignature(
+            signature,
+            stableTrackSignature,
+            stableTitle,
+            stableArtist,
+            rawTitle,
+            rawArtist
+        );
 
         // 決定要用於 UI 顯示的 title/artist（stable）
         String titleForDisplay = rawTitle;
@@ -3106,6 +4502,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         if (!sameTrack) {
             // 換歌：接受新 title/artist，但若 title 像歌詞行（車載藍牙常見）則拒用，顯示「未知歌曲」
             stableTrackSignature = signature != null ? signature : "";
+            apiAttemptedTrackKey = "";
             lastNotificationLookupPkg = "";
             lastNotificationLookupAtMs = 0L;
             lastNotificationLookupResult = null;
@@ -3232,9 +4629,26 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             && !"未知歌曲".contentEquals(titleForDisplay)
             && !isLikelyLyricLine(titleForDisplay);
         String effectiveSignature = signature != null ? signature : "";
-        if (canLoadLyrics && !effectiveSignature.isEmpty() && !effectiveSignature.equals(lastLyricsLoadTrackSignature)) {
-            lastLyricsLoadTrackSignature = effectiveSignature;
-            loadLyrics(titleForDisplay, artistForDisplay);
+        if (canLoadLyrics && !effectiveSignature.isEmpty()) {
+            if (effectiveSignature.equals(lastLyricsLoadTrackSignature)) {
+                LogHelper.d(TAG, "🛡️ 同曲目签名未变，跳过重复 loadLyrics");
+            } else if (!lastLyricsLoadTrackSignature.isEmpty()
+                && enhancedLyricLines != null && !enhancedLyricLines.isEmpty()
+                && isSameTrackMetadataSignature(
+                    effectiveSignature,
+                    lastLyricsLoadTrackSignature,
+                    stableTitle,
+                    stableArtist,
+                    titleForDisplay,
+                    artistForDisplay
+                )) {
+                lastLyricsLoadTrackSignature = effectiveSignature;
+                stableTrackSignature = effectiveSignature;
+                LogHelper.d(TAG, "🛡️ 播放器元数据补全(mediaId/时长)，保留歌词不重拉");
+            } else {
+                lastLyricsLoadTrackSignature = effectiveSignature;
+                loadLyrics(titleForDisplay, artistForDisplay);
+            }
         } else if (!canLoadLyrics) {
             // 若無法取得可信 title，避免用歌詞行/未知值去檢索歌詞；保留現有歌詞顯示
             LogHelper.d(TAG, "🛡️ 無可信曲名，跳過歌詞檢索以避免誤識別");
@@ -3352,6 +4766,103 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         return packageName + "|ttl:" + title + "|alb:" + album + "|art:" + artist + "|dur:" + duration + "|trk:" + trackNumber;
     }
 
+    /**
+     * 酷狗等播放器常先后推送：先无 mediaId、时长为 0，再补全。此类变化不应视为切歌。
+     */
+    private static boolean isSameTrackMetadataSignature(String newSig,
+                                                       String oldSig,
+                                                       String lockedTitle,
+                                                       String lockedArtist,
+                                                       String rawTitle,
+                                                       String rawArtist) {
+        if (TextUtils.isEmpty(newSig) || TextUtils.isEmpty(oldSig)) {
+            return false;
+        }
+        if (newSig.equals(oldSig)) {
+            return true;
+        }
+        String newMid = extractSignatureMediaId(newSig);
+        String oldMid = extractSignatureMediaId(oldSig);
+        if (!TextUtils.isEmpty(newMid) && newMid.equals(oldMid)) {
+            return true;
+        }
+        String title = !TextUtils.isEmpty(lockedTitle) ? lockedTitle : rawTitle;
+        String artist = !TextUtils.isEmpty(lockedArtist) ? lockedArtist : rawArtist;
+        if (!TextUtils.isEmpty(title)
+            && metadataSignatureMatchesTitleArtist(newSig, title, artist)
+            && metadataSignatureMatchesTitleArtist(oldSig, title, artist)) {
+            return true;
+        }
+        return normalizeMetadataSignatureForCompare(newSig).equals(normalizeMetadataSignatureForCompare(oldSig));
+    }
+
+    private static String extractSignatureMediaId(String signature) {
+        if (signature == null) {
+            return "";
+        }
+        int idx = signature.indexOf("|mid:");
+        if (idx < 0) {
+            return "";
+        }
+        return signature.substring(idx + 5);
+    }
+
+    private static boolean metadataSignatureMatchesTitleArtist(String signature, String title, String artist) {
+        if (TextUtils.isEmpty(signature) || TextUtils.isEmpty(title)) {
+            return false;
+        }
+        String normTitle = normalizeSignatureToken(title);
+        String sig = normalizeMetadataSignatureForCompare(signature);
+        if (!sig.contains("|ttl:" + normTitle)) {
+            return false;
+        }
+        if (TextUtils.isEmpty(artist)) {
+            return true;
+        }
+        return sig.contains("|art:" + normalizeSignatureToken(artist));
+    }
+
+    private static String normalizeSignatureToken(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim().toLowerCase(Locale.ROOT)
+            .replace(" ", "")
+            .replace("\t", "");
+    }
+
+    private static String normalizeMetadataSignatureForCompare(String signature) {
+        if (signature == null) {
+            return "";
+        }
+        return signature.replaceAll("\\|dur:\\d+", "|dur:*");
+    }
+
+    private boolean isSameSongTrackKey(String newTrackKey, String oldTrackKey, String title, String artist) {
+        if (TextUtils.isEmpty(newTrackKey)) {
+            return false;
+        }
+        if (!TextUtils.isEmpty(oldTrackKey)) {
+            if (newTrackKey.equals(oldTrackKey)) {
+                return true;
+            }
+            if (isLikelySameTrackDurationBucketRefinement(oldTrackKey, newTrackKey)) {
+                return true;
+            }
+        }
+        if (TextUtils.isEmpty(title)) {
+            return false;
+        }
+        String probe = buildTrackKey(title, artist != null ? artist : "", resolveCurrentLyricsPackageName(), 0L);
+        String probeNew = newTrackKey;
+        int i = probe.lastIndexOf("||");
+        int j = probeNew.lastIndexOf("||");
+        if (i >= 0 && j >= 0) {
+            return probe.regionMatches(0, probeNew, 0, i);
+        }
+        return false;
+    }
+
     private boolean isLikelyLyricLine(String s) {
         if (s == null) return false;
         String t = s.trim();
@@ -3462,6 +4973,15 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             LogHelper.d(TAG, "🛡️ loadLyrics 防重：同曲目已存在歌词，跳过重载");
             return;
         }
+        if (isLikelySameTrackDurationBucketRefinement(currentTrackKey, trackKey)
+            && enhancedLyricLines != null && !enhancedLyricLines.isEmpty()) {
+            currentTrackKey = trackKey;
+            lastLoadLyricsTrackKey = trackKey;
+            lastLoadLyricsTime = now;
+            cancelPendingNoLyrics();
+            LogHelper.d(TAG, "🛡️ loadLyrics：仅时长桶由未知补全，保留已有歌词不重载");
+            return;
+        }
         // 防抖：同曲目短時間內不重載，避免 metadata 頻繁變化導致覆蓋 API 歌詞、請求亂序出現「無歌詞」
         if (trackKey.equals(lastLoadLyricsTrackKey) && (now - lastLoadLyricsTime) < LOAD_LYRICS_DEBOUNCE_MS) {
             LogHelper.d(TAG, "🛡️ loadLyrics 防抖：同曲目 " + (LOAD_LYRICS_DEBOUNCE_MS / 1000) + " 秒內跳過重載");
@@ -3493,8 +5013,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             android.content.ComponentName notificationListener = new android.content.ComponentName(this, MiRootNotificationListenerService.class);
             String lyrics;
 
-            if (kuwoCarLyricsSessionActive) {
-                // 酷我车载：仅使用直连会话 extras 中的 AUDIO_LYRIC JSON，不使用「系统第一个活跃会话」与通知歌词
+            if (shouldUseKuwoNativeLyricsPath(resolveCurrentLyricsPackageName())) {
+                // 酷我车载：仅使用直连会话 extras 中的 AUDIO_LYRIC JSON，不使用通知/通用 API
                 lyrics = "";
                 if (mediaController != null) {
                     try {
@@ -3507,6 +5027,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                             superLyricFallbackModeActive = false;
                             applyFallbackRenderingModeIfNeeded();
                             setLyricsToView(enhancedLyricLines);
+                            markKuwoAudioLyricApplied();
                             LogHelper.d(TAG, "✅ 酷我 AUDIO_LYRIC 已解析: " + enhancedLyricLines.size() + " 行");
                             return;
                         }
@@ -3514,10 +5035,12 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                         LogHelper.w(TAG, "酷我歌词解析失败: " + e.getMessage());
                     }
                 }
-                // 酷我 JSON 无效时 lyrics 仍为空，等待下一次 extras 更新，不走酷狗通用 API
                 if (lyrics == null || lyrics.isEmpty()) {
-                    LogHelper.d(TAG, "酷我 AUDIO_LYRIC 无有效逐行歌词，保持酷我专用解析链");
+                    LogHelper.d(TAG, "酷我 AUDIO_LYRIC 无有效逐行歌词，继续等待专用解析或超时兜底");
                 }
+            } else if (isSuperLyricOnlySourceMode()) {
+                // 仅 SuperLyric：不读取 MediaController/通知歌词，避免与模块来源混用。
+                lyrics = "";
             } else {
                 MusicInfoHelper.MusicInfo musicInfo = MusicInfoHelper.getMusicInfoFromMediaController(this, notificationListener);
 
@@ -3570,12 +5093,13 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             }
 
             // 策略3: API 兜底（由 beginLyricsAcquisitionForTrack 发起；失败后自动转 SuperLyricApi）
-            if ((lyrics == null || lyrics.isEmpty()) && !title.isEmpty() && !kuwoCarLyricsSessionActive) {
+            if ((lyrics == null || lyrics.isEmpty()) && !title.isEmpty()
+                && !shouldUseKuwoNativeLyricsPath(resolveCurrentLyricsPackageName())) {
                 willFetchFromThirdPartyApi = true;
             }
             
-            // 解析并显示歌词（如果已经获取到）
-            if (lyrics != null && !lyrics.isEmpty()) {
+            // 解析并显示歌词（如果已经获取到；仅 SuperLyric 模式不走此通道）
+            if (!isSuperLyricOnlySourceMode() && lyrics != null && !lyrics.isEmpty()) {
                 final String notificationLyrics = lyrics;
                 lyricsParseExecutor.execute(() -> {
                     try {
@@ -3588,10 +5112,31 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                                 LogHelper.w(TAG, "⚠ 通知歌词解析后为空，保留已有歌词。原始歌词长度: " + notificationLyrics.length());
                                 return;
                             }
+                            if (qishuiAwaitingNetworkLyrics
+                                && isMixedLyricsSourceMode()
+                                && MusicPlayerLyricsPolicy.allowsQishuiSuperLyricPreviewWhileNetworkPending(
+                                    resolveCurrentLyricsPackageName(), true)) {
+                                LogHelper.d(TAG, "🛡️ 汽水等待 qsgc 网络 API，忽略通知/Media 多行歌词");
+                                return;
+                            }
+                            if (isMixedLyricsSourceMode()) {
+                                prepareNetworkApiLyricLines(result.lines);
+                            }
                             enhancedLyricLines = result.lines;
                             cancelPendingNoLyrics();
+                            if (isMixedLyricsSourceMode() && !enhancedLyricLines.isEmpty()) {
+                                markStructuredLyricsForWordFusion(
+                                    resolveCurrentLyricsPackageName(),
+                                    LyricsRuntimeSource.NETWORK,
+                                    ""
+                                );
+                            }
                             setLyricsToView(enhancedLyricLines);
-                            LogHelper.d(TAG, "🎤 歌词已解析: " + enhancedLyricLines.size() + " 行");
+                            if (isMixedLyricsSourceMode()) {
+                                tryFlushCachedSuperLyricWordFusion();
+                            }
+                            LogHelper.d(TAG, "🎤 歌词已解析: " + enhancedLyricLines.size() + " 行"
+                                + (isMixedLyricsSourceMode() ? "（智能切换·可逐字融合）" : ""));
                         });
                     } catch (Exception e) {
                         LogHelper.e(TAG, "解析通知歌词时发生异常: " + e.getMessage(), e);
@@ -3608,11 +5153,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         // 未走第三方 API 时（如酷我等仅等 extras），本轮结束后仍无歌词则延迟显示「暂无」；已发起 API 的由成功/失败回调里 schedule/cancel
         if (!title.isEmpty()
             && (enhancedLyricLines == null || enhancedLyricLines.isEmpty())
-            && !willFetchFromThirdPartyApi) {
-            long noLyricsDelayMs = kuwoCarLyricsSessionActive
-                ? NO_LYRICS_WAIT_SESSION_EXTRAS_MS
-                : NO_LYRICS_UI_DELAY_MS;
-            scheduleNoLyrics(requestSeq, trackKey, noLyricsDelayMs);
+            && !willFetchFromThirdPartyApi
+            && !(shouldUseKuwoNativeLyricsPath(resolveCurrentLyricsPackageName()) && kuwoPostNativeFallbackScheduled)) {
+            scheduleNoLyrics(requestSeq, trackKey, NO_LYRICS_UI_DELAY_MS);
         }
     }
     
@@ -3620,6 +5163,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
      * 更新播放状态
      */
     private void updatePlaybackState() {
+        maybeRefreshMediaControllerForActivePlayer();
         if (mediaController == null) {
             return;
         }
@@ -3628,7 +5172,6 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         if (state == null) {
             return;
         }
-        
         int playState = state.getState();
         boolean isPlaying = (playState == android.media.session.PlaybackState.STATE_PLAYING);
 
@@ -3725,7 +5268,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
 
         if (stateChanged) {
-            maybeRefreshMediaControllerForKuwoPolicy();
+            maybeRefreshMediaControllerForActivePlayer();
         }
     }
     
@@ -3839,18 +5382,13 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 }
                 int lineCount = lines != null ? lines.size() : 0;
                 
-                // 获取当前播放位置对应的歌词行
-                long currentPosition = 0;
-                if (mediaController != null && mediaController.getPlaybackState() != null) {
-                    currentPosition = mediaController.getPlaybackState().getPosition();
-                }
+                long currentPosition = resolveLyricsAnchorPositionMs();
                 
                 if (lines != null && !lines.isEmpty()) {
                     int currentIndex = findCurrentLineIndexForAbyssal(lines, currentPosition);
                     if (currentIndex >= 0 && currentIndex < lines.size()) {
                         String currentLyric = lines.get(currentIndex).text;
                         abyssalMirrorLyricsViewGroup.setLyric(currentLyric);
-                        broadcastCurrentLyricLine(currentLyric);
                         LogHelper.d(TAG, "✅ 已设置歌词数据到深渊镜视图: " + lineCount + " 行，当前行=" + currentIndex);
                     } else {
                         EnhancedLRCParser.EnhancedLyricLine first = lines.get(0);
@@ -3858,12 +5396,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                         abyssalMirrorLyricsViewGroup.setLyric(
                             t != null ? t : "",
                             false);
-                        broadcastCurrentLyricLine(t);
                     }
                 } else {
                     String noLyrics = getString(R.string.music_no_lyrics);
                     abyssalMirrorLyricsViewGroup.setLyric(noLyrics);
-                    broadcastCurrentLyricLine(noLyrics);
                 }
             } else if (abyssalMirrorEnabled && abyssalMirrorLyricsView != null) {
                 // 旧版3D旋转版本（兼容）
@@ -3871,8 +5407,18 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 abyssalMirrorLyricsView.setLyricLines(lines);
                 LogHelper.d(TAG, "✅ 已设置歌词数据到深渊镜视图（旧版）: " + lineCount + " 行");
             } else if (lyricsView != null) {
-                lyricsView.setLyrics(lines);
-                lyricsView.setTrackLoading(false);
+                if (lines != null && !lines.isEmpty()) {
+                    lyricsView.setTrackLoading(false);
+                    long playbackPosition = resolveLyricsAnchorPositionMs();
+                    syncLyricsRenderPositionCache(playbackPosition);
+                    lyricsView.setLyricsPreservingPlaybackAnchor(lines, playbackPosition, -1);
+                    lyricsView.centerCurrentLineImmediately();
+                } else {
+                    // V3.17+: 不在此清除 trackLoading，切歌时由 beginLyricsAcquisitionForTrack 置 true，
+                    // 防止 SuperLyric 回退推送上一首歌词。trackLoading 由歌词就绪或 scheduleNoLyrics 超时清除。
+                    syncLyricsRenderPositionCache(0L);
+                    lyricsView.setLyrics(lines);
+                }
             }
         } catch (Exception e) {
             LogHelper.e(TAG, "❌ 设置歌词数据失败", e);
@@ -3898,6 +5444,32 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         return p + "||" + t + "||" + a + "||" + durationBucket;
     }
 
+    /**
+     * 曲目键仅「时长桶」从 0（未知）变为大于 0（播放器后补）时视为同一曲。
+     * <p>
+     * 否则 {@link #loadLyrics} 会误判切歌并走 {@link #beginLyricsAcquisitionForTrack} 清空视图，
+     * 已拿到的歌词会被 {@code setLyricsToView(null)} 短暂打成「暂无歌词」。
+     */
+    private static boolean isLikelySameTrackDurationBucketRefinement(String oldTrackKey, String newTrackKey) {
+        if (oldTrackKey == null || newTrackKey == null) return false;
+        if (oldTrackKey.equals(newTrackKey)) return true;
+        int i = oldTrackKey.lastIndexOf("||");
+        int j = newTrackKey.lastIndexOf("||");
+        if (i < 0 || j < 0 || i != j) return false;
+        if (!oldTrackKey.regionMatches(0, newTrackKey, 0, i + 2)) {
+            return false;
+        }
+        String oldDur = oldTrackKey.substring(i + 2);
+        String newDur = newTrackKey.substring(j + 2);
+        try {
+            long oldB = Long.parseLong(oldDur);
+            long newB = Long.parseLong(newDur);
+            return oldB == 0L && newB > 0L;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     private String resolveCurrentLyricsPackageName() {
         try {
             if (mediaController != null && mediaController.getPackageName() != null && !mediaController.getPackageName().isEmpty()) {
@@ -3913,114 +5485,46 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         return "";
     }
 
-    private void broadcastCurrentLyricLine(String line) {
-        try {
-            Intent i = new Intent(MvIntents.ACTION_CURRENT_LYRIC_LINE_CHANGED);
-            i.putExtra(MvIntents.EXTRA_CURRENT_LYRIC_LINE, line != null ? line : "");
-            getApplicationContext().sendBroadcast(i);
-        } catch (Exception e) {
-            LogHelper.w(TAG, "广播当前歌词失败: " + e.getMessage());
-        }
-    }
-
-    private void ensureMvPlayer() {
-        if (mvPlayer != null) return;
-        try {
-            mvPlayer = new ExoPlayer.Builder(this).build();
-            if (mvPlayerView != null) {
-                mvPlayerView.setPlayer(mvPlayer);
-            }
-        } catch (Throwable t) {
-            LogHelper.e(TAG, "ensureMvPlayer failed", t);
-        }
-    }
-
-    private void releaseMvPlayer() {
-        try {
-            if (mvPlayerView != null) {
-                mvPlayerView.setPlayer(null);
-            }
-            if (mvPlayer != null) {
-                mvPlayer.release();
-            }
-        } catch (Throwable ignored) {
-        } finally {
-            mvPlayer = null;
-        }
-    }
-
-    private void switchToMvMode(String url, boolean fromNewIntent) {
-        if (mvLayer == null) return;
-        if (url == null || url.trim().isEmpty()) {
-            switchToLyricsMode(true);
-            return;
-        }
-        pendingMvUrl = url.trim();
-        ensureMvPlayer();
-        if (mvPlayer == null) {
-            switchToLyricsMode(true);
-            return;
-        }
-        try {
-            setVisibilityIfChanged(mvLayer, View.VISIBLE);
-            if (contentRootLayout != null) setVisibilityIfChanged(contentRootLayout, View.GONE);
-            if (lyricsView != null) setVisibilityIfChanged(lyricsView, View.GONE);
-            if (abyssalMirrorLyricsViewGroup != null) setVisibilityIfChanged(abyssalMirrorLyricsViewGroup, View.GONE);
-            if (buttonLayout != null) {
-                setVisibilityIfChanged(buttonLayout, View.GONE);
-            }
-            buttonsVisible = false;
-
-            mvPlayer.setMediaItem(MediaItem.fromUri(pendingMvUrl));
-            mvPlayer.prepare();
-            mvPlayer.play();
-
-            // If it fails quickly (no MV / blocked), fallback.
-            mvHandler.removeCallbacks(mvNoUrlFallbackRunnable);
-            mvNoUrlFallbackRunnable = () -> {
-                if (mvPlayer == null) return;
-                if (mvPlayer.getPlaybackState() == Player.STATE_IDLE) {
-                    fallbackNoMv();
-                }
-            };
-            mvHandler.postDelayed(mvNoUrlFallbackRunnable, 2500);
-
-            LogHelper.d(TAG, "✅ switchToMvMode ok, fromNewIntent=" + fromNewIntent);
-        } catch (Throwable t) {
-            LogHelper.e(TAG, "switchToMvMode failed", t);
-            fallbackNoMv();
-        }
-    }
-
-    private void fallbackNoMv() {
-        pendingMvUrl = "";
-        if (songTitleText != null) {
-            setTextIfChanged(songTitleText, "该歌曲暂无MV，已回退歌词");
-            songTitleText.post(this::applySongTitleSafeInsets);
-        }
-        switchToLyricsMode(true);
-    }
-
-    private void switchToLyricsMode(boolean stopMv) {
-        if (mvLayer != null) setVisibilityIfChanged(mvLayer, View.GONE);
-        if (contentRootLayout != null) setVisibilityIfChanged(contentRootLayout, View.VISIBLE);
-        if (lyricsView != null) setVisibilityIfChanged(lyricsView, View.VISIBLE);
-        if (abyssalMirrorLyricsViewGroup != null) {
-            setVisibilityIfChanged(abyssalMirrorLyricsViewGroup, abyssalMirrorEnabled ? View.VISIBLE : View.GONE);
-        }
-        if (stopMv) {
-            mvHandler.removeCallbacks(mvNoUrlFallbackRunnable);
-            if (mvPlayer != null) {
-                try {
-                    mvPlayer.stop();
-                } catch (Throwable ignored) {
-                }
-            }
-        }
-    }
-
     private boolean isLyricsRequestCurrent(int requestSeq, String trackKey) {
         return requestSeq == lyricsRequestSeq && trackKey != null && trackKey.equals(currentTrackKey) && !isFinishing();
+    }
+
+    private boolean isSuperLyricRealtimeTrackMatched(String callbackTitle, String callbackArtist) {
+        String stableT = normalizeLyricToken(stableTitle);
+        String stableA = normalizeLyricToken(stableArtist);
+        String cbT = normalizeLyricToken(callbackTitle);
+        String cbA = normalizeLyricToken(callbackArtist);
+        if (TextUtils.isEmpty(stableT)) {
+            return true;
+        }
+        if (TextUtils.isEmpty(cbT)) {
+            return false;
+        }
+        if (!softLyricTokenEquals(stableT, cbT)) {
+            return false;
+        }
+        if (TextUtils.isEmpty(stableA) || TextUtils.isEmpty(cbA)) {
+            return true;
+        }
+        return softLyricTokenEquals(stableA, cbA);
+    }
+
+    private String normalizeLyricToken(String value) {
+        if (value == null) return "";
+        return value.trim().toLowerCase(Locale.ROOT)
+            .replace(" ", "")
+            .replace("\t", "")
+            .replace("-", "")
+            .replace("_", "")
+            .replace("(", "")
+            .replace(")", "")
+            .replace("（", "")
+            .replace("）", "");
+    }
+
+    private boolean softLyricTokenEquals(String left, String right) {
+        if (TextUtils.isEmpty(left) || TextUtils.isEmpty(right)) return false;
+        return left.equals(right) || left.contains(right) || right.contains(left);
     }
 
     private EnhancedLRCParser.ParseResult parseLyricsContent(String rawLyrics) {
@@ -4041,73 +5545,915 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         return 0L;
     }
 
-    private void applySuperLyricFallbackPayload(SuperLyricApi.SuperLyricFallbackPayload payload,
-                                                String sourcePkg,
-                                                int requestSeq,
-                                                String trackKey) {
-        if (!isLyricsRequestCurrent(requestSeq, trackKey) || payload == null) return;
-        String text = payload.text != null ? payload.text.trim() : "";
-        if (text.isEmpty()) {
-            scheduleNoLyrics(requestSeq, trackKey);
+    private void syncLyricsRenderPositionCache(long positionMs) {
+        latestLyricsRenderPositionMs = Math.max(0L, positionMs);
+    }
+
+    /**
+     * 新歌词入库/切歌后用于定位当前行与 scrollY；勿把上首残留的 {@link #latestLyricsRenderPositionMs} 与新媒体进度盲目取 max。
+     */
+    private long resolveLyricsAnchorPositionMs() {
+        long mediaPos = getCurrentPlaybackPositionSafe();
+        long sinceTrackMs = lyricsTrackSettledAtMs > 0L
+            ? SystemClock.uptimeMillis() - lyricsTrackSettledAtMs
+            : Long.MAX_VALUE;
+        if (sinceTrackMs < TRACK_CHANGE_PLAYBACK_TRUST_MS) {
+            return mediaPos;
+        }
+        long cached = Math.max(0L, latestLyricsRenderPositionMs);
+        if (cached <= 0L) {
+            return mediaPos;
+        }
+        if (mediaPos <= 0L) {
+            return cached;
+        }
+        if (mediaPos + TRACK_CHANGE_CACHED_POSITION_GAP_MS < cached) {
+            return mediaPos;
+        }
+        return Math.max(mediaPos, cached);
+    }
+
+    /**
+     * 智能切换拉词中禁止用上首 SuperLyric 单句覆盖；汽水等待网络时的单句预览除外。
+     */
+    private boolean shouldAllowSuperLyricSingleLineFallback(String sourcePkg,
+                                                            int requestSeq,
+                                                            String trackKey) {
+        if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
+            return false;
+        }
+        if (isSuperLyricOnlySourceMode()) {
+            return true;
+        }
+        if (isMixedLyricsSourceMode()) {
+            if (hasMixedModeNetworkLyricsStructure()) {
+                return false;
+            }
+            if (MusicPlayerLyricsPolicy.allowsQishuiSuperLyricPreviewWhileNetworkPending(sourcePkg, true)
+                && (qishuiAwaitingNetworkLyrics || superLyricFallbackModeActive)) {
+                return true;
+            }
+            if (lyricsView != null && lyricsView.isTrackLoading()) {
+                return false;
+            }
+            return enhancedLyricLines == null || enhancedLyricLines.isEmpty();
+        }
+        return superLyricFallbackModeActive
+            || enhancedLyricLines == null
+            || enhancedLyricLines.isEmpty();
+    }
+
+    private void forceRefreshLyricsViewForSuperLyric(boolean restartWordProgress) {
+        if (lyricsView == null) return;
+        long playbackPosition = resolveLyricsAnchorPositionMs();
+        lyricsView.updatePosition(playbackPosition);
+        // SuperLyric 兜底会复用句子对象，强制触发行号/高亮/逐字刷新，避免同句数据更新被去重后不重绘。
+        if (restartWordProgress) {
+            lyricsView.refreshCurrentLine();
+        } else {
+            lyricsView.postInvalidateOnAnimation();
+            lyricsView.invalidate();
+        }
+    }
+
+    private void unlockFromSuperLyricFallbackAndApplyNetworkLyrics(List<EnhancedLRCParser.EnhancedLyricLine> lines,
+                                                                   String sourcePkg) {
+        unlockFromSuperLyricFallbackAndApplyNetworkLyrics(
+            lines, sourcePkg, LyricsRuntimeSource.NETWORK, null, "");
+    }
+
+    private void unlockFromSuperLyricFallbackAndApplyNetworkLyrics(List<EnhancedLRCParser.EnhancedLyricLine> lines,
+                                                                   String sourcePkg,
+                                                                   LyricsRuntimeSource networkSource) {
+        unlockFromSuperLyricFallbackAndApplyNetworkLyrics(lines, sourcePkg, networkSource, null, "");
+    }
+
+    private void unlockFromSuperLyricFallbackAndApplyNetworkLyrics(List<EnhancedLRCParser.EnhancedLyricLine> lines,
+                                                                   String sourcePkg,
+                                                                   LyricsRuntimeSource networkSource,
+                                                                   String strategyLabel) {
+        unlockFromSuperLyricFallbackAndApplyNetworkLyrics(
+            lines, sourcePkg, networkSource, strategyLabel, "");
+    }
+
+    private void unlockFromSuperLyricFallbackAndApplyNetworkLyrics(List<EnhancedLRCParser.EnhancedLyricLine> lines,
+                                                                   String sourcePkg,
+                                                                   LyricsRuntimeSource networkSource,
+                                                                   String strategyLabel,
+                                                                   String networkProvider) {
+        final boolean smoothUpgrade = MusicPlayerLyricsPolicy.prefersNetworkLyricsSmoothUpgrade(
+            sourcePkg, isMixedLyricsSourceMode(), superLyricFallbackModeActive);
+        cancelPendingQishuiSuperLyricPreviewWait();
+        qishuiAwaitingNetworkLyrics = false;
+        prepareNetworkApiLyricLines(lines);
+        enhancedLyricLines = lines;
+        cancelPendingNoLyrics();
+        final boolean wasSuperLyricPreview = superLyricFallbackModeActive;
+        markStructuredLyricsForWordFusion(
+            sourcePkg,
+            networkSource != null ? networkSource : LyricsRuntimeSource.NETWORK,
+            networkProvider != null ? networkProvider : ""
+        );
+        applyFallbackRenderingModeIfNeeded();
+
+        if (lyricsView != null) {
+            long playbackPosition = resolveLyricsAnchorPositionMs();
+            syncLyricsRenderPositionCache(playbackPosition);
+            if (smoothUpgrade) {
+                int textAnchor = findBestLineIndexForSuperLyricText(
+                    lines, lastSuperLyricAppliedTextNormalized);
+                int posAnchor = findCurrentLineIndexForAbyssal(lines, playbackPosition);
+                int anchor = resolveQishuiUpgradeAnchor(
+                    lines, playbackPosition, textAnchor, posAnchor);
+                seedSuperLyricWordFusionAfterNetworkUpgrade(
+                    lines, anchor, sourcePkg, wasSuperLyricPreview);
+                lyricsView.setEnableWordByWord(effectiveWordByWordForSuperLyric(null));
+                lyricsView.setShowTranslation(true);
+                lyricsView.upgradeFromSingleLinePreview(lines, playbackPosition, anchor);
+                lyricsView.setTrackLoading(false);
+                if (lastWordFusionLineIndex >= 0) {
+                    lyricsView.notifyWordTimestampsChanged(lastWordFusionLineIndex);
+                }
+                lyricsView.snapWordHighlightToPosition(playbackPosition);
+                lastAppliedLyricsTrackKey = currentTrackKey != null ? currentTrackKey : "";
+                lastAppliedLyricsFingerprint = buildLyricsFingerprint(lines);
+                lastAbyssalRenderedLineIndex = -1;
+                if (BuildConfig.DEBUG) {
+                    LogHelper.d(TAG, "✅ 汽水单句→完整LRC 平滑升级: anchor=" + anchor
+                        + ", fusionLine=" + lastWordFusionLineIndex
+                        + ", pos=" + playbackPosition + "ms");
+                }
+            } else {
+                lastWordFusionLineIndex = -1;
+                setLyricsToView(enhancedLyricLines);
+                lyricsView.postInvalidateOnAnimation();
+            }
+        } else {
+            lastWordFusionLineIndex = -1;
+            setLyricsToView(enhancedLyricLines);
+        }
+        if (isMixedLyricsSourceMode()) {
+            tryFlushCachedSuperLyricWordFusion();
+            if (smoothUpgrade && lyricsView != null && lastWordFusionLineIndex >= 0) {
+                long playbackPosition = resolveLyricsAnchorPositionMs();
+                lyricsView.notifyWordTimestampsChanged(lastWordFusionLineIndex);
+                lyricsView.snapWordHighlightToPosition(playbackPosition);
+            }
+        }
+        String detail = strategyLabel;
+        if (detail == null || detail.trim().isEmpty()) {
+            MusicPlayerLyricsPolicy.PrimaryStrategy strategy =
+                MusicPlayerLyricsPolicy.resolvePrimaryStrategy(sourcePkg);
+            detail = MusicPlayerLyricsPolicy.strategyDisplayLabel(strategy);
+        }
+        updateHookSourceStatusText(
+            networkSource != null ? networkSource : LyricsRuntimeSource.NETWORK,
+            detail
+        );
+    }
+
+    /**
+     * 汽水单句升级到完整 LRC 时，用当前 SuperLyric 句文本在完整歌词中找最佳行，减少切源跳屏。
+     */
+    private int findBestLineIndexForSuperLyricText(List<EnhancedLRCParser.EnhancedLyricLine> lines,
+                                                   String superTextNormalized) {
+        if (lines == null || lines.isEmpty()
+            || superTextNormalized == null || superTextNormalized.isEmpty()) {
+            return -1;
+        }
+        double bestSim = 0.0;
+        int bestIndex = -1;
+        final double threshold = 0.82;
+        for (int i = 0; i < lines.size(); i++) {
+            EnhancedLRCParser.EnhancedLyricLine line = lines.get(i);
+            if (line == null || line.text == null) {
+                continue;
+            }
+            double sim = LyricsMatcher.similarity(superTextNormalized, line.text);
+            if (sim > bestSim) {
+                bestSim = sim;
+                bestIndex = i;
+            }
+        }
+        return bestSim >= threshold ? bestIndex : -1;
+    }
+
+    /**
+     * 汽水单句→完整 LRC：优先播放进度锚点，文本锚点仅作 ±1 行微调。
+     */
+    private int resolveQishuiUpgradeAnchor(List<EnhancedLRCParser.EnhancedLyricLine> lines,
+                                           long playbackPositionMs,
+                                           int textAnchor,
+                                           int posAnchor) {
+        if (lines == null || lines.isEmpty()) {
+            return -1;
+        }
+        if (posAnchor < 0 || posAnchor >= lines.size()) {
+            return textAnchor >= 0 ? textAnchor : 0;
+        }
+        if (textAnchor < 0 || textAnchor >= lines.size()) {
+            return posAnchor;
+        }
+        if (Math.abs(textAnchor - posAnchor) <= 1) {
+            return posAnchor;
+        }
+        if (textAnchor >= 0 && textAnchor < lines.size()) {
+            EnhancedLRCParser.EnhancedLyricLine textLine = lines.get(textAnchor);
+            if (textLine != null && textLine.time >= 0L) {
+                long end = textAnchor + 1 < lines.size()
+                    ? lines.get(textAnchor + 1).time
+                    : textLine.time + 8000L;
+                if (playbackPositionMs >= textLine.time && playbackPositionMs < end) {
+                    return textAnchor;
+                }
+            }
+        }
+        return posAnchor;
+    }
+
+    /**
+     * 汽水网络完整歌词到达后，立即把 SuperLyric 逐字写入锚点附近行（升级前同步，避免逐字空白窗）。
+     */
+    private void seedSuperLyricWordFusionAfterNetworkUpgrade(List<EnhancedLRCParser.EnhancedLyricLine> lines,
+                                                             int anchorIndex,
+                                                             String sourcePkg,
+                                                             boolean wasSuperLyricPreview) {
+        if (!isMixedLyricsSourceMode() || lines == null || lines.isEmpty()) {
             return;
         }
-        long currentPlaybackPosition = getCurrentPlaybackPositionSafe();
+        int anchor = clampLyricLineIndex(lines, anchorIndex);
+        if (anchor < 0) {
+            return;
+        }
+        SuperLyricApi.SuperLyricFallbackPayload payload = cachedWordFusionPayload;
+        if (payload == null || !payload.hasValidWords()) {
+            payload = SuperLyricApi.peekCachedFallbackPayload(
+                stableTitle != null ? stableTitle : "",
+                stableArtist != null ? stableArtist : "",
+                sourcePkg != null ? sourcePkg : ""
+            );
+        }
+        List<EnhancedLRCParser.WordTimestamp> moduleWords = null;
+        long moduleLineStartMs = 0L;
+        String moduleText = null;
+        if (payload != null && payload.hasValidWords()) {
+            moduleWords = payload.wordTimestamps;
+            moduleLineStartMs = payload.lineStartMs;
+            moduleText = payload.text;
+            cachedWordFusionPayload = payload;
+        } else if (superLyricActiveLineHasWords
+            && reusableSuperLyricLine.wordTimestamps != null
+            && !reusableSuperLyricLine.wordTimestamps.isEmpty()) {
+            moduleWords = reusableSuperLyricLine.wordTimestamps;
+            moduleLineStartMs = reusableSuperLyricLine.time;
+            moduleText = reusableSuperLyricLine.text;
+        }
+        if (moduleWords == null || moduleWords.isEmpty()) {
+            return;
+        }
+        final double seedThreshold = 0.75;
+        int primaryIndex = -1;
+        int seedFrom = Math.max(0, anchor - 1);
+        int seedTo = Math.min(lines.size() - 1, anchor + 1);
+        for (int i = seedFrom; i <= seedTo; i++) {
+            EnhancedLRCParser.EnhancedLyricLine line = lines.get(i);
+            if (line == null || line.text == null) {
+                continue;
+            }
+            boolean trustedAnchor = i == anchor && wasSuperLyricPreview;
+            if (!trustedAnchor && moduleText != null && !moduleText.isEmpty()) {
+                double sim = LyricsMatcher.similarity(line.text, moduleText);
+                if (sim < seedThreshold
+                    && !softLyricTokenEquals(normalizeLyricToken(line.text), lastSuperLyricAppliedTextNormalized)) {
+                    continue;
+                }
+            }
+            long lineTime = line.time > 0L ? line.time : Math.max(0L, moduleLineStartMs);
+            long nextLineTimeMs = 0L;
+            if (i + 1 < lines.size()) {
+                EnhancedLRCParser.EnhancedLyricLine nextLine = lines.get(i + 1);
+                if (nextLine != null && nextLine.time > 0L) {
+                    nextLineTimeMs = nextLine.time;
+                }
+            }
+            ArrayList<EnhancedLRCParser.WordTimestamp> fusedWords = null;
+            if (trustedAnchor && wasSuperLyricPreview && payload != null && payload.hasValidWords()) {
+                fusedWords = buildSuperLyricModuleLineWordTimestamps(
+                    lineTime, line.text, payload.wordTimestamps, nextLineTimeMs, payload.lineStartMs);
+            } else if (trustedAnchor
+                && wasSuperLyricPreview
+                && superLyricActiveLineHasWords
+                && reusableSuperLyricLine.wordTimestamps != null
+                && !reusableSuperLyricLine.wordTimestamps.isEmpty()) {
+                fusedWords = SuperLyricWordTimestamps.reanchorAlignedWordsToLineTime(
+                    reusableSuperLyricLine.wordTimestamps,
+                    reusableSuperLyricLine.time,
+                    lineTime
+                );
+            }
+            if (fusedWords == null || fusedWords.isEmpty()) {
+                fusedWords = buildSuperLyricModuleLineWordTimestamps(
+                    lineTime, line.text, moduleWords, nextLineTimeMs, moduleLineStartMs);
+            }
+            if (fusedWords.isEmpty()) {
+                fusedWords = SuperLyricWordTimestamps.alignToLineTime(lineTime, moduleWords);
+            }
+            if (fusedWords.isEmpty()) {
+                continue;
+            }
+            line.wordTimestamps = fusedWords;
+            line.moduleWordTimeline = false;
+            if (i == anchor || primaryIndex < 0) {
+                primaryIndex = i;
+            }
+        }
+        if (primaryIndex >= 0) {
+            lastWordFusionLineIndex = primaryIndex;
+        }
+    }
+
+    /**
+     * 同句且已融合行索引一致时，在 UI 线程快速对齐逐字（跳过 Matcher 线程池，降低 Binder→高亮延迟）。
+     */
+    private boolean tryApplySuperLyricWordFusionFastPath(SuperLyricApi.SuperLyricFallbackPayload payload,
+                                                         String sourcePkg,
+                                                         int requestSeq,
+                                                         String trackKey) {
+        return tryApplySuperLyricWordFusionFastPath(payload, sourcePkg, requestSeq, trackKey, -1);
+    }
+
+    private boolean tryApplySuperLyricWordFusionFastPath(SuperLyricApi.SuperLyricFallbackPayload payload,
+                                                         String sourcePkg,
+                                                         int requestSeq,
+                                                         String trackKey,
+                                                         int preferredLineIndex) {
+        if (!isLyricsRequestCurrent(requestSeq, trackKey) || payload == null) {
+            return false;
+        }
+        if (payload.wordTimestamps == null || payload.wordTimestamps.isEmpty()) {
+            return false;
+        }
+        if (isMixedLyricsSourceMode()) {
+            if (!hasMixedModeNetworkLyricsStructure()) {
+                return false;
+            }
+        } else if (!canUseSuperLyricWordFusion()) {
+            return false;
+        }
+        List<EnhancedLRCParser.EnhancedLyricLine> lines = enhancedLyricLines;
+        if (lines == null || lines.isEmpty()) {
+            return false;
+        }
+        long playbackPosition = resolveLyricsAnchorPositionMs();
+        double fastPathSimThreshold = MusicPlayerLyricsPolicy.appliesQishuiMixedStrictPolicy(sourcePkg, true)
+            ? 0.90
+            : 0.82;
+        int lineIndex = clampLyricLineIndex(lines, preferredLineIndex);
+        if (lineIndex < 0) {
+            lineIndex = clampLyricLineIndex(
+                lines, findCurrentLineIndexForAbyssal(lines, playbackPosition));
+        }
+        if (lineIndex < 0
+            && lastWordFusionLineIndex >= 0
+            && (lyricsView == null || !lyricsView.isTrackLoading())) {
+            lineIndex = clampLyricLineIndex(lines, lastWordFusionLineIndex);
+        }
+        if (lineIndex < 0) {
+            return false;
+        }
+        EnhancedLRCParser.EnhancedLyricLine targetLine = lines.get(lineIndex);
+        if (targetLine == null || targetLine.text == null) {
+            return false;
+        }
+        if (LyricsMatcher.similarity(targetLine.text, payload.text) < fastPathSimThreshold) {
+            int playbackIndex = clampLyricLineIndex(
+                lines, findCurrentLineIndexForAbyssal(lines, playbackPosition));
+            if (playbackIndex >= 0 && playbackIndex != lineIndex) {
+                EnhancedLRCParser.EnhancedLyricLine playbackLine = lines.get(playbackIndex);
+                if (playbackLine != null
+                    && playbackLine.text != null
+                    && LyricsMatcher.similarity(playbackLine.text, payload.text) >= fastPathSimThreshold) {
+                    lineIndex = playbackIndex;
+                    targetLine = playbackLine;
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        long lineTime = targetLine.time > 0L ? targetLine.time : Math.max(0L, payload.lineStartMs);
+        long nextLineTimeMs = 0L;
+        if (lineIndex + 1 < lines.size()) {
+            EnhancedLRCParser.EnhancedLyricLine nextLine = lines.get(lineIndex + 1);
+            if (nextLine != null && nextLine.time > 0L) {
+                nextLineTimeMs = nextLine.time;
+            }
+        }
+        ArrayList<EnhancedLRCParser.WordTimestamp> fusedWords = buildSuperLyricModuleLineWordTimestamps(
+            lineTime, targetLine.text, payload.wordTimestamps, nextLineTimeMs, payload.lineStartMs);
+        if (fusedWords.isEmpty()) {
+            fusedWords = SuperLyricWordTimestamps.alignToLineTime(lineTime, payload.wordTimestamps);
+        }
+        if (fusedWords.isEmpty()) {
+            return false;
+        }
+        MixedLyricsLineMatcher.MatchResult fastMatch = new MixedLyricsLineMatcher.MatchResult(
+            lineIndex,
+            1.0,
+            1.0,
+            1.0,
+            MixedLyricsLineMatcher.MatchTier.STRONG,
+            true,
+            preferredLineIndex >= 0 ? "fast_path_playback_line" : "fast_path_same_line"
+        );
+        commitSuperLyricWordFusion(
+            new PendingWordFusion(requestSeq, trackKey, sourcePkg, payload, lineIndex, fastMatch, fusedWords),
+            wordFusionGeneration.get()
+        );
+        return true;
+    }
+
+    /** 行级比对未过但当前播放行文本与模块句一致且已有逐字：保持模块轴，不回退行时间戳推算。 */
+    private boolean tryApplyStickyWordFusionOnPlaybackLine(SuperLyricApi.SuperLyricFallbackPayload payload,
+                                                           String sourcePkg,
+                                                           int requestSeq,
+                                                           String trackKey,
+                                                           long playbackPosition) {
+        if (payload == null || !payload.hasValidWords()) {
+            return false;
+        }
+        List<EnhancedLRCParser.EnhancedLyricLine> lines = enhancedLyricLines;
+        if (lines == null || lines.isEmpty()) {
+            return false;
+        }
+        int playbackIndex = clampLyricLineIndex(
+            lines, findCurrentLineIndexForAbyssal(lines, playbackPosition));
+        if (playbackIndex < 0) {
+            return false;
+        }
+        EnhancedLRCParser.EnhancedLyricLine line = lines.get(playbackIndex);
+        if (line == null || line.text == null) {
+            return false;
+        }
+        double threshold = MusicPlayerLyricsPolicy.appliesQishuiMixedStrictPolicy(sourcePkg, true)
+            ? 0.88
+            : 0.80;
+        if (LyricsMatcher.similarity(line.text, payload.text) < threshold) {
+            return false;
+        }
+        return tryApplySuperLyricWordFusionFastPath(
+            payload, sourcePkg, requestSeq, trackKey, playbackIndex);
+    }
+
+    private static final class PendingWordFusion {
+        final int requestSeq;
+        final String trackKey;
+        final String sourcePkg;
+        final SuperLyricApi.SuperLyricFallbackPayload payload;
+        final int matchedIndex;
+        final MixedLyricsLineMatcher.MatchTier tier;
+        final double textSimilarity;
+        final double wordCoverage;
+        final ArrayList<EnhancedLRCParser.WordTimestamp> fusedWords;
+
+        PendingWordFusion(int requestSeq,
+                          String trackKey,
+                          String sourcePkg,
+                          SuperLyricApi.SuperLyricFallbackPayload payload,
+                          int matchedIndex,
+                          MixedLyricsLineMatcher.MatchResult match,
+                          ArrayList<EnhancedLRCParser.WordTimestamp> fusedWords) {
+            this.requestSeq = requestSeq;
+            this.trackKey = trackKey;
+            this.sourcePkg = sourcePkg;
+            this.payload = payload;
+            this.matchedIndex = matchedIndex;
+            this.tier = match != null ? match.tier : MixedLyricsLineMatcher.MatchTier.REJECTED;
+            this.textSimilarity = match != null ? match.textSimilarity : 0.0;
+            this.wordCoverage = match != null ? match.wordCoverage : 0.0;
+            this.fusedWords = fusedWords;
+        }
+    }
+
+    private static void clearLineModuleWordTimeline(EnhancedLRCParser.EnhancedLyricLine line) {
+        if (line == null) {
+            return;
+        }
+        line.moduleWordTimeline = false;
+        if (line.wordTimestamps != null) {
+            line.wordTimestamps.clear();
+        }
+    }
+
+    /**
+     * 智能切换逐字融合（参考 1.8.4）：网络歌词在且模块有逐字时，行级比对通过后只写当前行 wordTimestamps。
+     */
+    private boolean applyMixedModeWordFusionPayload(SuperLyricApi.SuperLyricFallbackPayload payload,
+                                                    String sourcePkg,
+                                                    int requestSeq,
+                                                    String trackKey) {
+        if (!isLyricsRequestCurrent(requestSeq, trackKey) || payload == null) {
+            return false;
+        }
+        if (!hasMixedModeNetworkLyricsStructure()) {
+            return false;
+        }
+        if (payload.wordTimestamps == null || payload.wordTimestamps.isEmpty()) {
+            return false;
+        }
+        if (enhancedLyricLines == null || enhancedLyricLines.isEmpty()) {
+            return false;
+        }
+        if (tryApplySuperLyricWordFusionFastPath(payload, sourcePkg, requestSeq, trackKey)) {
+            return true;
+        }
+        long playbackPosition = resolveLyricsAnchorPositionMs();
+        int anchorIndex = findCurrentLineIndexForAbyssal(enhancedLyricLines, playbackPosition);
+        MusicPlayerLyricsPolicy.LineMatchStrictness lineStrictness =
+            MusicPlayerLyricsPolicy.resolveLineMatchStrictness(sourcePkg, true);
+        MixedLyricsLineMatcher.MatchResult match = MixedLyricsLineMatcher.match(
+            enhancedLyricLines,
+            payload.text,
+            payload.wordTimestamps,
+            payload.lineStartMs,
+            playbackPosition,
+            anchorIndex,
+            lineStrictness
+        );
+        int matchedIndex = clampLyricLineIndex(enhancedLyricLines, match != null ? match.lineIndex : -1);
+        if (!match.accepted || matchedIndex < 0) {
+            if (tryApplyStickyWordFusionOnPlaybackLine(
+                payload, sourcePkg, requestSeq, trackKey, playbackPosition)) {
+                return true;
+            }
+            if (BuildConfig.DEBUG) {
+                LogHelper.d(TAG, "⏭ 智能切换·逐字融合未通过比对: " + (match != null ? match.reason : "")
+                    + ", text=" + safeShort(payload.text));
+            }
+            return false;
+        }
+        EnhancedLRCParser.EnhancedLyricLine targetLine = enhancedLyricLines.get(matchedIndex);
+        if (targetLine == null) {
+            return false;
+        }
+        long lineTime = targetLine.time > 0L ? targetLine.time : Math.max(0L, payload.lineStartMs);
+        String networkLineText = targetLine.text != null ? targetLine.text : "";
+        long nextLineTimeMs = 0L;
+        if (matchedIndex + 1 < enhancedLyricLines.size()) {
+            EnhancedLRCParser.EnhancedLyricLine nextLine = enhancedLyricLines.get(matchedIndex + 1);
+            if (nextLine != null && nextLine.time > 0L) {
+                nextLineTimeMs = nextLine.time;
+            }
+        }
+        ArrayList<EnhancedLRCParser.WordTimestamp> fusedWords = buildSuperLyricModuleLineWordTimestamps(
+            lineTime, networkLineText, payload.wordTimestamps, nextLineTimeMs, payload.lineStartMs);
+        if (fusedWords.isEmpty()) {
+            fusedWords = SuperLyricWordTimestamps.alignToLineTime(lineTime, payload.wordTimestamps);
+        }
+        if (fusedWords.isEmpty()) {
+            return false;
+        }
+        commitSuperLyricWordFusion(
+            new PendingWordFusion(requestSeq, trackKey, sourcePkg, payload, matchedIndex, match, fusedWords),
+            wordFusionGeneration.get()
+        );
+        return true;
+    }
+
+    private boolean applySuperLyricWordFusionPayload(SuperLyricApi.SuperLyricFallbackPayload payload,
+                                                     String sourcePkg,
+                                                     int requestSeq,
+                                                     String trackKey) {
+        if (!isLyricsRequestCurrent(requestSeq, trackKey) || payload == null) {
+            return false;
+        }
+        if (payload.wordTimestamps == null || payload.wordTimestamps.isEmpty()) {
+            return false;
+        }
+        if (isMixedLyricsSourceMode()) {
+            return applyMixedModeWordFusionPayload(payload, sourcePkg, requestSeq, trackKey);
+        }
+        if (!canUseSuperLyricWordFusion()) {
+            return false;
+        }
+        if (tryApplySuperLyricWordFusionFastPath(payload, sourcePkg, requestSeq, trackKey)) {
+            return true;
+        }
+        scheduleSuperLyricOnlyWordFusion(payload, sourcePkg, requestSeq, trackKey);
+        return true;
+    }
+
+    /** 仅 SuperLyric 整曲多行：后台行级比对后提交逐字。 */
+    private void scheduleSuperLyricOnlyWordFusion(SuperLyricApi.SuperLyricFallbackPayload payload,
+                                                  String sourcePkg,
+                                                  int requestSeq,
+                                                  String trackKey) {
+        final int generation = wordFusionGeneration.get();
+        final List<EnhancedLRCParser.EnhancedLyricLine> lines = enhancedLyricLines;
+        final long playbackPosition = resolveLyricsAnchorPositionMs();
+        superLyricWordFusionExecutor.execute(() -> {
+            if (generation != wordFusionGeneration.get() || lines == null || lines.isEmpty()) {
+                return;
+            }
+            int anchorIndex = findCurrentLineIndexForAbyssal(lines, playbackPosition);
+            MixedLyricsLineMatcher.MatchResult match = MixedLyricsLineMatcher.match(
+                lines,
+                payload.text,
+                payload.wordTimestamps,
+                payload.lineStartMs,
+                playbackPosition,
+                anchorIndex,
+                MusicPlayerLyricsPolicy.resolveLineMatchStrictness(sourcePkg, false)
+            );
+            if (!match.accepted || match.lineIndex < 0 || match.lineIndex >= lines.size()) {
+                return;
+            }
+            EnhancedLRCParser.EnhancedLyricLine targetLine = lines.get(match.lineIndex);
+            if (targetLine == null) {
+                return;
+            }
+            long lineTime = targetLine.time > 0L ? targetLine.time : Math.max(0L, payload.lineStartMs);
+            String lineText = targetLine.text != null ? targetLine.text : "";
+            long nextLineTimeMs = 0L;
+            if (match.lineIndex + 1 < lines.size()) {
+                EnhancedLRCParser.EnhancedLyricLine nextLine = lines.get(match.lineIndex + 1);
+                if (nextLine != null && nextLine.time > 0L) {
+                    nextLineTimeMs = nextLine.time;
+                }
+            }
+            ArrayList<EnhancedLRCParser.WordTimestamp> fusedWords = buildSuperLyricModuleLineWordTimestamps(
+                lineTime, lineText, payload.wordTimestamps, nextLineTimeMs, payload.lineStartMs);
+            if (fusedWords.isEmpty()) {
+                return;
+            }
+            PendingWordFusion pending = new PendingWordFusion(
+                requestSeq, trackKey, sourcePkg, payload, match.lineIndex, match, fusedWords
+            );
+            uiHandler.post(() -> commitSuperLyricWordFusion(pending, generation));
+        });
+    }
+
+    private void commitSuperLyricWordFusion(PendingWordFusion pending, int generation) {
+        if (pending == null || generation != wordFusionGeneration.get()) {
+            return;
+        }
+        if (!isLyricsRequestCurrent(pending.requestSeq, pending.trackKey)) {
+            return;
+        }
+        int safeIndex = clampLyricLineIndex(enhancedLyricLines, pending.matchedIndex);
+        if (enhancedLyricLines == null || safeIndex < 0) {
+            return;
+        }
+        EnhancedLRCParser.EnhancedLyricLine targetLine = enhancedLyricLines.get(safeIndex);
+        if (targetLine == null || pending.fusedWords == null || pending.fusedWords.isEmpty()) {
+            return;
+        }
+        if (BuildConfig.DEBUG) {
+            LogHelper.d(TAG, "✅ SuperLyric 逐字融合命中: idx=" + safeIndex
+                + ", tier=" + pending.tier
+                + ", sim=" + String.format(Locale.US, "%.2f", pending.textSimilarity)
+                + ", word=" + String.format(Locale.US, "%.2f", pending.wordCoverage));
+        }
+        if (targetLine.time <= 0L && pending.payload != null) {
+            targetLine.time = Math.max(0L, pending.payload.lineStartMs);
+        }
+        boolean sameLineRefinement = safeIndex == lastWordFusionLineIndex
+            && targetLine.wordTimestamps != null
+            && !targetLine.wordTimestamps.isEmpty()
+            && !SuperLyricWordTimestamps.hasMaterialWordTimingChange(
+                targetLine.wordTimestamps, pending.fusedWords);
+        if (sameLineRefinement) {
+            if (lyricsView != null) {
+                long playbackPosition = resolveLyricsAnchorPositionMs();
+                lyricsView.updatePosition(playbackPosition);
+            }
+            return;
+        }
+        targetLine.wordTimestamps = pending.fusedWords;
+        // V3.17+: 智能切换融合逐字使用模块轴加权进度，按字时长计算高亮，不按字计数等分。
+        // 仅 SuperLyric 整曲模式保持旧路径（模块时间轴可能为句内相对值）。
+        targetLine.moduleWordTimeline = isMixedLyricsSourceMode();
+        lastWordFusionLineIndex = safeIndex;
+        cancelPendingNoLyrics();
+        superLyricFallbackModeActive = false;
+        applyFallbackRenderingModeIfNeeded();
+        if (isSuperLyricOnlySourceMode()) {
+            markStructuredLyricsFromSuperLyricModule(
+                pending.sourcePkg != null ? pending.sourcePkg : currentLyricsSourcePkg
+            );
+            updateHookSourceStatusText(LyricsRuntimeSource.SUPER_LYRIC, "整曲·逐字");
+        } else {
+            markStructuredLyricsForWordFusion(
+                pending.sourcePkg != null ? pending.sourcePkg : currentLyricsSourcePkg,
+                lastNetworkLyricsRuntimeSource,
+                lastNetworkLyricsProvider
+            );
+            updateHookSourceStatusWordFusion();
+        }
+        if (lyricsView != null) {
+            lyricsView.setEnableWordByWord(effectiveWordByWordForSuperLyric(pending.payload));
+            long playbackPosition = resolveLyricsAnchorPositionMs();
+            lyricsView.updatePosition(playbackPosition);
+            // 禁止 setLyrics / refreshCurrentLine：会 scrollY=0 再瞬间居中，且无上移动画。
+            lyricsView.notifyWordTimestampsChanged(safeIndex);
+        }
+    }
+
+    private boolean applySuperLyricFallbackPayload(SuperLyricApi.SuperLyricFallbackPayload payload,
+                                                   String sourcePkg,
+                                                   int requestSeq,
+                                                   String trackKey) {
+        if (!shouldAllowSuperLyricSingleLineFallback(sourcePkg, requestSeq, trackKey) || payload == null) {
+            return false;
+        }
+        String text = payload.text != null ? payload.text.trim() : "";
+        if (text.isEmpty()) {
+            scheduleNoLyricsIfStillEmpty(requestSeq, trackKey, null, null);
+            return false;
+        }
+        String normalizedText = normalizeLyricToken(text);
         long payloadStart = Math.max(0L, payload.lineStartMs);
-        // SuperLyric 常返回“当前句内局部时间”而非整首歌绝对时间；若直接喂给歌词视图，
-        // 会出现“播放到 80s，但最后一行时间只有 3s”而被 ModernLyricsView 判回第 1 行。
-        long anchoredLineTime = currentPlaybackPosition > 0L ? currentPlaybackPosition : payloadStart;
+        long currentPlaybackPosition = resolveLyricsAnchorPositionMs();
+        boolean textChangedFromLastApply = TextUtils.isEmpty(lastSuperLyricAppliedTextNormalized)
+            || TextUtils.isEmpty(normalizedText)
+            || !softLyricTokenEquals(normalizedText, lastSuperLyricAppliedTextNormalized);
+        boolean moduleRelativeLineTime = payload.lineStartMs > 0L
+            && payload.lineStartMs < 120_000L;
+        boolean moduleRelativeWords = payload.hasValidWords()
+            && SuperLyricWordTimestamps.usesSentenceRelativeTimeline(payload.wordTimestamps);
+        if (payloadStart > 0L
+            && currentPlaybackPosition > 0L
+            && payloadStart + SUPER_LYRIC_STALE_BACKWARD_TOLERANCE_MS < currentPlaybackPosition
+            && !superLyricFallbackModeActive
+            && !textChangedFromLastApply
+            && !isSuperLyricOnlySourceMode()
+            && !moduleRelativeLineTime
+            && !moduleRelativeWords) {
+            if (BuildConfig.DEBUG) {
+                LogHelper.w(TAG, "⏭ 忽略异常 SuperLyric 句子: pos=" + currentPlaybackPosition
+                    + "ms, payloadStart=" + payloadStart
+                    + "ms, tolerance=" + SUPER_LYRIC_STALE_BACKWARD_TOLERANCE_MS
+                    + "ms, text=" + safeShort(text));
+            }
+            return false;
+        }
+        // 与 1.8.4 参考版一致：行结构锚到当前播放进度，逐字用 alignToLineTime 生成整曲绝对毫秒轴，
+        // 避免句内 0 基轴 + 模块行起点锚定导致 (播放位置 - 锚点) 远超字时长而「一下跑完」。
+        final long superLyricLeadCompensationMs = 40L;
+        boolean sameLineAsLastApply = !TextUtils.isEmpty(normalizedText)
+            && !TextUtils.isEmpty(lastSuperLyricAppliedTextNormalized)
+            && softLyricTokenEquals(normalizedText, lastSuperLyricAppliedTextNormalized)
+            && lastSuperLyricAppliedLineTimeMs > 0L;
+        long anchoredCandidate = currentPlaybackPosition > 0L
+            ? Math.max(currentPlaybackPosition + superLyricLeadCompensationMs, payloadStart)
+            : payloadStart;
+        long anchoredLineTime = sameLineAsLastApply
+            ? Math.max(lastSuperLyricAppliedLineTimeMs, Math.max(payloadStart, 0L))
+            : anchoredCandidate;
         if (BuildConfig.DEBUG) {
             LogHelper.d(TAG, "🎯 SuperLyric(单句) apply: trackKey=" + (trackKey != null ? trackKey : "")
                 + ", seq=" + requestSeq
                 + ", pos=" + currentPlaybackPosition + "ms"
                 + ", payloadStart=" + payloadStart + "ms"
                 + ", anchored=" + anchoredLineTime + "ms"
+                + ", sameLine=" + sameLineAsLastApply
                 + ", text=" + safeShort(text));
         }
         EnhancedLRCParser.EnhancedLyricLine line = reusableSuperLyricLine;
-        line.time = anchoredLineTime;
+        line.time = Math.max(0L, anchoredLineTime);
         line.text = text;
         line.translation = null;
-        if (payload.hasValidWords()) {
-            reusableSuperLyricWords.clear();
-            long shift = anchoredLineTime - payloadStart;
-            for (EnhancedLRCParser.WordTimestamp word : payload.wordTimestamps) {
-                if (word == null) continue;
-                long start = Math.max(0L, word.startTime + shift);
-                long end = Math.max(start, word.endTime + shift);
-                reusableSuperLyricWords.add(new EnhancedLRCParser.WordTimestamp(word.word, start, end));
-            }
-            line.wordTimestamps = reusableSuperLyricWords;
+        superLyricActiveLineHasWords = payload.hasValidWords();
+        if (superLyricActiveLineHasWords) {
+            line.wordTimestamps = SuperLyricWordTimestamps.alignToLineTime(line.time, payload.wordTimestamps);
+            // 单句兜底走绝对毫秒轴 + legacy 进度（与参考版 ModernLyricsView 一致），不用 moduleWordTimeline。
+            line.moduleWordTimeline = false;
         } else {
-            reusableSuperLyricWords.clear();
-            line.wordTimestamps = reusableSuperLyricWords;
+            line.wordTimestamps = new ArrayList<>();
+            line.moduleWordTimeline = false;
         }
         reusableSingleLineLyrics.clear();
         reusableSingleLineLyrics.add(line);
         enhancedLyricLines = reusableSingleLineLyrics;
         cancelPendingNoLyrics();
+        boolean wasSuperLyricFallbackModeActive = superLyricFallbackModeActive;
         superLyricFallbackModeActive = true;
         applyFallbackRenderingModeIfNeeded();
-        setLyricsToView(reusableSingleLineLyrics);
+        // 单行兜底切句时避免重复 setLyrics() 触发视图状态重置（会带来切句瞬间割裂感）。
+        // 仅在首次进入兜底或非普通歌词视图路径时重绑数据。
+        boolean shouldRebindSingleLineLyrics = !wasSuperLyricFallbackModeActive
+            || abyssalMirrorEnabled
+            || lyricsView == null;
+        if (shouldRebindSingleLineLyrics) {
+            setLyricsToView(reusableSingleLineLyrics);
+        }
+        lastSuperLyricAppliedTextNormalized = normalizedText;
+        lastSuperLyricAppliedLineTimeMs = line.time;
         currentLyricsSource = LyricsSource.SUPER_LYRIC_FALLBACK;
         currentLyricsSourcePkg = sourcePkg != null ? sourcePkg : "";
-        updateHookSourceStatusText(payload.hasValidWords() ? "来源：SuperLyric兜底(逐字)" : "来源：SuperLyric兜底(静态)");
-        LogHelper.d(TAG, "✅ SuperLyricApi 兜底命中: words=" + payload.hasValidWords());
+        updateHookSourceStatusText(
+            LyricsRuntimeSource.SUPER_LYRIC,
+            payload.hasValidWords() ? "单句·逐字" : "单句"
+        );
+        if (lyricsView != null) {
+            lyricsView.setEnableWordByWord(effectiveWordByWordForSuperLyric(payload));
+            lyricsView.setEnableShuffleSplitEffect(shuffleSplitEffectEnabled);
+            long latestPosition = resolveLyricsAnchorPositionMs();
+            syncLyricsRenderPositionCache(latestPosition);
+            lyricsView.updatePosition(latestPosition);
+            if (sameLineAsLastApply && payload.hasValidWords()) {
+                lyricsView.refreshCurrentLine();
+            } else if (shouldRebindSingleLineLyrics) {
+                lyricsView.refreshAllLines();
+                lyricsView.refreshCurrentLine();
+                lyricsView.centerCurrentLineImmediately();
+            } else {
+                lyricsView.refreshCurrentLine();
+            }
+            lyricsView.postInvalidateOnAnimation();
+            lyricsView.invalidate();
+        } else {
+            forceRefreshLyricsViewForSuperLyric(payload.hasValidWords());
+        }
+        LogHelper.d(TAG, "✅ SuperLyricApi 兜底命中: words=" + payload.hasValidWords()
+            + ", lines=1");
+        return true;
+    }
+
+    /**
+     * 当前曲目是否已有 SuperLyric 模块写入的逐字时间轴（非网络 LRC 行区间推算）。
+     */
+    private boolean structuredLyricsHaveWordTimestamps() {
+        if (enhancedLyricLines == null || enhancedLyricLines.isEmpty()) {
+            return false;
+        }
+        for (EnhancedLRCParser.EnhancedLyricLine line : enhancedLyricLines) {
+            if (line == null) {
+                continue;
+            }
+            if (line.wordTimestamps != null && !line.wordTimestamps.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean effectiveWordByWordForSuperLyric(SuperLyricApi.SuperLyricFallbackPayload payload) {
+        if (!supportsWordByWordLyricsFeatures()) {
+            return false;
+        }
+        boolean hasModuleWords = payload != null
+            ? payload.hasValidWords()
+            : (superLyricActiveLineHasWords || structuredLyricsHaveWordTimestamps());
+        if (isSuperLyricOnlySourceMode()) {
+            // 仅 SuperLyric：逐字高亮跟随用户「逐字显示」开关；开启且有模块逐字轴时用字时间，否则按行进度模拟。
+            return wordByWordEnabled;
+        }
+        if (isMixedLyricsSourceMode()) {
+            if (superLyricFallbackModeActive) {
+                return hasModuleWords || wordByWordEnabled;
+            }
+            if (hasMixedModeNetworkLyricsStructure()) {
+                return true;
+            }
+            return wordByWordEnabled || hasModuleWords;
+        }
+        if (wordByWordEnabled) {
+            return true;
+        }
+        if (structuredLyricsHaveWordTimestamps()) {
+            return true;
+        }
+        if (!superLyricFallbackModeActive) {
+            return false;
+        }
+        return hasModuleWords;
     }
 
     private void applyFallbackRenderingModeIfNeeded() {
         if (lyricsView == null) return;
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        boolean effectiveWordByWord = effectiveWordByWordForSuperLyric(null);
         if (superLyricFallbackModeActive) {
             lyricsView.setShowTranslation(false);
-            lyricsView.setEnableShuffleSplitEffect(false);
-            lyricsView.setShuffleOnlyCurrentLine(true);
-            lyricsView.setEnableWordByWord(true);
-            lyricsView.setTimeAdjustOffset(0L);
-        } else {
-            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            lyricsView.setShowTranslation(true);
-            lyricsView.setEnableWordByWord(wordByWordEnabled);
+            lyricsView.setEnableWordByWord(effectiveWordByWord);
             lyricsView.setEnableShuffleSplitEffect(shuffleSplitEffectEnabled);
+            lyricsView.setShuffleSplitMulticolorEnabled(shuffleSplitEffectEnabled && shuffleSplitMulticolorEnabled);
+            lyricsView.setShuffleSplitMode(shuffleSplitEffectEnabled ? "WORD" : shuffleSplitMode);
+            lyricsView.setShuffleOnlyCurrentLine(shuffleSplitEffectEnabled || shuffleSplitOnlyCurrentLine);
+            lyricsView.setEnableGesture(gestureControlEnabled);
+            lyricsView.setTimeAdjustOffset(0L);
+            lyricsView.setShuffleSplitTiltRatio(prefs.getFloat("shuffleSplitTiltRatio", 5f));
+            float scaleVariance = prefs.contains(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE)
+                ? prefs.getFloat(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE, 0.22f)
+                : adaptiveShuffleSplitScaleVariance(currentTextSize);
+            lyricsView.setShuffleSplitScaleVariance(scaleVariance);
+        } else {
+            lyricsView.setShowTranslation(true);
+            lyricsView.setEnableWordByWord(effectiveWordByWord);
+            lyricsView.setEnableShuffleSplitEffect(shuffleSplitEffectEnabled);
+            lyricsView.setShuffleSplitMulticolorEnabled(shuffleSplitEffectEnabled && shuffleSplitMulticolorEnabled);
             lyricsView.setShuffleSplitMode(shuffleSplitEffectEnabled ? "WORD" : shuffleSplitMode);
             lyricsView.setShuffleOnlyCurrentLine(shuffleSplitEffectEnabled || shuffleSplitOnlyCurrentLine);
             lyricsView.setEnableGesture(gestureControlEnabled);
@@ -4129,6 +6475,29 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         } catch (Exception ignored) {}
     }
 
+    /**
+     * 仅当当前曲目仍无任何歌词行时调度「暂无歌词」；SuperLyric 实时回调可能晚于拉取失败。
+     */
+    private void scheduleNoLyricsIfStillEmpty(int requestSeq,
+                                              String trackKey,
+                                              LyricsRuntimeSource statusSource,
+                                              String statusDetail) {
+        if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
+            return;
+        }
+        if (enhancedLyricLines != null && !enhancedLyricLines.isEmpty()) {
+            return;
+        }
+        if (statusSource != null) {
+            updateHookSourceStatusText(statusSource, statusDetail);
+        }
+        long delayMs = NO_LYRICS_UI_DELAY_MS;
+        if (superLyricRealtimeListener != null && shouldUseSuperLyricFallback()) {
+            delayMs = Math.max(delayMs, isSuperLyricOnlySourceMode() ? 8_000L : 5_000L);
+        }
+        scheduleNoLyrics(requestSeq, trackKey, delayMs);
+    }
+
     private void scheduleNoLyrics(int requestSeq, String trackKey) {
         scheduleNoLyrics(requestSeq, trackKey, NO_LYRICS_UI_DELAY_MS);
     }
@@ -4139,12 +6508,16 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             if (!isLyricsRequestCurrent(requestSeq, trackKey)) {
                 return;
             }
-            // 只有在当前仍然没有歌词时才显示“未获取到歌词”
+            // V3.17+: 确认无歌词时清除 trackLoading，让视图进入”暂无歌词”稳态
+            if (lyricsView != null && lyricsView.isTrackLoading()) {
+                lyricsView.setTrackLoading(false);
+            }
+            // 只有在当前仍然没有歌词时才显示”未获取到歌词”
             if (enhancedLyricLines == null || enhancedLyricLines.isEmpty()) {
                 setLyricsToView(null);
             }
         };
-        // 延迟一点，避免短时间内“通知无歌词/随后API拿到歌词”导致闪烁；等 extras 时用更长 delay
+        // 延迟一点，避免短时间内”通知无歌词/随后API拿到歌词”导致闪烁；等 extras 时用更长 delay
         long d = Math.max(0L, delayMs);
         uiHandler.postDelayed(pendingNoLyricsRunnable, d);
     }
@@ -4154,6 +6527,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
      */
     private void updatePositionToView(long position) {
         try {
+            latestLyricsRenderPositionMs = Math.max(0L, position);
             long adjustedPosition = position + (long) projectionSyncOffsetMs;
             if (adjustedPosition < 0) {
                 adjustedPosition = 0;
@@ -4207,16 +6581,33 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return 0;
         }
         
+        // 进度超过末行：正常尾奏锁末行；远超末行时间轴则视为上首残留进度，回到首行。
+        int lastIndex = lyricLines.size() - 1;
+        EnhancedLRCParser.EnhancedLyricLine lastLine = lyricLines.get(lastIndex);
+        if (lastLine != null && position >= lastLine.time) {
+            if (position <= lastLine.time + 90_000L) {
+                return lastIndex;
+            }
+            return 0;
+        }
+        
         // 从后往前查找，找到第一个时间小于等于位置且位置小于下一行时间的行
         for (int i = lyricLines.size() - 1; i >= 0; i--) {
             EnhancedLRCParser.EnhancedLyricLine line = lyricLines.get(i);
+            if (line == null) {
+                continue;
+            }
             
             // 计算这一行的有效结束时间
             long lineEndTime;
             if (i + 1 < lyricLines.size()) {
-                lineEndTime = lyricLines.get(i + 1).time;
+                EnhancedLRCParser.EnhancedLyricLine next = lyricLines.get(i + 1);
+                lineEndTime = next != null ? next.time : line.time + 3000;
             } else {
                 lineEndTime = line.time + 3000; // 默认3秒
+            }
+            if (lineEndTime <= line.time) {
+                lineEndTime = line.time + 3000;
             }
             
             // 只有当position >= line.time才开始显示，且position < lineEndTime才保持显示
@@ -4276,23 +6667,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             pPath = null;
         }
         projectionLyricsCustomPath = pPath;
-        abyssalLyricsFontId = LyricsFontHelper.normalizeFontId(prefs.getString(KEY_ABYSSAL_LYRICS_FONT, null));
-        String aPath = prefs.getString(KEY_ABYSSAL_LYRICS_CUSTOM_PATH, null);
-        if (aPath != null && aPath.isEmpty()) {
-            aPath = null;
-        }
-        abyssalLyricsCustomPath = aPath;
         if (!LyricsFontHelper.ID_CUSTOM.equals(projectionLyricsFontId)) {
             projectionLyricsCustomPath = null;
         } else if (projectionLyricsCustomPath == null || !(new java.io.File(projectionLyricsCustomPath).isFile())) {
             projectionLyricsFontId = LyricsFontHelper.DEFAULT_ID;
             projectionLyricsCustomPath = null;
-        }
-        if (!LyricsFontHelper.ID_CUSTOM.equals(abyssalLyricsFontId)) {
-            abyssalLyricsCustomPath = null;
-        } else if (abyssalLyricsCustomPath == null || !(new java.io.File(abyssalLyricsCustomPath).isFile())) {
-            abyssalLyricsFontId = LyricsFontHelper.DEFAULT_ID;
-            abyssalLyricsCustomPath = null;
         }
     }
 
@@ -4307,6 +6686,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         backgroundTextureAlpha = prefs.getInt(KEY_BACKGROUND_TEXTURE_ALPHA, DEFAULT_BACKGROUND_TEXTURE_ALPHA);
         wordByWordEnabled = prefs.getBoolean(KEY_WORD_BY_WORD, false);  // 默认关闭逐字显示
         shuffleSplitEffectEnabled = prefs.getBoolean(KEY_SHUFFLE_SPLIT_EFFECT, false);
+        shuffleSplitMulticolorEnabled = prefs.getBoolean(KEY_SHUFFLE_SPLIT_MULTICOLOR, false);
         shuffleSplitMode = prefs.getString(KEY_SHUFFLE_SPLIT_MODE, "WORD");
         if (shuffleSplitMode == null) shuffleSplitMode = "WORD";
         shuffleSplitOnlyCurrentLine = prefs.getBoolean(KEY_SHUFFLE_SPLIT_ONLY_CURRENT_LINE, true);
@@ -4314,6 +6694,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         neonDisplayEnabled = prefs.getBoolean(KEY_NEON_DISPLAY, prefs.getBoolean(KEY_LYRICS_NEON_GLOW_LEGACY, true));
         neonBorderEnabled = prefs.getBoolean(KEY_NEON_BORDER, true);  // 默认开启霓虹灯边框
         marqueeLightSize = prefs.getFloat(KEY_MARQUEE_LIGHT_SIZE, 18f);  // 默认跑马灯线条宽度18px
+        marqueeLightDurationMs = prefs.getInt(KEY_MARQUEE_LIGHT_DURATION_MS, DEFAULT_MARQUEE_LIGHT_DURATION_MS);
         gestureControlEnabled = prefs.getBoolean(KEY_GESTURE_CONTROL, false);  // 默认关闭手势控制
         if (shuffleSplitEffectEnabled) {
             // 分词模式与逐字/滑动互斥，进入页面时直接纠偏，避免旧偏好导致冲突
@@ -4322,18 +6703,35 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             shuffleSplitMode = "WORD";
             shuffleSplitOnlyCurrentLine = true;
         }
+        abyssalMirrorEnabled = prefs.getBoolean(KEY_ABYSSAL_MIRROR, false);  // 默认关闭深渊镜效果
+        if (abyssalMirrorEnabled) {
+            // 深渊镜与逐字/分词互斥，进入页面时纠偏（手势切歌不互斥）
+            wordByWordEnabled = false;
+            shuffleSplitEffectEnabled = false;
+        }
         backgroundTextureEnabled = prefs.getBoolean(KEY_BACKGROUND_TEXTURE, false);  // 默认关闭歌词底图显示
+        albumArtBackgroundEnabled = prefs.getBoolean(KEY_ALBUM_ART_BACKGROUND, false);
+        albumArtAlphaPercent = Math.max(0, Math.min(100, prefs.getInt(KEY_ALBUM_ART_ALPHA_PERCENT, DEFAULT_ALBUM_ART_ALPHA_PERCENT)));
+        albumArtBlurRadiusPx = Math.max(0f, prefs.getFloat(KEY_ALBUM_ART_BLUR_RADIUS, DEFAULT_ALBUM_ART_BLUR_RADIUS_PX));
         powerSavingModeEnabled = prefs.getBoolean(KEY_POWER_SAVING_MODE, false);
+        borderPerformanceGuardEnabled = prefs.getBoolean(KEY_BORDER_PERFORMANCE_GUARD, false);
+        borderLightweightModeEnabled = prefs.getBoolean(KEY_BORDER_LIGHTWEIGHT_MODE, false);
         projectionSyncOffsetMs = prefs.getInt(KEY_PROJECTION_SYNC_OFFSET_MS, DEFAULT_PROJECTION_SYNC_OFFSET_MS);
         lyricsSourceMode = normalizeLyricsSourceMode(
             prefs.getString(KEY_LYRICS_SOURCE_MODE, VALUE_LYRICS_SOURCE_MIXED)
         );
-        breathingRhythmMs = prefs.getInt(KEY_BREATHING_RHYTHM_MS, DEFAULT_BREATHING_RHYTHM_MS);
+        breathingEnabled = prefs.getBoolean(KEY_BREATHING_ENABLED, false);
+        breathingBpm = prefs.getInt(KEY_BREATHING_BPM, DEFAULT_BREATHING_BPM);
         breathingScaleVariance = prefs.getFloat(KEY_BREATHING_SCALE_VARIANCE, DEFAULT_BREATHING_SCALE_VARIANCE);
         breathingDisplacementStrength = prefs.getFloat(KEY_BREATHING_DISPLACEMENT_STRENGTH, DEFAULT_BREATHING_DISPLACEMENT_STRENGTH);
-        colorChangeIntervalMs = prefs.getInt(KEY_COLOR_CHANGE_INTERVAL_MS, DEFAULT_COLOR_CHANGE_INTERVAL_MS);
-        shuffleLayoutRebuildIntervalMs = prefs.getInt(KEY_SHUFFLE_LAYOUT_REBUILD_INTERVAL_MS, DEFAULT_SHUFFLE_LAYOUT_REBUILD_INTERVAL_MS);
-        abyssalMirrorEnabled = prefs.getBoolean(KEY_ABYSSAL_MIRROR, false);  // 默认关闭深渊镜效果
+        colorChangeIntervalMs = Math.max(
+                MIN_COLOR_CHANGE_INTERVAL_MS,
+                Math.min(
+                        MAX_COLOR_CHANGE_INTERVAL_MS,
+                        prefs.getInt(KEY_COLOR_CHANGE_INTERVAL_MS, DEFAULT_COLOR_CHANGE_INTERVAL_MS)
+                )
+        );
+        randomColorSwitchEnabled = prefs.getBoolean(KEY_RANDOM_COLOR_SWITCH_ENABLED, true);
         abyssalGyroSensitivity = prefs.getFloat(KEY_ABYSSAL_GYRO_SENSITIVITY, DEFAULT_ABYSSAL_GYRO_SENSITIVITY);
         abyssalMovableRange = prefs.getFloat(KEY_ABYSSAL_MOVABLE_RANGE, DEFAULT_ABYSSAL_MOVABLE_RANGE);
         loadLyricsFontFieldsFromPrefs(prefs);
@@ -4343,9 +6741,21 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                   ", 跑马灯线条宽度=" + marqueeLightSize + "px, 霓虹效果=" + neonDisplayEnabled + ", 边框显示=" + neonBorderEnabled + 
                   ", 手势控制=" + gestureControlEnabled +
                   ", 底图显示=" + backgroundTextureEnabled +
-                  ", 深渊镜效果=" + abyssalMirrorEnabled);
+                  ", 专辑图背景=" + albumArtBackgroundEnabled +
+                  ", 深渊镜效果=" + abyssalMirrorEnabled +
+                  ", 边框护栏=" + borderPerformanceGuardEnabled +
+                  ", 边框轻量模式=" + borderLightweightModeEnabled);
     }
 
+    private long breathingBpmToRhythmMs(int bpm) {
+        if (bpm <= 0) {
+            // 兜底为最慢节奏，避免异常值导致动画时长无效。
+            return 5000L;
+        }
+        int safeBpm = Math.max(1, bpm);
+        return Math.round(60000f / safeBpm);
+    }
+    
     /**
      * 保存设置
      */
@@ -4358,6 +6768,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         editor.putInt(KEY_BACKGROUND_TEXTURE_ALPHA, backgroundTextureAlpha);
         editor.putBoolean(KEY_WORD_BY_WORD, wordByWordEnabled);
         editor.putBoolean(KEY_SHUFFLE_SPLIT_EFFECT, shuffleSplitEffectEnabled);
+        editor.putBoolean(KEY_SHUFFLE_SPLIT_MULTICOLOR, shuffleSplitMulticolorEnabled);
         editor.putString(KEY_SHUFFLE_SPLIT_MODE, shuffleSplitMode);
         editor.putBoolean(KEY_SHUFFLE_SPLIT_ONLY_CURRENT_LINE, shuffleSplitOnlyCurrentLine);
         editor.putBoolean(KEY_SHUFFLE_SPLIT_PERFORMANCE_GUARD,
@@ -4366,51 +6777,86 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         editor.putBoolean(KEY_NEON_DISPLAY, neonDisplayEnabled);
         editor.putBoolean(KEY_NEON_BORDER, neonBorderEnabled);
         editor.putFloat(KEY_MARQUEE_LIGHT_SIZE, marqueeLightSize);
+        editor.putInt(KEY_MARQUEE_LIGHT_DURATION_MS, marqueeLightDurationMs);
         editor.putBoolean(KEY_GESTURE_CONTROL, gestureControlEnabled);
         editor.putBoolean(KEY_BACKGROUND_TEXTURE, backgroundTextureEnabled);
+        editor.putBoolean(KEY_ALBUM_ART_BACKGROUND, albumArtBackgroundEnabled);
+        editor.putInt(KEY_ALBUM_ART_ALPHA_PERCENT, Math.max(0, Math.min(100, albumArtAlphaPercent)));
+        editor.putFloat(KEY_ALBUM_ART_BLUR_RADIUS, Math.max(0f, albumArtBlurRadiusPx));
         editor.putString(KEY_LYRICS_SOURCE_MODE, normalizeLyricsSourceMode(lyricsSourceMode));
-        editor.putInt(KEY_BREATHING_RHYTHM_MS, breathingRhythmMs);
+        editor.putBoolean(KEY_BORDER_PERFORMANCE_GUARD, borderPerformanceGuardEnabled);
+        editor.putBoolean(KEY_BORDER_LIGHTWEIGHT_MODE, borderLightweightModeEnabled);
+        editor.putBoolean(KEY_BREATHING_ENABLED, breathingEnabled);
+        editor.putInt(KEY_BREATHING_BPM, breathingBpm);
         editor.putFloat(KEY_BREATHING_SCALE_VARIANCE, breathingScaleVariance);
         editor.putFloat(KEY_BREATHING_DISPLACEMENT_STRENGTH, breathingDisplacementStrength);
-        editor.putInt(KEY_COLOR_CHANGE_INTERVAL_MS, colorChangeIntervalMs);
-        editor.putInt(KEY_SHUFFLE_LAYOUT_REBUILD_INTERVAL_MS, shuffleLayoutRebuildIntervalMs);
+        editor.putInt(
+                KEY_COLOR_CHANGE_INTERVAL_MS,
+                Math.max(MIN_COLOR_CHANGE_INTERVAL_MS, Math.min(MAX_COLOR_CHANGE_INTERVAL_MS, colorChangeIntervalMs))
+        );
+        editor.putBoolean(KEY_RANDOM_COLOR_SWITCH_ENABLED, randomColorSwitchEnabled);
         editor.apply();
         LogHelper.d(TAG, "💾 保存设置: 字体大小=" + currentTextSize + ", 底图大小=" + backgroundTextureSize + 
                   ", 未唱歌词透明度=" + normalLyricsAlpha + "%, 底图透明度=" + backgroundTextureAlpha + "%" +
                   ", 逐字显示=" + wordByWordEnabled + ", 跑马灯=" + marqueeLightEnabled + 
                   ", 跑马灯线条宽度=" + marqueeLightSize + "px, 霓虹灯边框=" + neonBorderEnabled + 
                   ", 手势控制=" + gestureControlEnabled +
-                  ", 底图显示=" + backgroundTextureEnabled);
+                  ", 底图显示=" + backgroundTextureEnabled +
+                  ", 专辑图背景=" + albumArtBackgroundEnabled);
     }
     
+    /**
+     * 在 [applySettings] 指纹短路之前同步「颜色变化节奏」到视图，避免 getAll().hashCode() 碰撞或指纹未变时背屏不跟随调试滑块。
+     */
+    private void applyColorChangeIntervalFromPrefsIfChanged() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        int fromPrefs = Math.max(
+                MIN_COLOR_CHANGE_INTERVAL_MS,
+                Math.min(
+                        MAX_COLOR_CHANGE_INTERVAL_MS,
+                        prefs.getInt(KEY_COLOR_CHANGE_INTERVAL_MS, DEFAULT_COLOR_CHANGE_INTERVAL_MS)
+                )
+        );
+        if (fromPrefs == colorChangeIntervalMs) {
+            return;
+        }
+        colorChangeIntervalMs = fromPrefs;
+        if (abyssalMirrorLyricsViewGroup != null) {
+            abyssalMirrorLyricsViewGroup.setColorChangeIntervalMs(colorChangeIntervalMs);
+        }
+        if (lyricsView != null) {
+            lyricsView.setColorChangeIntervalMs(colorChangeIntervalMs);
+        }
+        if (marqueeLightView != null) {
+            marqueeLightView.setColorChangeIntervalMs(colorChangeIntervalMs);
+        }
+        LogHelper.d(TAG, "🎨 颜色变化节奏已从偏好同步: " + colorChangeIntervalMs + "ms");
+    }
+
     /**
      * 应用设置（从SharedPreferences读取并应用）
      */
     public void applySettings() {
         // 重新加载设置（确保获取最新值）
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        applyColorChangeIntervalFromPrefsIfChanged();
         final String previousLyricsSourceMode = lyricsSourceMode;
         String newSettingsFingerprint = String.valueOf(
                 prefs.getAll().hashCode()
-        ) + "|" + isMainScreenLandscapeMode + "|" + rearMvModePreferred;
+        ) + "|" + isMainScreenLandscapeMode;
         if (newSettingsFingerprint.equals(lastAppliedSettingsFingerprint)) {
             return;
         }
         lastAppliedSettingsFingerprint = newSettingsFingerprint;
-        String modeRaw = prefs.getString(KEY_REAR_DISPLAY_MODE, null);
-        if (modeRaw == null || modeRaw.trim().isEmpty()) {
-            // 兼容旧键 rearMvEnabled
-            boolean legacyMv = prefs.getBoolean("rearMvEnabled", false);
-            modeRaw = legacyMv ? VALUE_REAR_MODE_MV : VALUE_REAR_MODE_LYRICS;
-        }
-        rearMvModePreferred = VALUE_REAR_MODE_MV.equalsIgnoreCase(modeRaw);
         float originalTextSize = prefs.getFloat(KEY_TEXT_SIZE, DEFAULT_TEXT_SIZE);
         float originalBackgroundTextureSize = prefs.getFloat(KEY_BACKGROUND_TEXTURE_SIZE, DEFAULT_BACKGROUND_TEXTURE_SIZE);
         float originalMarqueeLightSize = prefs.getFloat(KEY_MARQUEE_LIGHT_SIZE, 18f);  // 默认跑马灯线条宽度18px
+        marqueeLightDurationMs = prefs.getInt(KEY_MARQUEE_LIGHT_DURATION_MS, DEFAULT_MARQUEE_LIGHT_DURATION_MS);
         normalLyricsAlpha = prefs.getInt(KEY_NORMAL_LYRICS_ALPHA, DEFAULT_NORMAL_LYRICS_ALPHA);
         backgroundTextureAlpha = prefs.getInt(KEY_BACKGROUND_TEXTURE_ALPHA, DEFAULT_BACKGROUND_TEXTURE_ALPHA);
         wordByWordEnabled = prefs.getBoolean(KEY_WORD_BY_WORD, false);  // 默认关闭逐字显示
         shuffleSplitEffectEnabled = prefs.getBoolean(KEY_SHUFFLE_SPLIT_EFFECT, false);
+        shuffleSplitMulticolorEnabled = prefs.getBoolean(KEY_SHUFFLE_SPLIT_MULTICOLOR, false);
         shuffleSplitMode = prefs.getString(KEY_SHUFFLE_SPLIT_MODE, "WORD");
         shuffleSplitOnlyCurrentLine = prefs.getBoolean(KEY_SHUFFLE_SPLIT_ONLY_CURRENT_LINE, true);
         if (shuffleSplitEffectEnabled) {
@@ -4420,6 +6866,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             // 分词显示与逐字高亮互斥，强制关闭逐字
             wordByWordEnabled = false;
         }
+        boolean newAbyssalMirrorEnabled = prefs.getBoolean(KEY_ABYSSAL_MIRROR, false);  // 默认关闭深渊镜效果
         marqueeLightEnabled = prefs.getBoolean(KEY_MARQUEE_LIGHT, true);
         neonDisplayEnabled = prefs.getBoolean(KEY_NEON_DISPLAY, prefs.getBoolean(KEY_LYRICS_NEON_GLOW_LEGACY, true));
         neonBorderEnabled = prefs.getBoolean(KEY_NEON_BORDER, true);  // 默认开启霓虹灯边框
@@ -4428,36 +6875,37 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             // 分词显示模式与可滑动歌词互斥；偏好里可能残留旧组合，运行时强制关闭手势
             gestureControlEnabled = false;
         }
+        if (newAbyssalMirrorEnabled) {
+            wordByWordEnabled = false;
+            shuffleSplitEffectEnabled = false;
+        }
         backgroundTextureEnabled = prefs.getBoolean(KEY_BACKGROUND_TEXTURE, false);  // 默认关闭歌词底图显示
+        albumArtBackgroundEnabled = prefs.getBoolean(KEY_ALBUM_ART_BACKGROUND, false);
+        albumArtAlphaPercent = Math.max(0, Math.min(100, prefs.getInt(KEY_ALBUM_ART_ALPHA_PERCENT, DEFAULT_ALBUM_ART_ALPHA_PERCENT)));
+        albumArtBlurRadiusPx = Math.max(0f, prefs.getFloat(KEY_ALBUM_ART_BLUR_RADIUS, DEFAULT_ALBUM_ART_BLUR_RADIUS_PX));
         projectionSyncOffsetMs = prefs.getInt(KEY_PROJECTION_SYNC_OFFSET_MS, DEFAULT_PROJECTION_SYNC_OFFSET_MS);
         lyricsSourceMode = normalizeLyricsSourceMode(
             prefs.getString(KEY_LYRICS_SOURCE_MODE, VALUE_LYRICS_SOURCE_MIXED)
         );
         final boolean lyricsSourceModeChanged = !TextUtils.equals(previousLyricsSourceMode, lyricsSourceMode);
-        breathingRhythmMs = prefs.getInt(KEY_BREATHING_RHYTHM_MS, DEFAULT_BREATHING_RHYTHM_MS);
+        breathingEnabled = prefs.getBoolean(KEY_BREATHING_ENABLED, false);
+        breathingBpm = prefs.getInt(KEY_BREATHING_BPM, DEFAULT_BREATHING_BPM);
         breathingScaleVariance = prefs.getFloat(KEY_BREATHING_SCALE_VARIANCE, DEFAULT_BREATHING_SCALE_VARIANCE);
         breathingDisplacementStrength = prefs.getFloat(KEY_BREATHING_DISPLACEMENT_STRENGTH, DEFAULT_BREATHING_DISPLACEMENT_STRENGTH);
-        colorChangeIntervalMs = prefs.getInt(KEY_COLOR_CHANGE_INTERVAL_MS, DEFAULT_COLOR_CHANGE_INTERVAL_MS);
-        shuffleLayoutRebuildIntervalMs = prefs.getInt(KEY_SHUFFLE_LAYOUT_REBUILD_INTERVAL_MS, DEFAULT_SHUFFLE_LAYOUT_REBUILD_INTERVAL_MS);
-        boolean newAbyssalMirrorEnabled = prefs.getBoolean(KEY_ABYSSAL_MIRROR, false);  // 默认关闭深渊镜效果
+        colorChangeIntervalMs = Math.max(
+                MIN_COLOR_CHANGE_INTERVAL_MS,
+                Math.min(
+                        MAX_COLOR_CHANGE_INTERVAL_MS,
+                        prefs.getInt(KEY_COLOR_CHANGE_INTERVAL_MS, DEFAULT_COLOR_CHANGE_INTERVAL_MS)
+                )
+        );
+        randomColorSwitchEnabled = prefs.getBoolean(KEY_RANDOM_COLOR_SWITCH_ENABLED, true);
         powerSavingModeEnabled = prefs.getBoolean(KEY_POWER_SAVING_MODE, false);
-        if (rearMvModePreferred) {
-            // MV 模式与深渊镜互斥
-            newAbyssalMirrorEnabled = false;
-        }
-        if (powerSavingModeEnabled) {
-            // 省电模式：仅普通歌词；关闭霓虹、跑马灯、手势、深渊镜、逐字、分词、底图（偏好可能为旧组合）
-            wordByWordEnabled = false;
-            shuffleSplitEffectEnabled = false;
-            shuffleSplitMode = "WORD";
-            shuffleSplitOnlyCurrentLine = true;
-            marqueeLightEnabled = false;
-            neonDisplayEnabled = false;
-            neonBorderEnabled = false;
-            gestureControlEnabled = false;
-            backgroundTextureEnabled = false;
-            newAbyssalMirrorEnabled = false;
-        }
+        borderPerformanceGuardEnabled = prefs.getBoolean(KEY_BORDER_PERFORMANCE_GUARD, false);
+        borderLightweightModeEnabled = prefs.getBoolean(KEY_BORDER_LIGHTWEIGHT_MODE, false);
+        // 省电模式：运行时强制“普通整行歌词”。
+        // 注意：不要在这里改写各开关变量（它们应继续代表用户偏好），
+        // 具体启用/禁用由 applySettings 时根据 powerSavingModeEnabled 计算 effective flags。
         loadLyricsFontFieldsFromPrefs(prefs);
         
         // 主屏横屏模式：字体大小、跑马灯大小调整
@@ -4481,24 +6929,45 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                   ", 跑马灯线条宽度=" + marqueeLightSize + "px, 霓虹效果=" + neonDisplayEnabled + ", 边框显示=" + neonBorderEnabled + 
                   ", 省电模式=" + powerSavingModeEnabled + ", 手势控制=" + gestureControlEnabled +
                   ", 底图显示=" + backgroundTextureEnabled +
+                  ", 专辑图背景=" + albumArtBackgroundEnabled +
                   ", 深渊镜效果=" + newAbyssalMirrorEnabled +
-                  ", 背屏模式=" + (rearMvModePreferred ? "MV" : "LYRICS"));
+                  ", 边框护栏=" + borderPerformanceGuardEnabled +
+                  ", 边框轻量模式=" + borderLightweightModeEnabled);
         
-        // 如果深渊镜设置发生变化，需要重新创建视图（这需要重启Activity，暂时只更新当前视图）
-        // 注意：切换模式需要重启Activity才能生效
+        // 如果深渊镜开关状态发生变化，必须重启 Activity 才能切换视图层次
+        //（深渊镜使用 AbyssalMirrorLyricsViewGroup，其他模式使用 ModernLyricsView，
+        //  二者在 createUI() 中二选一创建，applySettings() 无法原地切换视图类型。）
+        if (newAbyssalMirrorEnabled != abyssalMirrorEnabled) {
+            abyssalMirrorEnabled = newAbyssalMirrorEnabled;
+            LogHelper.d(TAG, "🔄 深渊镜模式切换(" + (abyssalMirrorEnabled ? "ON" : "OFF") + ")，重启Activity重建视图");
+            recreate();
+            return;
+        }
         abyssalMirrorEnabled = newAbyssalMirrorEnabled;
-        
+        if (!supportsWordByWordLyricsFeatures()) {
+            wordFusionGeneration.incrementAndGet();
+        }
+
         // 更新歌词视图
+        applyProjectionBackgroundMode();
+        if (albumArtBackgroundView != null) {
+            albumArtBackgroundView.setAlpha(albumArtAlphaPercent / 100f);
+        }
+        updateAlbumArtBackground(mediaController != null ? mediaController.getMetadata() : null);
         if (abyssalMirrorEnabled && abyssalMirrorLyricsViewGroup != null) {
             // 新的ViewGroup版本：更新字体大小、颜色、手势开关、陀螺仪倍数与可移动范围
             float gyroSensitivity = prefs.getFloat(KEY_ABYSSAL_GYRO_SENSITIVITY, DEFAULT_ABYSSAL_GYRO_SENSITIVITY);
             float movableRange = prefs.getFloat(KEY_ABYSSAL_MOVABLE_RANGE, DEFAULT_ABYSSAL_MOVABLE_RANGE);
             abyssalMirrorLyricsViewGroup.setTextSize(currentTextSize);
-            abyssalMirrorLyricsViewGroup.setTextColor(0xFFFFFFFF); // 白色
+            abyssalMirrorLyricsViewGroup.setTextColor(randomColorSwitchEnabled ? randomHighSaturationColor() : 0xFFFFFFFF);
             abyssalMirrorLyricsViewGroup.setEnableGesture(gestureControlEnabled);
             abyssalMirrorLyricsViewGroup.setGyroSensitivityMultiplier(gyroSensitivity);
             abyssalMirrorLyricsViewGroup.setMovableRangeMultiplier(movableRange);
-            abyssalMirrorLyricsViewGroup.setLyricsTypeface(LyricsFontHelper.resolveTypeface(this, abyssalLyricsFontId, abyssalLyricsCustomPath));
+            abyssalMirrorLyricsViewGroup.setColorChangeIntervalMs(colorChangeIntervalMs);
+            abyssalMirrorLyricsViewGroup.setRandomColorSwitchEnabled(randomColorSwitchEnabled);
+            abyssalMirrorLyricsViewGroup.setPerformanceGuardEnabled(borderPerformanceGuardEnabled);
+            abyssalMirrorLyricsViewGroup.setLightweightModeEnabled(powerSavingModeEnabled || borderLightweightModeEnabled);
+            abyssalMirrorLyricsViewGroup.setLyricsTypeface(LyricsFontHelper.resolveTypeface(this, projectionLyricsFontId, projectionLyricsCustomPath));
             LogHelper.d(TAG, "✅ 深渊镜歌词视图设置已更新（ViewGroup版本）");
         } else if (abyssalMirrorEnabled && abyssalMirrorLyricsView != null) {
             // 旧版3D旋转版本（兼容）
@@ -4506,10 +6975,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             abyssalMirrorLyricsView.postInvalidateOnAnimation();
             LogHelper.d(TAG, "✅ 深渊镜歌词视图设置已更新（旧版）");
         } else if (lyricsView != null) {
-            lyricsView.setEnableWordByWord(wordByWordEnabled);
-            lyricsView.setEnableShuffleSplitEffect(shuffleSplitEffectEnabled);
-            lyricsView.setShuffleSplitMode(shuffleSplitEffectEnabled ? "WORD" : shuffleSplitMode);
-            lyricsView.setShuffleOnlyCurrentLine(shuffleSplitEffectEnabled || shuffleSplitOnlyCurrentLine);
+            final boolean effectiveShuffleSplitEnabled = !powerSavingModeEnabled && shuffleSplitEffectEnabled;
+            lyricsView.setEnableWordByWord(effectiveWordByWordForSuperLyric(null));
+            lyricsView.setEnableShuffleSplitEffect(effectiveShuffleSplitEnabled);
+            lyricsView.setShuffleSplitMode(effectiveShuffleSplitEnabled ? "WORD" : shuffleSplitMode);
+            lyricsView.setShuffleOnlyCurrentLine(effectiveShuffleSplitEnabled || shuffleSplitOnlyCurrentLine);
             lyricsView.setShuffleSplitTiltRatio(prefs.getFloat("shuffleSplitTiltRatio", 5f));
             float scaleVariance = prefs.contains(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE)
                     ? prefs.getFloat(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE, 0.22f)
@@ -4535,14 +7005,22 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             lyricsView.setEnableGesture(gestureControlEnabled);
             lyricsView.setShowBackgroundTexture(backgroundTextureEnabled);
             lyricsView.setPowerSavingModeEnabled(powerSavingModeEnabled);
-            lyricsView.setBreathingRhythmMs(powerSavingModeEnabled ? 5000 : breathingRhythmMs);
-            lyricsView.setBreathingScaleVariance(powerSavingModeEnabled ? 0f : breathingScaleVariance);
-            lyricsView.setBreathingDisplacementStrength(powerSavingModeEnabled ? 0f : breathingDisplacementStrength);
+            lyricsView.setBreathingRhythmMs(powerSavingModeEnabled ? 5000 : breathingBpmToRhythmMs(breathingBpm));
+            lyricsView.setBreathingScaleVariance(
+                (powerSavingModeEnabled || !breathingEnabled) ? 0f : breathingScaleVariance
+            );
+            lyricsView.setBreathingDisplacementStrength(
+                (powerSavingModeEnabled || !breathingEnabled) ? 0f : breathingDisplacementStrength
+            );
+            lyricsView.setBreathingScaleEnabled(breathingEnabled && !powerSavingModeEnabled);
             lyricsView.setColorChangeIntervalMs(colorChangeIntervalMs);
-            lyricsView.setShuffleLayoutRebuildIntervalMs(shuffleLayoutRebuildIntervalMs);
+            lyricsView.setRandomColorSwitchEnabled(randomColorSwitchEnabled);
+            lyricsView.setShuffleLayoutRebuildIntervalMs(0L);
+            lyricsView.setShuffleSplitMulticolorEnabled(effectiveShuffleSplitEnabled && shuffleSplitMulticolorEnabled);
             lyricsView.setNeonLyricsEnabled(neonDisplayEnabled);
             lyricsView.setLyricsFont(projectionLyricsFontId, projectionLyricsCustomPath);
             lyricsView.setTimeAdjustOffset(projectionSyncOffsetMs);
+            lyricsView.setLyricsHorizontalInsetPx(isMainScreenLandscapeMode ? 0 : REAR_LYRICS_LEFT_CLEAR_PX);
             applyFallbackRenderingModeIfNeeded();
             applyRenderFrameRateBudget(lyricsView);
             lyricsView.postInvalidateOnAnimation();
@@ -4557,22 +7035,31 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             marqueeLightView.setNeonEffectsEnabled(neonDisplayEnabled);
             marqueeLightView.setMarqueeLightEnabled(marqueeLightEnabled);  // 设置跑马灯是否启用
             marqueeLightView.setLightSize(marqueeLightSize);  // 设置跑马灯线条宽度
+            marqueeLightView.setAnimationDuration(marqueeLightDurationMs);
+            marqueeLightView.setPerformanceGuardEnabled(borderPerformanceGuardEnabled);
+            marqueeLightView.setLightweightModeEnabled(powerSavingModeEnabled || borderLightweightModeEnabled);
+            marqueeLightView.setColorChangeIntervalMs(colorChangeIntervalMs);
             LogHelper.d(TAG, "✅ 跑马灯设置已更新: " + (marqueeLightEnabled ? "显示" : "隐藏") + 
-                      ", 线条宽度=" + marqueeLightSize + "px, 霓虹效果=" + neonDisplayEnabled + ", 边框显示=" + neonBorderEnabled +
+                      ", 线条宽度=" + marqueeLightSize + "px, 动画时长=" + marqueeLightDurationMs + "ms" +
+                      ", 霓虹效果=" + neonDisplayEnabled + ", 边框显示=" + neonBorderEnabled +
                       ", 视图可见: " + shouldBeVisible);
         }
         
         applySongTitleSafeInsets();
 
-        checkAndDisableOfficialGesture();
-
-        // Apply mode visibility (MV only shows when url is available)
-        updateRearDisplayModeUi();
-
         if (lyricsSourceModeChanged) {
             LogHelper.d(TAG, "🔄 歌词来源模式已切换: " + previousLyricsSourceMode + " -> " + lyricsSourceMode);
             if (shouldUseNetworkApiSource()) {
                 stopSuperLyricRealtimeTicker();
+            } else {
+                SuperLyricApi.ensureReceiverRegistered();
+                startSuperLyricRealtimeTicker();
+            }
+            if (isSuperLyricOnlySourceMode()) {
+                enhancedLyricLines = new ArrayList<>();
+                superLyricFallbackModeActive = false;
+                lastSuperLyricAppliedTextNormalized = "";
+                lastSuperLyricAppliedLineTimeMs = -1L;
             }
             String title = stableTitle != null ? stableTitle : "";
             if (!title.isEmpty() && !isLikelyLyricLine(title)) {
@@ -4591,13 +7078,89 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         LogHelper.d(TAG, "✅ 所有设置已应用");
     }
 
-    private void updateRearDisplayModeUi() {
-        if (mvLayer == null) return;
-        if (rearMvModePreferred && pendingMvUrl != null && !pendingMvUrl.isEmpty()) {
-            switchToMvMode(pendingMvUrl, false);
-        } else {
-            // MV 偏好开启但暂无直链：仍显示歌词（兼容无 MV 歌曲）
-            switchToLyricsMode(false);
+    private void applyProjectionBackgroundMode() {
+        if (mainFrameLayout == null) return;
+        final boolean useAlbumArtBackground = !powerSavingModeEnabled && albumArtBackgroundEnabled && !abyssalMirrorEnabled;
+        if (contentRootLayout != null) {
+            contentRootLayout.setBackgroundColor(useAlbumArtBackground ? 0x00000000 : 0xFF000000);
+        }
+        if (lyricsView != null) {
+            lyricsView.setOpaqueBackgroundEnabled(!useAlbumArtBackground);
+        }
+        if (albumArtBackgroundView != null) {
+            if (!useAlbumArtBackground) {
+                setVisibilityIfChanged(albumArtBackgroundView, View.GONE);
+                albumArtBackgroundView.setImageDrawable(null);
+                currentAlbumArtBitmap = null;
+                clearAlbumArtBlurEffect();
+            }
+        }
+    }
+
+    private void updateAlbumArtBackground(MediaMetadata metadata) {
+        if (albumArtBackgroundView == null) return;
+        if (powerSavingModeEnabled || !albumArtBackgroundEnabled || abyssalMirrorEnabled) {
+            setVisibilityIfChanged(albumArtBackgroundView, View.GONE);
+            albumArtBackgroundView.setImageDrawable(null);
+            currentAlbumArtBitmap = null;
+            clearAlbumArtBlurEffect();
+            return;
+        }
+        Bitmap bitmap = extractAlbumArtBitmap(metadata);
+        if (bitmap == null) {
+            // 切歌中 metadata 短暂无封面时，始终保留旧图，避免底图黑闪。
+            return;
+        }
+        if (bitmap == currentAlbumArtBitmap) {
+            if (albumArtBackgroundView.getVisibility() != View.VISIBLE) {
+                setVisibilityIfChanged(albumArtBackgroundView, View.VISIBLE);
+            }
+            return;
+        }
+        currentAlbumArtBitmap = bitmap;
+        albumArtBackgroundView.setImageBitmap(bitmap);
+        applyAlbumArtBlurEffectIfSupported();
+        setVisibilityIfChanged(albumArtBackgroundView, View.VISIBLE);
+    }
+
+    private Bitmap extractAlbumArtBitmap(MediaMetadata metadata) {
+        if (metadata == null) return null;
+        Bitmap bmp = metadata.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON);
+        if (bmp != null) return bmp;
+        bmp = metadata.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART);
+        if (bmp != null) return bmp;
+        bmp = metadata.getBitmap(MediaMetadata.METADATA_KEY_ART);
+        if (bmp != null) return bmp;
+        try {
+            if (metadata.getDescription() != null) {
+                return metadata.getDescription().getIconBitmap();
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private void applyAlbumArtBlurEffectIfSupported() {
+        if (albumArtBackgroundView == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (albumArtBlurRadiusPx <= 0f) {
+                albumArtBackgroundView.setRenderEffect(null);
+                return;
+            }
+            albumArtBackgroundView.setRenderEffect(
+                RenderEffect.createBlurEffect(
+                    albumArtBlurRadiusPx,
+                    albumArtBlurRadiusPx,
+                    Shader.TileMode.CLAMP
+                )
+            );
+        }
+    }
+
+    private void clearAlbumArtBlurEffect() {
+        if (albumArtBackgroundView == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            albumArtBackgroundView.setRenderEffect(null);
         }
     }
 
@@ -4822,11 +7385,31 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 LogHelper.d(TAG, "🖥️ 主屏横屏模式：窗口获得焦点，隐藏系统UI（全屏）");
             } else {
                 RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+                if (getDisplayIdSafe() == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
+                    RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
+                }
                 hideSystemUI();
             }
-            
             // 如果窗口获得焦点，检查是否需要初始化UI（从主屏移动到背屏的情况）
             if (!isFinishing()) {
+                // 焦点恢复时：系统 marquee 偶发停止，强制重触发一次（仅当需要滚动时）
+                try {
+                    if (songTitleText != null) {
+                        int vw = songTitleLayoutParams != null ? songTitleLayoutParams.width : songTitleText.getWidth();
+                        if (vw > 0) {
+                            applySongTitleOverflowMode(vw);
+                        } else {
+                            // width 可能尚未布局完成，延迟触发
+                            songTitleText.postDelayed(() -> {
+                                try {
+                                    int w = songTitleText.getWidth();
+                                    if (w > 0) applySongTitleOverflowMode(w);
+                                } catch (Exception ignored) {}
+                            }, 120);
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
                 int displayId = 0;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     try {
@@ -4853,15 +7436,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 // 在背屏时，立即重新应用常亮flags（防止双击息屏后屏幕熄灭）
                 if (displayId == 1) {
                     RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
-                    // 检查背屏常亮开关
-                    boolean keepScreenOnEnabledFocus = true; // 默认开启
-                    try {
-                        SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                        keepScreenOnEnabledFocus = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                    } catch (Exception e) {
-                        LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-                    }
-                    
+                    // 检查背屏常亮开关（与功能页一致）
+                    boolean keepScreenOnEnabledFocus = isProjectionKeepScreenOnEnabled();
+
                     if (keepScreenOnEnabledFocus) {
                         // 立即重新应用常亮flags（与未投放应用时的实现方式一致）
                         getWindow().addFlags(
@@ -4890,104 +7467,12 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     }
                 }
                 
-                // 如果在背屏但UI未创建，初始化UI
                 if (displayId == 1 && lyricsView == null) {
-                    LogHelper.d(TAG, "🎯 onWindowFocusChanged: 在背屏但UI未创建，开始初始化UI");
-                    
-                    // 保存静态实例
-                    currentInstance = this;
-                    initialDisplayId = displayId;
-                    
-                    // 保持常亮 + 锁屏显示（根据背屏常亮开关决定）
-                    boolean keepScreenOnEnabledFocus = true; // 默认开启
-                    try {
-                        SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                        keepScreenOnEnabledFocus = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                    } catch (Exception e) {
-                        LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-                    }
-                    
-                    if (keepScreenOnEnabledFocus) {
-                        // 与未投放应用时的实现方式一致
-                        getWindow().addFlags(
-                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
-                            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
-                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-                        );
-                        LogHelper.d(TAG, "✅ 背屏常亮已开启（onWindowFocusChanged创建UI），保持屏幕常亮");
-                    } else {
-                        getWindow().addFlags(
-                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
-                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                        );
-                        // 清除常亮标志（如果之前设置了）
-                        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                        LogHelper.d(TAG, "⏸️ 背屏常亮已关闭（onWindowFocusChanged创建UI），不保持屏幕常亮");
-                    }
-                    
-                    // 适配新API：锁屏时显示（与未投放应用时的实现方式一致）
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                        setShowWhenLocked(true);
-                        setTurnScreenOn(true);
-                    }
-                    
-                    // 优化渲染性能（参考充电动画，解决DequeueBuffer超时）
-                    getWindow().setFlags(
-                        WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-                        WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-                    );
-                    
-                    // 让内容始终延伸到摄像头区域（Display Cutout，参考充电动画）
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        WindowManager.LayoutParams params = getWindow().getAttributes();
-                        params.layoutInDisplayCutoutMode = 
-                            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
-                        getWindow().setAttributes(params);
-                        LogHelper.d(TAG, "✅ 已设置窗口延伸至刘海区域（onWindowFocusChanged）");
-                    }
-                    
-                    // 一次性设置窗口尺寸（确保全屏）
-                    WindowManager.LayoutParams params = getWindow().getAttributes();
-                    params.width = WindowManager.LayoutParams.MATCH_PARENT;
-                    params.height = WindowManager.LayoutParams.MATCH_PARENT;
-                    getWindow().setAttributes(params);
-                    
-                    // 加载设置
-                    loadSettings();
-                    
-                    // 创建UI布局
-                    createUI();
-                    
-                    // 初始化歌词动画器
-                    initLyricsAnimator();
-                    
-                    // 获取MediaController
-                    setupMediaController();
-                    
-                    // 更新UI
-                    updateMediaInfo();
-                    
-                    // 立即同步一次播放状态
-                    updatePlaybackState();
-                    
-                    // 绑定TaskService（用于屏蔽/恢复官方手势服务）
-                    // 注意：如果Activity在主屏启动后移动到背屏，onCreate中不会执行bindTaskService，需要在这里绑定
-                    bindTaskService();
-                    
-                    // 启动音乐投屏背屏常亮服务
-                    startMusicProjectionWakeService();
-                    // 通知 MiRoot 主页更新音乐投屏按钮状态（广播启动时也可点击结束投屏）
-                    notifyMainActivityProjectionStarted();
+                    initLyricsUiOnRearIfNeeded("onWindowFocusChanged");
                 } else if (displayId == 1 && hasLyricsView()) {
-                    // UI已创建，重新应用常亮flags（与未投放应用时的实现方式一致）
-                    boolean keepScreenOnEnabledFocus2 = true; // 默认开启
-                    try {
-                        SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                        keepScreenOnEnabledFocus2 = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                    } catch (Exception e) {
-                        LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-                    }
-                    
+                    // UI已创建，重新应用常亮flags（与功能页「投屏常亮」一致）
+                    boolean keepScreenOnEnabledFocus2 = isProjectionKeepScreenOnEnabled();
+
                     if (keepScreenOnEnabledFocus2) {
                         // 与未投放应用时的实现方式一致
                         getWindow().addFlags(
@@ -5030,10 +7515,22 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
         LogHelper.d(TAG, "📍 onConfigurationChanged时displayId=" + displayId + ", initialDisplayId=" + initialDisplayId);
 
+        int mainMode = RearMirootProjectionLifecycle.resolveMainDisplayProjectionMode(
+                displayId, isMainScreenLandscapeMode, hasLyricsView());
+        if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
+            RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode);
+            LogHelper.w(TAG, "🛑 onConfigurationChanged 落主屏且已有 UI，结束投屏");
+            finishProjectionFromUser("display-changed-to-main");
+            return;
+        }
+        if (RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode)) {
+            return;
+        }
+
         // 与车控一致：任务已从首次创建 UI 的显示屏迁走则销毁，避免占错主屏
         if (initialDisplayId != -1 && displayId != initialDisplayId) {
             LogHelper.w(TAG, "🛑 onConfigurationChanged检测到displayId变化（从 " + initialDisplayId + " 到 " + displayId + "），立即清理并销毁Activity");
-            requestProjectionExitSequence("display-changed-onConfig");
+            finishProjectionFromUser("display-changed-onConfig");
             return;
         }
         
@@ -5065,15 +7562,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 if (currentDisplayId == 1 && lyricsView == null) {
                     LogHelper.d(TAG, "✅ 确认在背屏且UI未创建，开始创建UI");
                     initialDisplayId = currentDisplayId;
-                    // 保持常亮 + 锁屏显示（根据背屏常亮开关决定）
-                    boolean keepScreenOnEnabledConfig = true; // 默认开启
-                    try {
-                        SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                        keepScreenOnEnabledConfig = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                    } catch (Exception e) {
-                        LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-                    }
-                    
+                    // 保持常亮 + 锁屏显示（与功能页「投屏常亮」一致）
+                    boolean keepScreenOnEnabledConfig = isProjectionKeepScreenOnEnabled();
+
                     if (keepScreenOnEnabledConfig) {
                         // 与未投放应用时的实现方式一致
                         getWindow().addFlags(
@@ -5152,12 +7643,6 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                         // 启动音乐投屏背屏常亮服务（确认在背屏且UI已创建）
                         startMusicProjectionWakeService();
                         notifyMainActivityProjectionStarted();
-                        // 投屏显示正确后，延迟检查是否需要屏蔽官方手势服务（确保TaskService已连接）
-                        if (delayedGestureCheckRunnable != null) {
-                            uiHandler.removeCallbacks(delayedGestureCheckRunnable);
-                        }
-                        delayedGestureCheckRunnable = this::checkAndDisableOfficialGesture;
-                        uiHandler.postDelayed(delayedGestureCheckRunnable, 1000);
                     } else {
                         LogHelper.w(TAG, "⚠️ 投屏未完全成功（onConfigurationChanged） (displayId=" + configDisplayId + ", lyricsView=" + (lyricsView != null) + ", isFinishing=" + isFinishing() + ")");
                         // 创建失败，关闭常亮服务
@@ -5174,19 +7659,6 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         super.onNewIntent(intent);
         setIntent(intent);
 
-        // MV intent: start/switch to MV when preferred
-        if (intent != null) {
-            String mode = intent.getStringExtra(INTENT_EXTRA_REAR_MODE);
-            String url = intent.getStringExtra(INTENT_EXTRA_MV_URL);
-            if (VALUE_REAR_MODE_MV.equalsIgnoreCase(mode) && url != null && !url.trim().isEmpty()) {
-                pendingMvUrl = url.trim();
-                LogHelper.d(TAG, "onNewIntent: mvUrl received, len=" + pendingMvUrl.length());
-                if (rearMvModePreferred) {
-                    switchToMvMode(pendingMvUrl, true);
-                }
-            }
-        }
-        
         // 检查是否是点击通知结束投屏
         if (intent != null && "ACTION_STOP_PROJECTION".equals(intent.getAction())) {
             LogHelper.d(TAG, "🛑 onNewIntent中收到结束投屏请求，立即销毁Activity");
@@ -5196,7 +7668,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 getWindow().setFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, 
                     WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
                 
-                requestProjectionExitSequence("onNewIntent-stop-intent");
+                finishProjectionFromUser("onNewIntent-stop-intent");
                 // 确保立即返回，不执行后续代码
                 return;
             } catch (Exception e) {
@@ -5204,7 +7676,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 // 即使发生异常，也尝试清理资源并销毁Activity
                 try {
                     getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
-                    requestProjectionExitSequence("onNewIntent-stop-intent-error");
+                    finishProjectionFromUser("onNewIntent-stop-intent-error");
                 } catch (Exception e2) {
                     LogHelper.e(TAG, "❌ 销毁Activity时发生异常", e2);
                 }
@@ -5218,7 +7690,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         super.onStart();
         isInForeground = true;
         uiAnimationsCancelled = false;
-        cancelRearStopExitGrace();
+        handleProjectionForegroundAfterStopGrace();
+        RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+        if (getDisplayIdSafe() == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
+            RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
+        }
     }
     
     @Override
@@ -5226,32 +7702,19 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         super.onResume();
         isInForeground = true;
         uiAnimationsCancelled = false;
-        cancelRearStopExitGrace();
+        handleProjectionForegroundAfterStopGrace();
         LogHelper.d(TAG, "🟢 onResume");
+
+        if (RearMirootProjectionLifecycle.shouldSkipProjectionResume(
+                isFinishing(), projectionExitFlowStarted, finishRequestedByMiRoot)) {
+            return;
+        }
         
         // 检查是否是点击通知结束投屏
         if (getIntent() != null && "ACTION_STOP_PROJECTION".equals(getIntent().getAction())) {
-            LogHelper.d(TAG, "🛑 onResume中收到结束投屏请求，立即销毁Activity");
-            try {
-                getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
-                // 立即隐藏窗口，避免显示内容
-                getWindow().setFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, 
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
-                
-                requestProjectionExitSequence("onResume-stop-intent");
-                // 确保立即返回，不执行后续代码
-                return;
-            } catch (Exception e) {
-                LogHelper.e(TAG, "❌ 处理结束投屏请求时发生异常", e);
-                // 即使发生异常，也尝试清理资源并销毁Activity
-                try {
-                    getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
-                    requestProjectionExitSequence("onResume-stop-intent-error");
-                } catch (Exception e2) {
-                    LogHelper.e(TAG, "❌ 销毁Activity时发生异常", e2);
-                }
-                return;
-            }
+            LogHelper.d(TAG, "🛑 onResume中收到结束投屏请求");
+            finishProjectionFromUser("onResume-stop-intent");
+            return;
         }
         
         // 判断当前所在的屏幕
@@ -5261,9 +7724,21 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
         LogHelper.d(TAG, "📍 onResume时displayId=" + displayId);
 
-        // 从其他路径遗留的 NOT_FOCUSABLE/NOT_TOUCHABLE 会在 onResume 清掉，避免背屏「全无手势」
-        if (displayId == 1 && getWindow() != null) {
-            RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+        int mainDisplayMode = RearMirootProjectionLifecycle.resolveMainDisplayProjectionMode(
+                displayId, isMainScreenLandscapeMode, hasLyricsView());
+        if (RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainDisplayMode)) {
+            if (mainDisplayMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
+                LogHelper.w(TAG, "⚠️ 主屏禁止展示投屏 UI，结束音乐投屏");
+                finishProjectionFromUser("main-display-no-ui-allowed");
+            } else if (lyricsView == null && !isMainScreenLandscapeMode) {
+                schedulePollRearLyricsUiInitAfterMove();
+            }
+            return;
+        }
+
+        RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+        if (getDisplayIdSafe() == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
+            RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
         }
 
         if (displayId == 1 || (isMainScreenLandscapeMode && displayId == 0)) {
@@ -5282,27 +7757,19 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return;
         }
 
-        // 主屏透明占位、等待 am / move-stack 迁往背屏（超时由 onCreate 中 scheduleMainScreenPlaceholderTimeout 处理）
-        if (displayId == 0 && lyricsView == null && !isMainScreenLandscapeMode) {
-            LogHelper.d(TAG, "⏳ 主屏占位（无歌词 UI），等待迁屏或占位超时(" + MAIN_SCREEN_PLACEHOLDER_TIMEOUT_MS + "ms)");
-            return;
-        }
-        
         // 如果在背屏，检查是否需要创建UI（可能是在主屏启动后移动到背屏）
-        if (lyricsView == null) {
+        if (lyricsView == null && displayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
+            if (initLyricsUiOnRearIfNeeded("onResume")) {
+                resumeSuperLyricLyricsPipeline();
+                return;
+            }
             LogHelper.d(TAG, "🎯 在背屏但UI未创建(lyricsView=null)，开始创建UI");
             if (initialDisplayId == -1) {
                 initialDisplayId = getDisplayIdSafe();
             }
-            // 保持常亮 + 锁屏显示（根据背屏常亮开关决定）
-            boolean keepScreenOnEnabledResume = true; // 默认开启
-            try {
-                SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                keepScreenOnEnabledResume = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-            } catch (Exception e) {
-                LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-            }
-            
+            // 保持常亮 + 锁屏显示（与功能页「投屏常亮」一致）
+            boolean keepScreenOnEnabledResume = isProjectionKeepScreenOnEnabled();
+
             if (keepScreenOnEnabledResume) {
                 // 与未投放应用时的实现方式一致
                 getWindow().addFlags(
@@ -5385,12 +7852,6 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 // 启动音乐投屏背屏常亮服务（确认在背屏且UI已创建）
                 startMusicProjectionWakeService();
                 notifyMainActivityProjectionStarted();
-                // 投屏显示正确后，延迟检查是否需要屏蔽官方手势服务（确保TaskService已连接）
-                if (delayedGestureCheckRunnable != null) {
-                    uiHandler.removeCallbacks(delayedGestureCheckRunnable);
-                }
-                delayedGestureCheckRunnable = this::checkAndDisableOfficialGesture;
-                uiHandler.postDelayed(delayedGestureCheckRunnable, 1000);
             } else {
                 LogHelper.w(TAG, "⚠️ 投屏未完全成功 (displayId=" + currentDisplayId + ", hasLyricsView=" + hasLyricsView() + ", isFinishing=" + isFinishing() + ")");
                 // 创建失败，关闭常亮服务
@@ -5398,15 +7859,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             }
         } else {
             // UI已创建，只需更新状态
-            // 再次确保Window flags（保持常亮 + 锁屏显示，根据背屏常亮开关决定）
-            boolean keepScreenOnEnabledResume2 = true; // 默认开启
-            try {
-                SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                keepScreenOnEnabledResume2 = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-            } catch (Exception e) {
-                LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-            }
-            
+            // 再次确保Window flags（与功能页「投屏常亮」一致）
+            boolean keepScreenOnEnabledResume2 = isProjectionKeepScreenOnEnabled();
+
             if (keepScreenOnEnabledResume2) {
                 // 与未投放应用时的实现方式一致
                 getWindow().addFlags(
@@ -5446,6 +7901,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
 
             // 重新同步播放状态
             updatePlaybackState();
+            resumeLyricsAnimatorAfterForeground();
+            resumeSuperLyricLyricsPipeline();
 
             // 确认在背屏且UI已创建后，才显示通知（界面显示成功后）
             int resumeDisplayId = 0;
@@ -5462,12 +7919,6 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 // 启动音乐投屏背屏常亮服务（确认在背屏且UI已创建）
                 startMusicProjectionWakeService();
                 notifyMainActivityProjectionStarted();
-                // 投屏显示正确后，延迟检查是否需要屏蔽官方手势服务（确保TaskService已连接）
-                if (delayedGestureCheckRunnable != null) {
-                    uiHandler.removeCallbacks(delayedGestureCheckRunnable);
-                }
-                delayedGestureCheckRunnable = this::checkAndDisableOfficialGesture;
-                uiHandler.postDelayed(delayedGestureCheckRunnable, 1000);
             } else {
                 // 已有歌词 UI 时：不因 resume 瞬间 displayId≠1 停止服务（否则通知栏「正在投屏」被误撤）
                 LogHelper.d(TAG, "⏳ 投屏状态检查 (onResume): displayId=" + resumeDisplayId + ", hasLyricsView=" + hasLyricsView() + ", isFinishing=" + isFinishing());
@@ -5489,8 +7940,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         isInForeground = false;
         cancelUiAnimationsIdempotent();
         LogHelper.d(TAG, "🟡 onPause");
-        stopSuperLyricRealtimeTicker();
-        
+        // 锁屏/息屏时仍可能在背屏显示：不要因为 onPause 就停掉 SuperLyric 实时刷新，否则会出现锁屏后歌词跟不上。
+        if (!shouldRunSuperLyricRealtimeWhilePaused()) {
+            stopSuperLyricRealtimeTicker();
+        }
         // 检查是否应该清理（如果Activity被系统回收或进入后台，确保资源被清理）
         // 注意：这里不主动销毁Activity，只是检查状态，真正的清理在onDestroy中进行
         // 但如果检测到异常情况（比如在主屏且正在finishing），可以提前清理
@@ -5517,14 +7970,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 // 在背屏且没有finishing时，继续维持常亮flags（防止系统清除）
                 // 与未投屏时常亮实现方式一致：在onPause时重新应用flags，确保屏幕不会熄灭
                 try {
-                    boolean keepScreenOnEnabledPause = true; // 默认开启
-                    try {
-                        SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                        keepScreenOnEnabledPause = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                    } catch (Exception e) {
-                        LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-                    }
-                    
+                    boolean keepScreenOnEnabledPause = isProjectionKeepScreenOnEnabled();
+
                     if (keepScreenOnEnabledPause && getWindow() != null) {
                         // 重新应用常亮flags，防止系统在onPause时清除（与未投屏时常亮实现方式一致）
                         getWindow().addFlags(
@@ -5565,6 +8012,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         isInForeground = false;
         cancelUiAnimationsIdempotent();
         LogHelper.d(TAG, "🟡 onStop");
+        if (!shouldRunSuperLyricRealtimeWhilePaused()) {
+            stopSuperLyricRealtimeTicker();
+        }
 
         if (isFinishing()) {
             return;
@@ -5574,8 +8024,13 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         // 与车控一致：仅当已从「首次创建 UI 的显示屏」迁走时才结束投屏；背屏双击等导致的短暂 onStop 仍处于同一 display，不 finish
         boolean movedToOtherDisplay = (initialDisplayId != -1 && displayId != initialDisplayId);
         if (movedToOtherDisplay) {
+            // 充电覆盖期间允许短暂迁屏抖动，不主动结束下层投屏。
+            if (isChargingOverlayActive()) {
+                LogHelper.d(TAG, "⏸️ onStop 检测到充电覆盖迁屏，保留投屏会话，不触发退出");
+                return;
+            }
             LogHelper.w(TAG, "⚠️ 界面已从初始显示屏移动(displayId=" + displayId + ", initialDisplayId=" + initialDisplayId + ")，结束音乐投屏并销毁Activity");
-            requestProjectionExitSequence("moved-to-other-display-onStop");
+            finishProjectionFromUser("moved-to-other-display-onStop");
             return;
         }
 
@@ -5584,14 +8039,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             if (!isFinishing() && displayId == 1) {
                 // 在背屏且没有finishing时，继续维持常亮flags（与未投屏时常亮实现方式一致）
                 try {
-                    boolean keepScreenOnEnabledStop = true; // 默认开启
-                    try {
-                        SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                        keepScreenOnEnabledStop = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                    } catch (Exception e) {
-                        LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-                    }
-                    
+                    boolean keepScreenOnEnabledStop = isProjectionKeepScreenOnEnabled();
+
                     if (keepScreenOnEnabledStop && getWindow() != null) {
                         // 重新应用常亮flags，防止系统在onStop时清除（与未投屏时常亮实现方式一致）
                         getWindow().addFlags(
@@ -5644,14 +8093,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             }
             
             if (!isFinishing() && displayId == 1 && getWindow() != null) {
-                boolean keepScreenOnEnabled = true; // 默认开启
-                try {
-                    SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                    keepScreenOnEnabled = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                } catch (Exception e) {
-                    // 忽略错误
-                }
-                
+                boolean keepScreenOnEnabled = isProjectionKeepScreenOnEnabled();
+
                 if (keepScreenOnEnabled) {
                     // 重新应用常亮flags（与未投屏时常亮实现方式一致）
                     getWindow().addFlags(
@@ -5744,83 +8187,40 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
         bottomSwipeExitPointerDownInZone = false;
         bottomSwipeExitPending = true;
-        Runnable exit = () -> {
-            if (isFinishing()) {
-                return;
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed()) {
-                return;
-            }
-            requestProjectionExitSequence("bottom-swipe-exit");
-        };
-        uiHandler.post(exit);
+        finishProjectionFromUser("bottom-swipe-exit");
     }
 
-    private void requestProjectionExitSequence(String reason) {
-        Runnable starter = () -> {
-            if (projectionExitFlowStarted) {
-                return;
-            }
-            projectionExitFlowStarted = true;
-            projectionExitUiLocked = true;
-            cancelUiAnimationsIdempotent();
-            if (BuildConfig.DEBUG) {
-                LogHelper.d(TAG, "🚪 开始退出投屏流程: " + reason);
-            }
-            Runnable completeExit = () -> {
-                if (projectionCleanupDone) {
-                    return;
-                }
-                projectionCleanupDone = true;
-                try {
-                    if (getWindow() != null) {
-                        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
-                    }
-                } catch (Exception ignored) {
-                }
-                try {
-                    performCleanupAndExit();
-                } catch (Exception e) {
-                    LogHelper.e(TAG, "退出流程清理失败", e);
-                }
-                try {
-                    restoreOfficialLauncherInBackground();
-                } catch (Exception e) {
-                    LogHelper.w(TAG, "退出流程恢复官方背屏服务失败", e);
-                }
-                finishProjectionTask();
-            };
-            View decor = (getWindow() != null) ? getWindow().getDecorView() : null;
-            if (decor != null) {
-                decor.animate()
-                        .cancel();
-                decor.animate()
-                        .alpha(0f)
-                        .setDuration(EXIT_FADE_DURATION_MS)
-                        .withEndAction(completeExit)
-                        .start();
-            } else {
-                uiHandler.postDelayed(completeExit, EXIT_FADE_DURATION_MS);
-            }
-        };
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            starter.run();
-        } else {
-            uiHandler.post(starter);
-        }
-    }
-    
     @Override
     public void finish() {
+        if (finishRequestedByMiRoot || projectionExitFlowStarted) {
+            RearMirootProjectionLifecycle.hideWindowBeforeProjectionFinish(this);
+            RearMirootProjectionLifecycle.sendMainDisplayHomeBeforeProjectionEnd(taskService);
+            RearMirootProjectionLifecycle.prepareRearDisplayBeforeFinish(getDisplayIdSafe(), taskService);
+            if (initialDisplayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID
+                    && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                if (Build.VERSION.SDK_INT >= 34) {
+                    try {
+                        overrideActivityTransition(Activity.OVERRIDE_TRANSITION_CLOSE, 0, 0);
+                    } catch (Exception ignored) {
+                    }
+                }
+                finishAndRemoveTask();
+                overridePendingTransition(0, 0);
+                return;
+            }
+        }
         super.finish();
-        // 禁用转场动画（去掉背屏切换界面的动画）
         overridePendingTransition(0, 0);
     }
 
     /**
-     * 结束投屏并移除独立 task（Manifest：singleInstance + 独立 taskAffinity），避免栈与队列 Runnable 残留。
+     * 异常/门禁路径可 finishAndRemoveTask；用户主动结束走 {@link #finish()}（背屏 UI 已建立时用 removeTask 防主屏露 UI）。
      */
     private void finishProjectionTask() {
+        if (finishRequestedByMiRoot || projectionExitFlowStarted) {
+            finish();
+            return;
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             try {
                 finishAndRemoveTask();
@@ -5842,20 +8242,26 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             @Override
             public void handleOnBackPressed() {
                 LogHelper.d(TAG, "🔙 返回键结束音乐投屏");
-                requestProjectionExitSequence("back-pressed");
+                finishProjectionFromUser("back-pressed");
             }
         });
     }
     
     /**
-     * 执行清理并退出（统一处理所有退出场景，参考车控投屏的performCleanupAndExit）
-     * 确保无论通过什么方式退出，都能正确清理资源
+     * 资源清理；用户手势/返回退出时在 {@link #onDestroy()} 调用，不在 finish 前 restore 官方背屏。
+     *
+     * @param restoreOfficial 是否同步恢复官方背屏（异常/非 MiRoot 主动结束）
      */
-    private void performCleanupAndExit() {
+    private void performProjectionResourceCleanup(boolean restoreOfficial) {
+        if (projectionCleanupDone) {
+            return;
+        }
+        projectionCleanupDone = true;
         try {
-            LogHelper.d(TAG, "🧹 开始执行清理并退出（音乐投屏）");
+            LogHelper.d(TAG, "🧹 音乐投屏资源清理 (restoreOfficial=" + restoreOfficial + ")");
 
             cancelMainScreenPlaceholderTimeout();
+            cancelRearLyricsUiInitPoll();
             cancelRearStopExitGrace();
             mainScreenPolicyHandler.removeCallbacksAndMessages(null);
             uiHandler.removeCallbacksAndMessages(null);
@@ -5888,22 +8294,22 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             }
             releaseProjectionProximitySession();
 
-            // 清理窗口资源（清除窗口标志和属性，恢复系统UI可见性）
-            try {
-                // false：退出/销毁前勿 setDecorFitsSystemWindows(true)，透明主题会因 insets 变化露出副屏底层，表现为闪白页
-                cleanupWindow(false);
-            } catch (Exception e) {
-                LogHelper.w(TAG, "清理窗口资源失败", e);
+            if (!projectionExitFlowStarted) {
+                try {
+                    cleanupWindow(false);
+                } catch (Exception e) {
+                    LogHelper.w(TAG, "清理窗口资源失败", e);
+                }
             }
-            
-            // 恢复官方手势服务（如果已屏蔽）。Launcher 仍在 onDestroy 中延迟恢复。
-            try {
-                enableOfficialGesture();
-            } catch (Exception e) {
-                LogHelper.w(TAG, "恢复官方手势服务失败", e);
+
+            if (restoreOfficial && !finishRequestedByMiRoot) {
+                try {
+                    ITaskService tsSnapshot = taskService;
+                    OfficialSubscreenMiRootProjectionSession.release(getApplicationContext(), tsSnapshot);
+                } catch (Exception e) {
+                    LogHelper.w(TAG, "恢复官方背屏服务（Session）失败", e);
+                }
             }
-            
-            // 注意：恢复官方Launcher现在在onDestroy中延迟执行，确保Activity完全销毁后再恢复，避免显示切换动画
             
             // 解绑TaskService（在恢复官方服务之后）
             try {
@@ -5957,11 +8363,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     LogHelper.w(TAG, "注销锁屏监听失败", e);
                 }
             }
-            try {
-                SuperLyricApi.releaseReceiver();
-            } catch (Exception e) {
-                LogHelper.w(TAG, "释放 SuperLyric 接收器失败", e);
-            }
+            // 与 SuperLyricApi ModuleDemo 一致：投屏结束只移除 UI 监听，不 unregisterReceiver，
+            // 避免下次「仅 SuperLyric」整段无 onLyric 推送。
             // 停止系统UI可见性检查（主屏横屏模式）
             if (systemUICheckHandler != null && systemUICheckRunnable != null) {
                 try {
@@ -5989,14 +8392,6 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             }
             
             // 清理资源：断开视图与歌词数据引用，便于 GC 回收大布局/纹理
-            try {
-                mvHandler.removeCallbacks(mvNoUrlFallbackRunnable);
-            } catch (Exception ignored) {}
-            releaseMvPlayer();
-            mvPlayerView = null;
-            mvLyricLineView = null;
-            mvLayer = null;
-
             if (abyssalMirrorLyricsViewGroup != null) {
                 try {
                     abyssalMirrorLyricsViewGroup.setOnPrevNextGestureListener(null);
@@ -6030,7 +8425,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 LogHelper.w(TAG, "通知MainActivity失败", e);
             }
             
-            LogHelper.d(TAG, "✅ 清理并退出完成（音乐投屏）");
+            LogHelper.d(TAG, "✅ 音乐投屏资源清理完成");
         } catch (Exception e) {
             LogHelper.e(TAG, "❌ 执行清理并退出时发生异常", e);
             // 即使发生异常，也确保静态实例被清除和状态通知
@@ -6053,8 +8448,17 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             lyricsParseExecutor.shutdownNow();
         } catch (Exception ignored) {
         }
+        performProjectionResourceCleanup(!finishRequestedByMiRoot);
+
         super.onDestroy();
+
+        if (finishRequestedByMiRoot) {
+            RearMirootProjectionLifecycle.scheduleOfficialSubscreenRestoreAfterDestroy(
+                    getApplicationContext(), null);
+        }
+
         LogHelper.d(TAG, "🔴 onDestroy开始");
+        updateHookSourceStatusText(LyricsRuntimeSource.IDLE);
 
         // 立即清除静态实例，避免在检查时误判为正在运行
         if (currentInstance == this) {
@@ -6089,11 +8493,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             }
         }
         
-        // 使用统一的清理方法，确保所有退出场景都能正确清理
-        // 这样可以处理双击息屏等系统强制销毁的情况，即使没有收到停止Intent也能正确清理
-        performCleanupAndExit();
-        
-        // 再次尝试通知MainActivity（确保状态同步，即使performCleanupAndExit中已通知）
+        // 再次尝试通知MainActivity（确保状态同步）
         // 这样可以处理双击息屏等系统强制销毁的情况
         try {
             notifyMainActivityProjectionStopped();
@@ -6194,6 +8594,13 @@ public class RearScreenLyricsActivity extends ComponentActivity {
 
     private void cancelUiAnimationsIdempotent() {
         if (uiAnimationsCancelled) return;
+        // 充电覆盖层在前台时歌词 Activity 仍会 onPause，但底层投屏需保持位置推进，避免结束后逐字高亮卡顿。
+        if (isChargingOverlayActive()) {
+            if (BuildConfig.DEBUG) {
+                LogHelper.d(TAG, "充电覆盖层在前台，保持歌词动画器运行");
+            }
+            return;
+        }
         uiAnimationsCancelled = true;
         try {
             if (lyricsAnimator != null) {
@@ -6448,102 +8855,45 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             // 如果缓存未初始化且TaskService可用，尝试初始化缓存
             if (!DisplayInfoCache.getInstance().isInitialized() && taskService != null) {
                 try {
-                    LogHelper.d(TAG, "🔄 缓存未初始化，尝试初始化以获取cutout信息");
+                    LogHelper.d(TAG, "🔄 缓存未初始化，尝试初始化以获取 cutout（仅用于垂直 inset）");
                     DisplayInfoCache.getInstance().initialize(taskService);
                 } catch (Exception e) {
                     LogHelper.w(TAG, "⚠️ 初始化缓存失败", e);
                 }
             }
-            
-            // 从缓存获取背屏信息
+
             RearDisplayHelper.RearDisplayInfo info = DisplayInfoCache.getInstance().getCachedInfo();
-            
-            // 如果没有cutout，不需要额外处理
-            if (info == null || !info.hasCutout()) {
-                LogHelper.d(TAG, "ℹ️ 背屏无Cutout，无需调整布局");
-                applyMediaButtonBarInsets();
-                return;
-            }
-            
-            // 获取rootLayout（内容布局）
-            android.view.View rootView = getWindow().getDecorView();
-            if (rootView == null) {
-                LogHelper.w(TAG, "⚠️ DecorView为空，无法应用安全区域");
-                applyMediaButtonBarInsets();
-                return;
-            }
-            
-            // 查找FrameLayout（根布局）
-            android.widget.FrameLayout frameLayout = null;
-            if (rootView instanceof android.widget.FrameLayout) {
-                frameLayout = (android.widget.FrameLayout) rootView;
-            } else {
-                // 尝试查找FrameLayout
-                frameLayout = rootView.findViewById(android.R.id.content);
-                if (frameLayout != null && frameLayout.getChildCount() > 0) {
-                    android.view.View firstChild = frameLayout.getChildAt(0);
-                    if (firstChild instanceof android.widget.FrameLayout) {
-                        frameLayout = (android.widget.FrameLayout) firstChild;
-                    }
+            View rl = findRootLayoutForSafeArea();
+            if (rl != null) {
+                int top = 0;
+                int bottom = 0;
+                if (info != null && info.hasCutout() && info.cutout != null) {
+                    top = Math.max(0, info.cutout.top);
+                    bottom = Math.max(0, info.cutout.bottom);
+                }
+                if (rl.getPaddingLeft() != 0 || rl.getPaddingRight() != 0
+                    || rl.getPaddingTop() != top || rl.getPaddingBottom() != bottom) {
+                    rl.setPadding(0, top, 0, bottom);
+                    LogHelper.d(TAG, String.format(
+                        "✅ 背屏内容区：左右无 padding（底图满宽），仅垂直安全区 top=%d bottom=%d",
+                        top, bottom));
+                } else {
+                    LogHelper.d(TAG, "ℹ️ 内容区垂直 padding 已正确，跳过更新");
                 }
             }
-            
-            if (frameLayout == null) {
-                LogHelper.w(TAG, "⚠️ 未找到FrameLayout，无法应用安全区域");
-                applyMediaButtonBarInsets();
-                return;
-            }
-            
-            // 查找rootLayout（LinearLayout，内容布局）
-            android.view.View rootLayout = null;
-            for (int i = 0; i < frameLayout.getChildCount(); i++) {
-                android.view.View child = frameLayout.getChildAt(i);
-                if (child instanceof LinearLayout && child.getBackground() != null) {
-                    // 找到黑色背景的LinearLayout
-                    android.graphics.drawable.ColorDrawable bg = null;
-                    try {
-                        bg = (android.graphics.drawable.ColorDrawable) child.getBackground();
-                    } catch (Exception e) {
-                        // 忽略类型转换错误
-                    }
-                    if (bg != null && bg.getColor() == 0xFF000000) {
-                        rootLayout = child;
-                        break;
-                    }
-                }
-            }
-            
-            if (rootLayout == null) {
-                LogHelper.w(TAG, "⚠️ 未找到rootLayout，无法应用安全区域");
-                applyMediaButtonBarInsets();
-                return;
-            }
-            
-            // 检查当前padding是否已经正确（避免重复设置导致的闪烁）
-            if (rootLayout.getPaddingLeft() == info.cutout.left && 
-                rootLayout.getPaddingTop() == info.cutout.top && 
-                rootLayout.getPaddingRight() == info.cutout.right && 
-                rootLayout.getPaddingBottom() == info.cutout.bottom) {
-                LogHelper.d(TAG, "ℹ️ 安全区域padding已正确设置，跳过更新");
-                applyMediaButtonBarInsets();
-                return;
-            }
-            
-            // 设置padding（避开cutout区域），背景会填充cutout区域
-            rootLayout.setPadding(
-                info.cutout.left,
-                info.cutout.top,
-                info.cutout.right,
-                info.cutout.bottom
-            );
-            
-            LogHelper.d(TAG, String.format("✅ 已应用安全区域padding（歌词内容避开摄像头）: left=%d, top=%d, right=%d, bottom=%d",
-                info.cutout.left, info.cutout.top, info.cutout.right, info.cutout.bottom));
             applyMediaButtonBarInsets();
-            
+
         } catch (Exception e) {
             LogHelper.e(TAG, "❌ 应用安全区域失败", e);
         }
+    }
+
+    private int randomHighSaturationColor() {
+        java.util.Random random = new java.util.Random();
+        float hue = random.nextFloat() * 360f;
+        float saturation = 0.85f + random.nextFloat() * 0.15f;
+        float value = 0.85f + random.nextFloat() * 0.15f;
+        return android.graphics.Color.HSVToColor(new float[]{hue, saturation, value});
     }
 }
 

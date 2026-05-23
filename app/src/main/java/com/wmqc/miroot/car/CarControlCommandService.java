@@ -77,6 +77,31 @@ public class CarControlCommandService extends IntentService {
             return;
         }
 
+        if (!CarControlDeviceGate.isAllowed(this)) {
+            String requestId = safeString(intent.getStringExtra(EXTRA_REQUEST_ID));
+            String replyAction = safeString(intent.getStringExtra(EXTRA_REPLY_ACTION));
+            if (replyAction.isEmpty()) {
+                replyAction = DEFAULT_REPLY_ACTION;
+            }
+            VehicleControlService.ControlResult denied = new VehicleControlService.ControlResult();
+            denied.success = false;
+            denied.message = "当前设备未授权使用车控";
+            sendResultBroadcast(
+                    replyAction,
+                    requestId,
+                    "",
+                    "",
+                    -1,
+                    -1,
+                    -1,
+                    denied,
+                    CALLBACK_PHASE_EXECUTION,
+                    ""
+            );
+            LogHelper.w(TAG, "设备未授权，拒绝执行车控指令");
+            return;
+        }
+
         String function = safeString(intent.getStringExtra(EXTRA_FUNCTION));
         String seat = safeString(intent.getStringExtra(EXTRA_SEAT));
         int durationMinutes = intent.getIntExtra(EXTRA_DURATION_MINUTES, -1);

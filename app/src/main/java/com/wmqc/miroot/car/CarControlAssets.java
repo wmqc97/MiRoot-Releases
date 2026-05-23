@@ -31,6 +31,11 @@ public final class CarControlAssets {
         return ASSET_DIR + "/" + baseName + ".png";
     }
 
+    /** WebP 资源路径（部分大图已从 PNG 转为 WebP，见 {@code assets/car/*.webp}） */
+    public static String webpPath(String baseName) {
+        return ASSET_DIR + "/" + baseName + ".webp";
+    }
+
     public static boolean exists(Context context, String assetPath) {
         if (context == null || assetPath == null || assetPath.isEmpty()) {
             return false;

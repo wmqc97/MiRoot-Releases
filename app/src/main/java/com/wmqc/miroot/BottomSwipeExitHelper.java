@@ -4,8 +4,8 @@ import android.view.MotionEvent;
 import android.view.View;
 
 /**
- * 背屏投屏「底部上滑退出」：将触摸映射到 {@link android.view.Window#getDecorView()} 的本地坐标，
- * 用屏幕 raw 坐标保证整条底边（左右）与系统手势区对齐一致。
+ * 背屏投屏「底部边缘左右滑退出」：将触摸映射到 {@link android.view.Window#getDecorView()} 的本地坐标，
+ * 用屏幕 raw 坐标保证整条底边（左右）与系统对齐一致。
  */
 public final class BottomSwipeExitHelper {
     private BottomSwipeExitHelper() {}

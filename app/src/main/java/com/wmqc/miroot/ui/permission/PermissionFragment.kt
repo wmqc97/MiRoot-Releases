@@ -1,4 +1,5 @@
 package com.wmqc.miroot.ui.permission
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -11,8 +12,10 @@ import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewTreeObserver
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
@@ -22,15 +25,19 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.wmqc.miroot.MainActivity
 import com.wmqc.miroot.R
+import com.wmqc.miroot.AboutCopy
 import com.wmqc.miroot.WelcomeIntro
 import com.wmqc.miroot.capability.EnvironmentProbe
 import com.wmqc.miroot.capability.PermissionSnapshot
+import com.wmqc.miroot.capability.PrivilegedShell
 import com.wmqc.miroot.capability.PrivilegeChannel
 import com.wmqc.miroot.capability.RuntimePermissionGate
 import com.wmqc.miroot.ui.common.showSectionHelp
 import com.wmqc.miroot.databinding.FragmentPermissionBinding
 import com.wmqc.miroot.viewmodel.MainPermissionViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class PermissionFragment : Fragment(R.layout.fragment_permission) {
 
@@ -39,11 +46,29 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
 
     private val viewModel: MainPermissionViewModel by activityViewModels()
 
-    /** Activity 从设置返回时，非当前 ViewPager 页的 Fragment 不会收到 [onResume]，在此随 Activity 刷新省电等运行时状态。 */
+    private val postNotificationsPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (!isAdded || _binding == null) return@registerForActivityResult
+        if (granted) {
+            scheduleBindRuntimeAuthRows()
+        } else {
+            MainDisplayUi.showToast(requireContext(), R.string.runtime_auth_hint_post_notifications, Toast.LENGTH_LONG)
+            openRuntimeSetting { RuntimePermissionGate.intentAppNotificationSettings(it) }
+        }
+    }
+
+    /** Activity 从设置返回时，非当前 ViewPager 页的 Fragment 不会收到 [onResume]，在此随 Activity 刷新特权与运行时状态。 */
     private val activityResumeRefreshObserver = object : DefaultLifecycleObserver {
         override fun onResume(owner: LifecycleOwner) {
-            if (_binding != null) bindRuntimeAuthRows()
+            refreshStatusPage()
         }
+    }
+
+    /** 从系统设置返回时窗口 regain focus 往往晚于 [onResume]，此时再读省电等状态更可靠。 */
+    private val windowFocusRefreshListener = ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+        if (!hasFocus || !isAdded || _binding == null) return@OnWindowFocusChangeListener
+        refreshStatusPage()
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
@@ -54,10 +79,9 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         viewModel.snapshot.value?.let(::render)
 
         binding.buttonRefresh.setOnClickListener {
-            viewModel.refresh()
             bindOsVersion()
             bindSubscreenVersion()
-            bindRuntimeAuthRows()
+            refreshStatusPage()
         }
 
         binding.textPermTitle.setOnClickListener {
@@ -80,7 +104,16 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
             try {
                 startActivity(intent)
             } catch (_: ActivityNotFoundException) {
-                Toast.makeText(requireContext(), R.string.settings_coolapk_open_failed, Toast.LENGTH_SHORT).show()
+                MainDisplayUi.showToast(requireContext(), R.string.settings_coolapk_open_failed, Toast.LENGTH_SHORT)
+            }
+        }
+
+        binding.rowSponsorIfdian.setOnClickListener {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.ifdian.net/a/MiRoot"))
+            try {
+                startActivity(intent)
+            } catch (_: ActivityNotFoundException) {
+                MainDisplayUi.showToast(requireContext(), R.string.settings_coolapk_open_failed, Toast.LENGTH_SHORT)
             }
         }
 
@@ -90,7 +123,7 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
             content.findViewById<TextView>(R.id.about_app_name).text = getString(R.string.app_name)
             content.findViewById<TextView>(R.id.about_version).text =
                 getString(R.string.settings_version, readVersionName())
-            content.findViewById<TextView>(R.id.about_body).text = buildAboutBodyText()
+            content.findViewById<TextView>(R.id.about_body).text = AboutCopy.buildBodyText(ctx)
             MaterialAlertDialogBuilder(ctx)
                 .setTitle(R.string.settings_about_title)
                 .setView(content)
@@ -110,7 +143,7 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
             val intent = RuntimePermissionGate.firstResolvableOverlayIntent(ctx, pm)
             if (intent != null) {
                 if (intent.data == null && intent.action == Settings.ACTION_MANAGE_OVERLAY_PERMISSION) {
-                    Toast.makeText(ctx, R.string.runtime_auth_hint_overlay_find_app, Toast.LENGTH_LONG).show()
+                    MainDisplayUi.showToast(ctx, R.string.runtime_auth_hint_overlay_find_app, Toast.LENGTH_LONG)
                 }
                 try {
                     startActivity(intent)
@@ -123,22 +156,67 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         }
         binding.rowBattery.setOnClickListener {
             val ctx = requireContext()
-            if (RuntimePermissionGate.isIgnoringBatteryOptimizations(ctx)) return@setOnClickListener
-            try {
-                startActivity(RuntimePermissionGate.intentIgnoreBatteryOptimizations(ctx))
-            } catch (_: Exception) {
+            if (RuntimePermissionGate.hasBatteryUnrestricted(ctx)) return@setOnClickListener
+            val intent = RuntimePermissionGate.firstResolvableBatteryIntent(ctx, ctx.packageManager)
+            if (intent != null) {
                 try {
-                    startActivity(RuntimePermissionGate.intentBatteryOptimizationList())
+                    startActivity(intent)
                 } catch (_: Exception) {
                     openRuntimeSetting { RuntimePermissionGate.intentAppDetails(it) }
                 }
+            } else {
+                openRuntimeSetting { RuntimePermissionGate.intentAppDetails(it) }
+            }
+        }
+        binding.rowPostNotifications.setOnClickListener {
+            val ctx = requireContext()
+            if (RuntimePermissionGate.canPostNotifications(ctx)) return@setOnClickListener
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                postNotificationsPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                openRuntimeSetting { RuntimePermissionGate.intentAppNotificationSettings(it) }
+            }
+        }
+        binding.rowAppList.setOnClickListener {
+            val ctx = requireContext()
+            if (RuntimePermissionGate.canQueryAllPackages(ctx)) return@setOnClickListener
+            val intent = RuntimePermissionGate.firstResolvableQueryAllPackagesIntent(ctx, ctx.packageManager)
+            if (intent != null) {
+                try {
+                    startActivity(intent)
+                } catch (_: Exception) {
+                    openRuntimeSetting { RuntimePermissionGate.intentAppDetails(it) }
+                }
+            } else {
+                MainDisplayUi.showToast(ctx, R.string.runtime_auth_hint_app_list, Toast.LENGTH_LONG)
+                openRuntimeSetting { RuntimePermissionGate.intentAppDetails(it) }
             }
         }
         binding.rowNotification.setOnClickListener {
             val ctx = requireContext()
             if (RuntimePermissionGate.isNotificationListenerEnabled(ctx)) return@setOnClickListener
-            Toast.makeText(ctx, R.string.runtime_auth_hint_notification, Toast.LENGTH_LONG).show()
-            openRuntimeSetting { RuntimePermissionGate.intentNotificationListenerSettings() }
+            MaterialAlertDialogBuilder(ctx)
+                .setTitle(R.string.runtime_auth_nls_miui_guide_title)
+                .setMessage(R.string.runtime_auth_nls_miui_guide_message)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setNeutralButton(R.string.runtime_auth_nls_miui_guide_open_miui) { _, _ ->
+                    val intent =
+                        RuntimePermissionGate.firstResolvableMiuiAutostartIntent(
+                            ctx,
+                            ctx.packageManager,
+                        )
+                    if (intent != null) {
+                        openRuntimeSetting { intent }
+                    } else {
+                        MainDisplayUi.showToast(ctx, R.string.runtime_auth_open_settings_failed, Toast.LENGTH_SHORT)
+                        openRuntimeSetting { RuntimePermissionGate.intentAppDetails(it) }
+                    }
+                }
+                .setPositiveButton(R.string.runtime_auth_nls_miui_guide_open_nls) { _, _ ->
+                    MainDisplayUi.showToast(ctx, R.string.runtime_auth_hint_notification, Toast.LENGTH_LONG)
+                    openRuntimeSetting { RuntimePermissionGate.intentNotificationListenerSettings() }
+                }
+                .show()
         }
 
         binding.cardActionForceStop.setOnClickListener {
@@ -146,6 +224,9 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
                 .setTitle(R.string.action_force_stop_title)
                 .setMessage(R.string.action_force_stop_message)
                 .setNegativeButton(android.R.string.cancel, null)
+                .setNeutralButton(R.string.action_force_stop_restart_official_subscreen) { _, _ ->
+                    restartOfficialSubscreenService()
+                }
                 .setPositiveButton(R.string.action_force_stop_confirm) { _, _ ->
                     activity?.finishAffinity()
                     Process.killProcess(Process.myPid())
@@ -164,11 +245,11 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
                     viewLifecycleOwner.lifecycleScope.launch {
                         val ok = EnvironmentProbe.probeRoot()
                         viewModel.refresh()
-                        Toast.makeText(
+                        MainDisplayUi.showToast(
                             requireContext(),
                             if (ok) getString(R.string.root_manage_result_ok) else getString(R.string.root_manage_result_no),
                             Toast.LENGTH_SHORT,
-                        ).show()
+                        )
                     }
                 }
                 .show()
@@ -205,13 +286,59 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         bindRuntimeAuthRows()
 
         requireActivity().lifecycle.addObserver(activityResumeRefreshObserver)
+        binding.root.viewTreeObserver.addOnWindowFocusChangeListener(windowFocusRefreshListener)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        refreshStatusPage()
     }
 
     override fun onResume() {
         super.onResume()
-        if (_binding != null) {
-            bindRuntimeAuthRows()
+        refreshStatusPage()
+    }
+
+    /** 特权（Root/Shizuku）与运行时权限（省电策略等）统一刷新入口。 */
+    private fun refreshStatusPage() {
+        viewModel.refresh()
+        scheduleBindRuntimeAuthRows()
+        scheduleDeferredPrivilegeRefresh()
+    }
+
+    /**
+     * Magisk / KernelSU 弹窗授权或从 Shizuku 返回后，首次 [refresh] 时 su 可能尚未就绪；
+     * 延迟再探测一轮，避免状态页长期停在「未授权」。
+     */
+    private fun scheduleDeferredPrivilegeRefresh() {
+        val b = _binding ?: return
+        b.root.removeCallbacks(deferredPrivilegeRefreshRunnable)
+        b.root.postDelayed(deferredPrivilegeRefreshRunnable, 500L)
+        b.root.postDelayed(deferredPrivilegeRefreshRunnable, 1500L)
+    }
+
+    private val deferredPrivilegeRefreshRunnable = Runnable {
+        if (isAdded && _binding != null) viewModel.refresh()
+    }
+
+    /**
+     * 从「忽略电池优化 / 省电策略」等系统页返回时，部分 ROM 在同一消息内读取权限 API 仍为旧值；
+     * 单帧 [View.post] 仍可能偏早（尤其 HyperOS 应用详情里的省电策略），再延迟多轮直至系统落库。
+     */
+    private fun scheduleBindRuntimeAuthRows() {
+        val b = _binding ?: return
+        b.root.removeCallbacks(bindRuntimeAuthRowsRunnable)
+        for (delayMs in RUNTIME_AUTH_REFRESH_DELAYS_MS) {
+            if (delayMs == 0L) {
+                b.root.post(bindRuntimeAuthRowsRunnable)
+            } else {
+                b.root.postDelayed(bindRuntimeAuthRowsRunnable, delayMs)
+            }
         }
+    }
+
+    private val bindRuntimeAuthRowsRunnable = Runnable {
+        if (_binding != null) bindRuntimeAuthRows()
     }
 
     private fun openRuntimeSetting(intentFor: (Context) -> Intent) {
@@ -222,7 +349,7 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
             try {
                 startActivity(RuntimePermissionGate.intentAppDetails(ctx))
             } catch (_: Exception) {
-                Toast.makeText(ctx, R.string.runtime_auth_open_settings_failed, Toast.LENGTH_SHORT).show()
+                MainDisplayUi.showToast(ctx, R.string.runtime_auth_open_settings_failed, Toast.LENGTH_SHORT)
             }
         }
     }
@@ -232,7 +359,9 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         val red = ContextCompat.getColor(ctx, R.color.perm_red)
         val needStorage = !RuntimePermissionGate.hasAllFilesAccess(ctx)
         val needOverlay = !RuntimePermissionGate.hasOverlay(ctx)
-        val needBattery = !RuntimePermissionGate.isIgnoringBatteryOptimizations(ctx)
+        val needBattery = !RuntimePermissionGate.hasBatteryUnrestricted(ctx)
+        val needPostNotifications = !RuntimePermissionGate.canPostNotifications(ctx)
+        val needAppList = !RuntimePermissionGate.canQueryAllPackages(ctx)
         val needNotification = !RuntimePermissionGate.isNotificationListenerEnabled(ctx)
 
         fun paintDenied(tv: TextView) {
@@ -259,6 +388,18 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         } else {
             binding.rowBattery.visibility = View.GONE
         }
+        if (needPostNotifications) {
+            binding.rowPostNotifications.visibility = View.VISIBLE
+            paintDenied(binding.statusPostNotifications)
+        } else {
+            binding.rowPostNotifications.visibility = View.GONE
+        }
+        if (needAppList) {
+            binding.rowAppList.visibility = View.VISIBLE
+            paintDenied(binding.statusAppList)
+        } else {
+            binding.rowAppList.visibility = View.GONE
+        }
         if (needNotification) {
             binding.rowNotification.visibility = View.VISIBLE
             paintDenied(binding.statusNotification)
@@ -271,9 +412,14 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         binding.dividerAfterOverlay.visibility =
             if (needOverlay && needBattery) View.VISIBLE else View.GONE
         binding.dividerAfterBattery.visibility =
-            if (needBattery && needNotification) View.VISIBLE else View.GONE
+            if (needBattery && needPostNotifications) View.VISIBLE else View.GONE
+        binding.dividerAfterPostNotifications.visibility =
+            if (needPostNotifications && needAppList) View.VISIBLE else View.GONE
+        binding.dividerAfterAppList.visibility =
+            if (needAppList && needNotification) View.VISIBLE else View.GONE
 
-        val anyNeeds = needStorage || needOverlay || needBattery || needNotification
+        val anyNeeds =
+            needStorage || needOverlay || needBattery || needPostNotifications || needAppList || needNotification
         binding.cardRuntimeAuth.visibility = if (anyNeeds) View.VISIBLE else View.GONE
     }
 
@@ -286,21 +432,6 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
             pi.versionName ?: "—"
         } catch (_: Exception) {
             "—"
-        }
-
-    private fun buildAboutBodyText(): String =
-        buildString {
-            append(getString(R.string.settings_about_section_intro))
-            append("\n")
-            append(getString(R.string.settings_about_app_desc))
-            append("\n\n")
-            append(getString(R.string.settings_about_section_thanks))
-            append("\n")
-            append(getString(R.string.settings_about_thanks))
-            append("\n\n")
-            append(getString(R.string.settings_about_section_software))
-            append("\n")
-            append(getString(R.string.settings_about_software))
         }
 
     private fun bindOsVersion() {
@@ -322,7 +453,32 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
                 return
             }
         }
-        Toast.makeText(requireContext(), R.string.shizuku_manage_no_app, Toast.LENGTH_SHORT).show()
+        MainDisplayUi.showToast(requireContext(), R.string.shizuku_manage_no_app, Toast.LENGTH_SHORT)
+    }
+
+    private fun restartOfficialSubscreenService() {
+        val snap = viewModel.snapshot.value
+        if (snap?.privileged != true) {
+            MainDisplayUi.showToast(requireContext(), R.string.privilege_shell_required, Toast.LENGTH_LONG)
+            return
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                PrivilegedShell.execCmd(
+                    "pm enable com.xiaomi.subscreencenter 2>/dev/null; " +
+                        "pm enable com.xiaomi.subscreencenter/.SubScreenLauncher 2>/dev/null; " +
+                        "am force-stop com.xiaomi.subscreencenter; " +
+                        "am start --display 1 -n com.xiaomi.subscreencenter/.subscreenlauncher.SubScreenLauncherActivity " +
+                        "|| am start --display 1 -n com.xiaomi.subscreencenter/.SubScreenLauncher",
+                )
+            }
+            if (!isAdded || _binding == null) return@launch
+            MainDisplayUi.showToast(
+                requireContext(),
+                if (ok) R.string.action_force_stop_restart_official_subscreen_ok else R.string.action_force_stop_restart_official_subscreen_fail,
+                if (ok) Toast.LENGTH_SHORT else Toast.LENGTH_LONG,
+            )
+        }
     }
 
     private fun bindSubscreenVersion() {
@@ -405,9 +561,14 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         val btnVis = if (hidePrivilegeButtons) View.GONE else View.VISIBLE
         binding.cardActionRoot.visibility = btnVis
         binding.cardActionShizuku.visibility = btnVis
+
+        bindRuntimeAuthRows()
     }
 
     override fun onDestroyView() {
+        _binding?.root?.removeCallbacks(bindRuntimeAuthRowsRunnable)
+        _binding?.root?.removeCallbacks(deferredPrivilegeRefreshRunnable)
+        _binding?.root?.viewTreeObserver?.removeOnWindowFocusChangeListener(windowFocusRefreshListener)
         activity?.lifecycle?.removeObserver(activityResumeRefreshObserver)
         _binding = null
         super.onDestroyView()
@@ -415,5 +576,8 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
 
     private companion object {
         private const val SUBSCREEN_PACKAGE = "com.xiaomi.subscreencenter"
+
+        /** 从系统设置返回后分批重读运行时权限（含 HyperOS 省电策略落库延迟）。 */
+        private val RUNTIME_AUTH_REFRESH_DELAYS_MS = longArrayOf(0L, 120L, 350L, 900L, 1500L, 2500L)
     }
 }

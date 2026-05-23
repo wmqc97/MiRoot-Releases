@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="8dp"
+    android:paddingTop="4dp"
+    android:paddingEnd="8dp"
+    android:paddingBottom="8dp">
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:id="@+id/layout_search_pick_app"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/pick_launcher_app_search_hint"
+        app:endIconMode="clear_text">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/edit_search_pick_app"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:imeOptions="actionSearch"
+            android:inputType="text|textCapWords|textNoSuggestions"
+            android:maxLines="1" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_pick_launcher_apps"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/pick_launcher_app_list_height"
+        android:layout_marginTop="8dp"
+        android:clipToPadding="false"
+        android:paddingBottom="4dp"
+        android:scrollbars="vertical"
+        tools:listitem="@layout/item_pick_launcher_app" />
+
+    <TextView
+        android:id="@+id/text_pick_launcher_empty"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/pick_launcher_app_list_height"
+        android:gravity="center"
+        android:text="@string/pick_launcher_app_no_match"
+        android:textAppearance="?attr/textAppearanceBodyMedium"
+        android:textColor="@color/mi_text_secondary"
+        android:visibility="gone"
+        tools:visibility="visible" />
+</LinearLayout>

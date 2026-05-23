@@ -20,7 +20,11 @@ import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.os.Build;
+import android.os.Bundle;
 import android.service.notification.StatusBarNotification;
+import android.text.TextUtils;
+
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -96,7 +100,12 @@ public class MusicInfoHelper {
                     String[] possibleLyricsKeys = {
                         "android.media.metadata.LYRICS",
                         "android.media.metadata.DESCRIPTION",
+                        "android.media.metadata.DISPLAY_DESCRIPTION",
+                        "android.media.metadata.DISPLAY_SUBTITLE",
                         "lyrics",
+                        "lyric",
+                        "lrc",
+                        "AUDIO_LYRIC",
                         "LYRICS"
                     };
                     for (String key : possibleLyricsKeys) {
@@ -112,7 +121,14 @@ public class MusicInfoHelper {
                         }
                     }
                 }
-                
+
+                // 一些播放器会把歌词写进 MediaController extras，而不是 metadata。
+                String extrasLyrics = readLyricsFromBundle(controller.getExtras());
+                if (!TextUtils.isEmpty(extrasLyrics)) {
+                    info.lyrics = extrasLyrics;
+                    LogHelper.d(TAG, "从MediaController extras获取到歌词");
+                }
+
                 LogHelper.d(TAG, "元数据: title=" + info.title + ", artist=" + info.artist);
             }
             
@@ -122,13 +138,23 @@ public class MusicInfoHelper {
                 int state = playbackState.getState();
                 info.isPlaying = (state == android.media.session.PlaybackState.STATE_PLAYING);
                 info.position = playbackState.getPosition();
-                info.duration = playbackState.getBufferedPosition();
+                try {
+                    if (metadata != null) {
+                        info.duration = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION);
+                    }
+                } catch (Exception ignored) {
+                    info.duration = 0;
+                }
                 
                 LogHelper.d(TAG, "播放状态: isPlaying=" + info.isPlaying + ", position=" + info.position);
             }
             
         } catch (SecurityException e) {
-            LogHelper.e(TAG, "权限不足，无法获取MediaController: " + e.getMessage());
+            LogHelper.wThrottled(
+                TAG,
+                "权限不足，无法获取 MediaController（通知使用权/MIUI 后台限制？）: " + LogHelper.truncateForLog(e.toString(), 180),
+                10 * 60 * 1000L
+            );
         } catch (Exception e) {
             LogHelper.e(TAG, "获取MediaController信息失败", e);
         }
@@ -156,10 +182,11 @@ public class MusicInfoHelper {
             info.packageName = sbn.getPackageName();
             
             // 获取通知标题和内容
-            String title = notification.extras.getString(Notification.EXTRA_TITLE, "");
-            String text = notification.extras.getString(Notification.EXTRA_TEXT, "");
-            String bigText = notification.extras.getString(Notification.EXTRA_BIG_TEXT, "");
-            String subText = notification.extras.getString(Notification.EXTRA_SUB_TEXT, "");
+            Bundle extras = notification.extras;
+            String title = getCharSequenceAsString(extras, Notification.EXTRA_TITLE);
+            String text = getCharSequenceAsString(extras, Notification.EXTRA_TEXT);
+            String bigText = getCharSequenceAsString(extras, Notification.EXTRA_BIG_TEXT);
+            String subText = getCharSequenceAsString(extras, Notification.EXTRA_SUB_TEXT);
             
             if (!title.isEmpty()) {
                 info.title = title;
@@ -177,6 +204,14 @@ public class MusicInfoHelper {
             if (!subText.isEmpty()) {
                 if (info.artist.isEmpty()) {
                     info.artist = subText;
+                }
+            }
+
+            if (info.lyrics.isEmpty()) {
+                String extrasLyrics = readLyricsFromBundle(extras);
+                if (!TextUtils.isEmpty(extrasLyrics)) {
+                    info.lyrics = extrasLyrics;
+                    LogHelper.d(TAG, "从通知 extras 深度扫描到歌词");
                 }
             }
             
@@ -223,43 +258,208 @@ public class MusicInfoHelper {
     /**
      * 通过第三方歌词API获取歌词
      */
-    public static String getLyricsFromAPI(Context context, String title, String artist, String musixmatchApiKey) {
+    public static String getLyricsFromAPI(Context context, String title, String artist, long durationMs, String musixmatchApiKey) {
+        return getLyricsFromAPI(context, title, artist, durationMs, musixmatchApiKey, null, false, true);
+    }
+
+    /**
+     * 按播放器来源选择歌词匹配方案：
+     * - 酷我：背屏优先专用解析链（AUDIO_LYRIC）；网络兜底按包名走酷狗优先策略
+     * - 汽水：先 qsgc 再酷狗；网易云/酷狗/酷我/QQ/其他：先酷狗再 qsgc；均失败再走 lrclib / lyrics.ovh
+     */
+    public static String getLyricsFromAPI(Context context, String title, String artist, long durationMs, String musixmatchApiKey, String sourcePackageName) {
+        return getLyricsFromAPI(context, title, artist, durationMs, musixmatchApiKey, sourcePackageName, false, true);
+    }
+
+    /**
+     * 按来源模式可配置网络匹配策略：
+     * - strictTitleArtistMatch=true：酷狗候选须歌名+歌手严格匹配（qsgc 精确直连仍会尝试）
+     * - enableSecondaryFallback=false：禁用 lrclib / lyrics.ovh 开放兜底（混合模式首轮由上层再发起宽松请求）
+     */
+    public static String getLyricsFromAPI(Context context,
+                                          String title,
+                                          String artist,
+                                          long durationMs,
+                                          String musixmatchApiKey,
+                                          String sourcePackageName,
+                                          boolean strictTitleArtistMatch,
+                                          boolean enableSecondaryFallback) {
+        NetworkLyricsOrchestrator.Payload payload = fetchNetworkLyricsPayload(
+            context,
+            title,
+            artist,
+            durationMs,
+            musixmatchApiKey,
+            sourcePackageName,
+            strictTitleArtistMatch,
+            enableSecondaryFallback
+        );
+        return payload.success ? payload.lyrics : "";
+    }
+
+    /**
+     * 智能网络拉词（含来源标识，供 UI Debug 与日志）。
+     */
+    public static NetworkLyricsOrchestrator.Payload fetchNetworkLyricsPayload(Context context,
+                                                                              String title,
+                                                                              String artist,
+                                                                              long durationMs,
+                                                                              String musixmatchApiKey,
+                                                                              String sourcePackageName,
+                                                                              boolean strictTitleArtistMatch,
+                                                                              boolean enableSecondaryFallback) {
         if (context == null || title == null || title.isEmpty()) {
             LogHelper.w(TAG, "通过API获取歌词失败: 参数无效");
+            NetworkLyricsOrchestrator.Payload empty = new NetworkLyricsOrchestrator.Payload();
+            empty.error = "参数无效";
+            return empty;
+        }
+
+        double durationSeconds = durationMs > 0 ? durationMs / 1000.0 : 0.0;
+        String resolvedPackage = MusicPlayerLyricsPolicy.resolveNetworkLyricsPackageName(
+            context, sourcePackageName);
+        MusicPlayerLyricsPolicy.PrimaryStrategy strategy =
+            MusicPlayerLyricsPolicy.resolvePrimaryStrategy(resolvedPackage);
+        LogHelper.d(TAG, "网络API拉词包名: explicit="
+            + (sourcePackageName != null ? sourcePackageName : "")
+            + ", resolved=" + resolvedPackage
+            + ", strategy=" + strategy);
+
+        return fetchNetworkLyricsPayload(
+            context,
+            title,
+            artist,
+            durationMs,
+            musixmatchApiKey,
+            sourcePackageName,
+            strictTitleArtistMatch,
+            enableSecondaryFallback,
+            false
+        );
+    }
+
+    public static NetworkLyricsOrchestrator.Payload fetchNetworkLyricsPayload(Context context,
+                                                                              String title,
+                                                                              String artist,
+                                                                              long durationMs,
+                                                                              String musixmatchApiKey,
+                                                                              String sourcePackageName,
+                                                                              boolean strictTitleArtistMatch,
+                                                                              boolean enableSecondaryFallback,
+                                                                              boolean qishuiQsgcOnlyPrimary) {
+        if (context == null || title == null || title.isEmpty()) {
+            LogHelper.w(TAG, "通过API获取歌词失败: 参数无效");
+            NetworkLyricsOrchestrator.Payload empty = new NetworkLyricsOrchestrator.Payload();
+            empty.error = "参数无效";
+            return empty;
+        }
+
+        double durationSeconds = durationMs > 0 ? durationMs / 1000.0 : 0.0;
+        String resolvedPackage = MusicPlayerLyricsPolicy.resolveNetworkLyricsPackageName(
+            context, sourcePackageName);
+        MusicPlayerLyricsPolicy.PrimaryStrategy strategy =
+            MusicPlayerLyricsPolicy.resolvePrimaryStrategy(resolvedPackage);
+        LogHelper.d(TAG, "网络API拉词包名: explicit="
+            + (sourcePackageName != null ? sourcePackageName : "")
+            + ", resolved=" + resolvedPackage
+            + ", strategy=" + strategy
+            + ", qishuiQsgcOnly=" + qishuiQsgcOnlyPrimary);
+
+        return NetworkLyricsOrchestrator.fetch(
+            context,
+            title,
+            artist,
+            durationSeconds,
+            musixmatchApiKey,
+            resolvedPackage,
+            strictTitleArtistMatch,
+            enableSecondaryFallback,
+            qishuiQsgcOnlyPrimary
+        );
+    }
+
+    private static String getCharSequenceAsString(Bundle extras, String key) {
+        if (extras == null || key == null) return "";
+        try {
+            CharSequence value = extras.getCharSequence(key);
+            return value != null ? value.toString() : "";
+        } catch (Exception ignored) {
             return "";
         }
-        
-        LogHelper.d(TAG, "通过API获取歌词: " + title + " - " + artist);
-        
-        // 使用标准API接口 /lyrics/search 获取歌词
-        List<LyricsMatcher.Candidate> candidates = LyricsAPIClient.searchLyrics(
-            context, title, artist, "", 0.0, musixmatchApiKey);
-        
-        if (candidates != null && !candidates.isEmpty()) {
-            // 获取分数最高的候选结果
-            LyricsMatcher.Candidate bestCandidate = candidates.get(0);
-            LogHelper.d(TAG, "✅ 找到最佳歌词候选: " + bestCandidate.title + " - " + bestCandidate.artist + 
-                      " (分数: " + String.format("%.2f", bestCandidate.score) + ", ID: " + bestCandidate.id + ")");
-            
-            // 使用 /lyrics/by-id 获取完整歌词内容
-            if (bestCandidate.id != null && !bestCandidate.id.isEmpty()) {
-                LyricsAPIClient.LyricsResult result = LyricsAPIClient.getLyricsById(
-                    context, bestCandidate.id, bestCandidate.provider);
-                
-                if (result.success && result.lyrics != null && !result.lyrics.isEmpty()) {
-                    LogHelper.d(TAG, "✅ 成功获取歌词内容，长度: " + result.lyrics.length());
-                    return result.lyrics;
-                } else {
-                    LogHelper.w(TAG, "❌ 获取歌词内容失败: " + result.error);
+    }
+
+    private static String readLyricsFromBundle(Bundle extras) {
+        if (extras == null) return "";
+        try {
+            // 先走高概率 key，减少遍历开销。
+            String[] keys = new String[] {
+                "lyric", "lyrics", "lrc", "AUDIO_LYRIC",
+                "android.media.metadata.LYRICS",
+                "android.media.metadata.DISPLAY_SUBTITLE",
+                "android.media.metadata.DISPLAY_DESCRIPTION",
+                "music_lyric", "current_lyric", "lyric_content"
+            };
+            for (String key : keys) {
+                String hit = getPotentialLyrics(extras, key);
+                if (!TextUtils.isEmpty(hit)) {
+                    return hit;
                 }
-            } else {
-                LogHelper.w(TAG, "⚠️ 候选结果ID为空，无法获取歌词内容");
             }
-            return "";
-        } else {
-            LogHelper.w(TAG, "❌ 搜索歌词失败: 未找到候选结果");
-            return "";
+
+            // 再扫描所有 extras key（兼容厂商私有字段）。
+            for (String key : extras.keySet()) {
+                if (key == null) continue;
+                String lower = key.toLowerCase();
+                if (lower.contains("lyric") || lower.contains("lrc")) {
+                    String hit = getPotentialLyrics(extras, key);
+                    if (!TextUtils.isEmpty(hit)) {
+                        return hit;
+                    }
+                }
+            }
+        } catch (Exception ignored) {
         }
+        return "";
+    }
+
+    private static String getPotentialLyrics(Bundle extras, String key) {
+        if (extras == null || key == null) return "";
+        try {
+            String value = extras.getString(key);
+            if (looksLikeLyrics(value)) return value.trim();
+        } catch (Exception ignored) {
+        }
+        try {
+            CharSequence value = extras.getCharSequence(key);
+            if (value != null && looksLikeLyrics(value.toString())) return value.toString().trim();
+        } catch (Exception ignored) {
+        }
+        try {
+            CharSequence[] lines = extras.getCharSequenceArray(key);
+            if (lines != null && lines.length > 0) {
+                List<String> valid = new ArrayList<>();
+                for (CharSequence cs : lines) {
+                    if (cs == null) continue;
+                    String s = cs.toString();
+                    if (looksLikeLyrics(s)) valid.add(s);
+                }
+                if (!valid.isEmpty()) {
+                    return TextUtils.join("\n", valid);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return "";
+    }
+
+    private static boolean looksLikeLyrics(String value) {
+        if (value == null) return false;
+        String s = value.trim();
+        if (s.isEmpty()) return false;
+        if (s.contains("\n")) return true;
+        if (s.matches(".*\\[\\d{1,2}:\\d{2}(\\.\\d{2,3})?].*")) return true;
+        // 单行兜底：太长的普通文案不当歌词；短句可能是实时行歌词。
+        return s.length() >= 6 && s.length() <= 120;
     }
 }
 

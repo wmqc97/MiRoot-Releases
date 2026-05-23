@@ -1,4 +1,5 @@
 package com.wmqc.miroot.rear
+import com.wmqc.miroot.display.MainDisplayUi
 
 import com.wmqc.miroot.lyrics.LogHelper
 import android.content.Context
@@ -161,7 +162,7 @@ class RearProjectionProximitySession(
                 } else {
                     appContext.getString(R.string.rear_assist_returned_main_fail)
                 }
-                Toast.makeText(appContext, msg, Toast.LENGTH_SHORT).show()
+                MainDisplayUi.showToast(appContext, msg, Toast.LENGTH_SHORT)
             }
         }
     }

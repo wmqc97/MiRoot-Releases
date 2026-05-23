@@ -65,6 +65,12 @@ public class VehicleStatusQueryService extends IntentService {
             replyAction = DEFAULT_REPLY_ACTION;
         }
 
+        if (!CarControlDeviceGate.isAllowed(this)) {
+            sendResultBroadcast(replyAction, requestId, false, "当前设备未授权使用车控", "");
+            LogHelper.w(TAG, "设备未授权，拒绝车辆状态查询");
+            return;
+        }
+
         LogHelper.d(TAG, "📡 收到车辆状态查询请求: requestId=" + requestId + ", replyAction=" + replyAction);
 
         boolean success = false;

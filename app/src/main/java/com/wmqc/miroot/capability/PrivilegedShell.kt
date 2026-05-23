@@ -12,7 +12,12 @@ import java.lang.reflect.Method
  */
 object PrivilegedShell {
 
+    /** 统一命令执行入口：Root 优先，失败自动回退 Shizuku。 */
+    @JvmStatic
+    fun execCmd(cmd: String): Boolean = runAndWait(cmd)
+
     @Throws(IOException::class)
+    @JvmStatic
     fun startShell(command: String, redirectErrorStream: Boolean = false): Process {
         val suFailure =
             try {
@@ -37,6 +42,20 @@ object PrivilegedShell {
             suFailure.addSuppressed(e)
             throw suFailure
         }
+    }
+
+    /**
+     * 仅使用 Root 通道执行（不回退 Shizuku）。
+     * 仅用于确实必须 root-only 的场景，例如访问其它应用 /data/data 私有目录。
+     */
+    @Throws(IOException::class)
+    @JvmStatic
+    fun startRootShellOnly(command: String, redirectErrorStream: Boolean = false): Process {
+        val pb = ProcessBuilder("su", "-c", command).withPrivilegedSuPath()
+        if (redirectErrorStream) {
+            pb.redirectErrorStream(true)
+        }
+        return pb.start()
     }
 
     private fun shizukuReady(): Boolean =
@@ -84,6 +103,7 @@ object PrivilegedShell {
     }
 
     /** 执行命令并等待结束，返回是否 exit code 为 0。 */
+    @JvmStatic
     fun runAndWait(command: String, redirectErrorStream: Boolean = true): Boolean =
         try {
             startShell(command, redirectErrorStream).waitFor() == 0
@@ -92,6 +112,7 @@ object PrivilegedShell {
         }
 
     /** 读取合并后的 stdout（适合单条输出，如 pid、单行路径）。 */
+    @JvmStatic
     fun captureOutput(command: String): String? =
         try {
             startShell(command, redirectErrorStream = true)

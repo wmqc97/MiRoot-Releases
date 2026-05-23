@@ -1,4 +1,5 @@
 package com.wmqc.miroot.car
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -24,6 +25,8 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.darkColorScheme as m3DarkColorScheme
 import androidx.compose.material3.lightColorScheme as m3LightColorScheme
 import androidx.compose.runtime.Composable
@@ -49,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.wmqc.miroot.R
+import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,6 +73,11 @@ class CarControlLoginActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!CarControlDeviceGate.isAllowed(this)) {
+            MainDisplayUi.showToast(this, "当前设备未授权使用车控", Toast.LENGTH_SHORT)
+            finish()
+            return
+        }
         enableEdgeToEdge()
         setContent {
             val dark = isSystemInDarkTheme()
@@ -139,6 +148,7 @@ private fun CarControlLoginScreenContent(
 
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var saveCredentials by remember { mutableStateOf(true) }
     var status by remember { mutableStateOf("") }
     var statusError by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
@@ -148,6 +158,7 @@ private fun CarControlLoginScreenContent(
         val p = ctx.getSharedPreferences("LoginPrefs", android.content.Context.MODE_PRIVATE)
         username = p.getString("username", "").orEmpty()
         password = p.getString("password", "").orEmpty()
+        saveCredentials = p.getBoolean("saveCredentials", true)
     }
 
     Box(
@@ -206,6 +217,32 @@ private fun CarControlLoginScreenContent(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             colors = fieldColors,
                         )
+                        androidx.compose.foundation.layout.Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = stringResource(R.string.car_control_save_credentials_title),
+                                    style = MiuixTheme.textStyles.body1,
+                                )
+                                Text(
+                                    text = stringResource(R.string.car_control_save_credentials_desc),
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = onPageSecondary,
+                                )
+                            }
+                            Switch(
+                                checked = saveCredentials,
+                                onCheckedChange = { saveCredentials = it },
+                                enabled = !loading,
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = brandPrimary,
+                                    checkedTrackColor = brandPrimary.copy(alpha = 0.5f),
+                                ),
+                            )
+                        }
                         if (status.isNotEmpty()) {
                             Text(
                                 text = status,
@@ -239,13 +276,18 @@ private fun CarControlLoginScreenContent(
                                         val prefs = ctx.getSharedPreferences("LoginPrefs", android.content.Context.MODE_PRIVATE)
                                         prefs.edit().apply {
                                             putString("username", u)
-                                            putString("password", pw)
                                             putString("accessToken", result.accessToken)
                                             putString("userId", result.userId)
                                             putString("refreshToken", result.refreshToken)
                                             val now = System.currentTimeMillis() / 1000
                                             putLong("expireTime", now + result.expiresIn)
                                             putInt("expiresIn", result.expiresIn)
+                                            putBoolean("saveCredentials", saveCredentials)
+                                            if (saveCredentials) {
+                                                putString("password", pw)
+                                            } else {
+                                                remove("password")
+                                            }
                                             apply()
                                         }
                                         onSuccess()

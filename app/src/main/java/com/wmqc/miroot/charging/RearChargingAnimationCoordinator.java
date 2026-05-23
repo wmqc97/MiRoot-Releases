@@ -2,6 +2,7 @@ package com.wmqc.miroot.charging;
 
 import android.content.Context;
 import android.content.Intent;
+import android.os.SystemClock;
 
 import com.wmqc.miroot.lyrics.LogHelper;
 
@@ -21,9 +22,26 @@ public final class RearChargingAnimationCoordinator {
 
     private static volatile AnimationType currentAnimation = AnimationType.NONE;
     private static volatile boolean shouldRestoreOnDestroy = true;
-    private static volatile boolean interruptedChargingWasAlwaysOn;
+    /** 充电层销毁后仍保护下层投屏，避免 onStop 800ms 宽限误关歌词/车控。 */
+    private static volatile long chargingProtectionUntilElapsedMs = 0L;
+    private static final long CHARGING_PROTECTION_MS = 3_000L;
 
     private RearChargingAnimationCoordinator() {
+    }
+
+    /**
+     * 充电动画正在播放，或刚结束仍在保护窗口内（供歌词 onStop 宽限判断）。
+     */
+    public static synchronized boolean isChargingProtectionActive() {
+        if (currentAnimation == AnimationType.CHARGING) {
+            return true;
+        }
+        return SystemClock.elapsedRealtime() < chargingProtectionUntilElapsedMs;
+    }
+
+    private static synchronized void markChargingProtectionWindow() {
+        chargingProtectionUntilElapsedMs =
+            SystemClock.elapsedRealtime() + CHARGING_PROTECTION_MS;
     }
 
     public static synchronized AnimationType startAnimation(AnimationType type) {
@@ -43,19 +61,6 @@ public final class RearChargingAnimationCoordinator {
         return oldAnimation;
     }
 
-    public static synchronized void markInterruptedChargingAsAlwaysOn(boolean alwaysOn) {
-        interruptedChargingWasAlwaysOn = alwaysOn;
-        LogHelper.d(TAG, "被打断的充电动画常亮标记: " + alwaysOn);
-    }
-
-    public static synchronized boolean shouldResumeChargingAnimation() {
-        return interruptedChargingWasAlwaysOn;
-    }
-
-    public static synchronized void clearChargingAlwaysOnFlag() {
-        interruptedChargingWasAlwaysOn = false;
-    }
-
     public static synchronized boolean endAnimation(AnimationType type) {
         if (currentAnimation != type) {
             LogHelper.w(TAG, "尝试结束动画[" + type + "]，但当前是[" + currentAnimation + "]");
@@ -64,6 +69,9 @@ public final class RearChargingAnimationCoordinator {
         boolean shouldRestore = shouldRestoreOnDestroy;
         if (shouldRestore) {
             LogHelper.d(TAG, "动画[" + type + "]正常结束，需要恢复背屏");
+            if (type == AnimationType.CHARGING) {
+                markChargingProtectionWindow();
+            }
         } else {
             LogHelper.d(TAG, "动画[" + type + "]被打断结束，不恢复背屏");
         }

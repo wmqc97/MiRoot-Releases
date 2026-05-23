@@ -13,16 +13,14 @@
 
 package com.wmqc.miroot.car;
 
+import com.wmqc.miroot.display.MainDisplayUi;
 import com.wmqc.miroot.lyrics.LogHelper;
 import com.wmqc.miroot.lyrics.ITaskService;
-import com.wmqc.miroot.lyrics.RootTaskService;
 import com.wmqc.miroot.lyrics.RearScreenWakeManager;
 import android.app.IntentService;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.ServiceConnection;
-import android.os.IBinder;
+import com.wmqc.miroot.lyrics.RootTaskServiceConnector;
 import android.os.PowerManager;
 import android.widget.Toast;
 import android.os.Handler;
@@ -38,19 +36,6 @@ public class CarControlProjectionService extends IntentService {
     private ITaskService taskService;
     private PowerManager.WakeLock wakeLock;
 
-    private final ServiceConnection taskServiceConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder binder) {
-            taskService = ITaskService.Stub.asInterface(binder);
-            LogHelper.d(TAG, "✓ TaskService已连接");
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            taskService = null;
-        }
-    };
-
     public CarControlProjectionService() {
         super("CarControlProjectionService");
     }
@@ -59,9 +44,7 @@ public class CarControlProjectionService extends IntentService {
     public void onCreate() {
         super.onCreate();
         LogHelper.d(TAG, "🔵 CarControlProjectionService onCreate");
-        // 立即绑定TaskService，给onHandleIntent更多时间等待连接
-        // 注意：IntentService是单线程的，不能在这里sleep，否则会阻塞后续操作
-        bindTaskService();
+        RootTaskServiceConnector.prewarm(this);
     }
 
     @Override
@@ -80,6 +63,11 @@ public class CarControlProjectionService extends IntentService {
 
             if (CarControlIntents.isCarControlProjectionServiceAction(action)) {
                 LogHelper.d(TAG, "🚗 处理车控投屏请求（含 MiRoot / 停止专用 action）");
+
+                if (!CarControlDeviceGate.isAllowed(this)) {
+                    LogHelper.w(TAG, "设备未授权，忽略车控投屏请求");
+                    return;
+                }
 
                 if (!ensureTaskServiceConnected()) {
                     LogHelper.e(TAG, "❌ TaskService未连接");
@@ -118,54 +106,13 @@ public class CarControlProjectionService extends IntentService {
     }
 
     private boolean ensureTaskServiceConnected() {
+        taskService = RootTaskServiceConnector.ensureConnected(this, 2500L);
         if (taskService != null) {
             LogHelper.d(TAG, "✅ TaskService已连接");
             return true;
         }
-
-        try {
-            LogHelper.d(TAG, "🔄 TaskService未连接，开始绑定 RootTaskService...");
-            // onCreate中已经绑定了，如果还没连接，再绑定一次（可能onCreate中的绑定还没完成）
-            bindTaskService();
-
-            // 与 MusicProjectionService 对齐：锁屏/后台广播时 RootTaskService 绑定可能较慢
-            int attempts = 0;
-            int maxAttempts = 20;
-            while (taskService == null && attempts < maxAttempts) {
-                Thread.sleep(250);
-                attempts++;
-                if (taskService == null) {
-                    LogHelper.d(TAG, "⏳ 等待TaskService连接中... (尝试 " + attempts + "/" + maxAttempts + ")");
-                }
-            }
-
-            if (taskService != null) {
-                LogHelper.d(TAG, "✅ TaskService连接成功 (尝试 " + attempts + "/" + maxAttempts + ")");
-                return true;
-            } else {
-                LogHelper.e(TAG, "❌ TaskService连接超时 (尝试 " + attempts + "/" + maxAttempts + ")");
-                return false;
-            }
-        } catch (Exception e) {
-            LogHelper.e(TAG, "❌ TaskService重连失败", e);
-            return false;
-        }
-    }
-
-    private void bindTaskService() {
-        if (taskService != null) {
-            LogHelper.d(TAG, "ℹ️ TaskService已绑定，跳过");
-            return;
-        }
-
-        try {
-            LogHelper.d(TAG, "🔄 开始绑定 RootTaskService...");
-            Intent intent = new Intent(this, RootTaskService.class);
-            bindService(intent, taskServiceConnection, Context.BIND_AUTO_CREATE);
-            LogHelper.d(TAG, "✅ 已调用 bindService 绑定 RootTaskService，等待连接回调...");
-        } catch (Exception e) {
-            LogHelper.e(TAG, "❌ 绑定 RootTaskService 失败", e);
-        }
+        LogHelper.e(TAG, "❌ TaskService连接超时");
+        return false;
     }
 
     /**
@@ -327,7 +274,7 @@ public class CarControlProjectionService extends IntentService {
      */
     private void showToast(String message) {
         new Handler(Looper.getMainLooper()).post(() -> {
-            Toast.makeText(getApplicationContext(), message, Toast.LENGTH_SHORT).show();
+            MainDisplayUi.showToast(getApplicationContext(), message, Toast.LENGTH_SHORT);
         });
     }
 
@@ -340,15 +287,7 @@ public class CarControlProjectionService extends IntentService {
         
         super.onDestroy();
 
-        if (taskService != null) {
-            try {
-                unbindService(taskServiceConnection);
-                LogHelper.d(TAG, "✓ TaskService已解绑（RootTaskService）");
-            } catch (Exception e) {
-                LogHelper.e(TAG, "解绑TaskService失败", e);
-            }
-            taskService = null;
-        }
+        taskService = null;
         LogHelper.d(TAG, "🔵 CarControlProjectionService 已销毁");
     }
 }

@@ -45,6 +45,34 @@ object RuntimePermissionGate {
         return pm.isIgnoringBatteryOptimizations(ctx.packageName)
     }
 
+    /**
+     * 省电策略是否已放开（状态页「省电策略」行）。
+     *
+     * HyperOS / MIUI 在应用详情里设「无限制」时，有时不会同步到
+     * [isIgnoringBatteryOptimizations]，但会放开后台相关 AppOps；二者任一满足即视为已授权。
+     */
+    fun hasBatteryUnrestricted(ctx: Context): Boolean {
+        if (isIgnoringBatteryOptimizations(ctx)) return true
+        val pkg = ctx.packageName
+        val appOps = ctx.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (isAppOpExplicitlyAllowed(appOps, OPSTR_RUN_ANY_IN_BACKGROUND, pkg)) {
+                return true
+            }
+        }
+        return isAppOpExplicitlyAllowed(appOps, OPSTR_RUN_IN_BACKGROUND, pkg)
+    }
+
+    /** 优先应用详情（HyperOS 省电策略），再回落到系统「忽略电池优化」列表。 */
+    fun batteryPermissionIntents(ctx: Context): List<Intent> = listOf(
+        intentAppDetails(ctx),
+        intentIgnoreBatteryOptimizations(ctx),
+        intentBatteryOptimizationList(),
+    )
+
+    fun firstResolvableBatteryIntent(ctx: Context, pm: PackageManager): Intent? =
+        batteryPermissionIntents(ctx).firstOrNull { it.resolveActivity(pm) != null }
+
     fun isNotificationListenerEnabled(ctx: Context): Boolean {
         val flat = Settings.Secure.getString(ctx.contentResolver, "enabled_notification_listeners")
             ?: return false
@@ -215,12 +243,7 @@ object RuntimePermissionGate {
 
     private fun isAppOpAllowed(appOps: AppOpsManager, op: String, packageName: String): Boolean {
         return try {
-            val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                appOps.unsafeCheckOpNoThrow(op, Process.myUid(), packageName)
-            } else {
-                @Suppress("DEPRECATION")
-                appOps.checkOpNoThrow(op, Process.myUid(), packageName)
-            }
+            val mode = readAppOpMode(appOps, op, packageName)
             mode == AppOpsManager.MODE_ALLOWED || mode == AppOpsManager.MODE_DEFAULT
         } catch (_: Throwable) {
             // 某些 ROM 对未知 op 直接抛异常；按“未限制”处理，避免状态页崩溃。
@@ -228,6 +251,25 @@ object RuntimePermissionGate {
         }
     }
 
+    private fun isAppOpExplicitlyAllowed(appOps: AppOpsManager, op: String, packageName: String): Boolean {
+        return try {
+            readAppOpMode(appOps, op, packageName) == AppOpsManager.MODE_ALLOWED
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun readAppOpMode(appOps: AppOpsManager, op: String, packageName: String): Int {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            appOps.unsafeCheckOpNoThrow(op, Process.myUid(), packageName)
+        } else {
+            @Suppress("DEPRECATION")
+            appOps.checkOpNoThrow(op, Process.myUid(), packageName)
+        }
+    }
+
     private const val OPSTR_QUERY_ALL_PACKAGES = "android:query_all_packages"
     private const val OPSTR_MIUI_GET_INSTALLED_APPS = "android:get_installed_apps"
+    private const val OPSTR_RUN_ANY_IN_BACKGROUND = "android:run_any_in_background"
+    private const val OPSTR_RUN_IN_BACKGROUND = "android:run_in_background"
 }

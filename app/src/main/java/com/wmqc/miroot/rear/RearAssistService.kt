@@ -60,7 +60,7 @@ class RearAssistService : Service() {
             }
             shellExecutor.execute {
                 try {
-                    PrivilegedShell.runAndWait("input -d 1 keyevent KEYCODE_WAKEUP")
+                    PrivilegedShell.execCmd("input -d 1 keyevent KEYCODE_WAKEUP")
                 } catch (e: Exception) {
                     LogHelper.w(TAG, "wakeup shell failed", e)
                 }
@@ -231,14 +231,14 @@ class RearAssistService : Service() {
 
     private fun sendWakeBurst(reason: String) {
         try {
-            PrivilegedShell.runAndWait("input -d 1 keyevent KEYCODE_WAKEUP")
+            PrivilegedShell.execCmd("input -d 1 keyevent KEYCODE_WAKEUP")
         } catch (e: Exception) {
             LogHelper.w(TAG, "wake burst immediate failed ($reason)", e)
         }
         for (i in 1..WAKE_RETRY_COUNT) {
             try {
                 Thread.sleep(WAKE_RETRY_DELAY_MS * i)
-                PrivilegedShell.runAndWait("input -d 1 keyevent KEYCODE_WAKEUP")
+                PrivilegedShell.execCmd("input -d 1 keyevent KEYCODE_WAKEUP")
             } catch (_: Exception) {
                 break
             }
@@ -258,7 +258,7 @@ class RearAssistService : Service() {
     companion object {
         private const val TAG = "RearAssistService"
         private const val CHANNEL_ALWAYS_ID = "miroot_rear_always_wake"
-        private const val NOTIF_ID = 10021
+        private const val NOTIF_ID = MiRootNotificationIds.ALWAYS_WAKE_NOTIFICATION_ID
 
         const val ACTION_STOP_ALWAYS_WAKE = "com.wmqc.miroot.rear.STOP_ALWAYS_WAKE"
         const val ACTION_UI_REAR_PREFS_CHANGED = "com.wmqc.miroot.rear.UI_REAR_PREFS_CHANGED"

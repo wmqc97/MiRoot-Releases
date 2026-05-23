@@ -1,7 +1,5 @@
 package com.wmqc.miroot.ui.music
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.Service
 import android.content.ComponentName
 import android.content.Context
@@ -14,11 +12,12 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import com.wmqc.miroot.R
+import com.wmqc.miroot.charging.ChargingService
 import com.wmqc.miroot.lyrics.LogHelper
 import com.wmqc.miroot.lyrics.PrivilegeBackend
+import com.wmqc.miroot.rear.MiRootNotificationIds
+import com.wmqc.miroot.rear.RearSwitchKeeperService
 import com.wmqc.miroot.service.MiRootNotificationListenerService
 import java.lang.reflect.Method
 
@@ -33,7 +32,7 @@ class MusicAutoProjectionService : Service() {
         object : Runnable {
             override fun run() {
                 applyPlaybackProbe()
-                mainHandler.postDelayed(this, POLL_MS)
+                mainHandler.postDelayed(this, pollIntervalMs())
             }
         }
     private var sessionsListenerRegistered = false
@@ -82,27 +81,16 @@ class MusicAutoProjectionService : Service() {
 
     private fun ensureForeground() {
         try {
-            createChannel()
-            val n =
-                NotificationCompat.Builder(this, CHANNEL_ID)
-                    .setSmallIcon(R.mipmap.ic_launcher)
-                    .setContentTitle(getString(R.string.music_auto_projection_notif_title))
-                    .setContentText(getString(R.string.music_auto_projection_notif_text))
-                    .setOngoing(true)
-                    .setSilent(true)
-                    .setShowWhen(false)
-                    .setPriority(NotificationCompat.PRIORITY_MIN)
-                    .setCategory(NotificationCompat.CATEGORY_SERVICE)
-                    .build()
+            val n = RearSwitchKeeperService.createServiceNotification(this, true)
             if (Build.VERSION.SDK_INT >= 34) {
                 ServiceCompat.startForeground(
                     this,
-                    NOTIF_ID,
+                    MiRootNotificationIds.MAIN_SERVICE_NOTIFICATION_ID,
                     n,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
                 )
             } else {
-                startForeground(NOTIF_ID, n)
+                startForeground(MiRootNotificationIds.MAIN_SERVICE_NOTIFICATION_ID, n)
             }
         } catch (t: Throwable) {
             LogHelper.e(TAG, "ensureForeground failed", t)
@@ -110,22 +98,15 @@ class MusicAutoProjectionService : Service() {
         }
     }
 
-    private fun createChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val ch =
-            NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.music_auto_projection_channel_name),
-                NotificationManager.IMPORTANCE_LOW,
-            )
-        ch.setShowBadge(false)
-        ch.enableLights(false)
-        ch.enableVibration(false)
-        ch.setSound(null, null)
-        getSystemService(NotificationManager::class.java)?.createNotificationChannel(ch)
-    }
-
     private fun registerSessionsListenerOnce() {
+        if (!MusicProjectionController.isNotificationListenerEnabled(this)) {
+            LogHelper.wThrottled(
+                TAG,
+                "NotificationListener 未启用或被系统限制：跳过会话监听注册（请在权限页开启通知使用权，并检查 MIUI 自启动/后台限制）",
+                THROTTLE_MISSING_NLS_MS,
+            )
+            return
+        }
         if (sessionsListenerRegistered) return
         try {
             val msm = getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
@@ -145,8 +126,18 @@ class MusicAutoProjectionService : Service() {
                 m.invoke(msm, cn, activeSessionsListener, handler)
             }
             sessionsListenerRegistered = true
+        } catch (e: SecurityException) {
+            LogHelper.wThrottled(
+                TAG,
+                "registerSessionsListener 被拒绝（通知使用权/MIUI 后台限制？）：${LogHelper.truncateForLog(e.toString(), 180)}",
+                THROTTLE_MISSING_NLS_MS,
+            )
         } catch (e: Exception) {
-            LogHelper.w(TAG, "registerSessionsListener: ${e.message}")
+            LogHelper.wThrottled(
+                TAG,
+                "registerSessionsListener 失败：${LogHelper.truncateForLog(e.toString(), 180)}",
+                THROTTLE_MISSING_NLS_MS,
+            )
         }
     }
 
@@ -161,6 +152,9 @@ class MusicAutoProjectionService : Service() {
     }
 
     private fun rebuildControllers() {
+        if (!MusicProjectionController.isNotificationListenerEnabled(this)) {
+            return
+        }
         for (c in tracked) {
             try {
                 c.unregisterCallback(playbackCallback)
@@ -177,7 +171,12 @@ class MusicAutoProjectionService : Service() {
                 c.registerCallback(playbackCallback)
                 tracked.add(c)
             }
-        } catch (_: SecurityException) {
+        } catch (e: SecurityException) {
+            LogHelper.wThrottled(
+                TAG,
+                "rebuildControllers 被拒绝（通知使用权/MIUI 后台限制？）：${LogHelper.truncateForLog(e.toString(), 180)}",
+                THROTTLE_MISSING_NLS_MS,
+            )
         }
     }
 
@@ -200,6 +199,14 @@ class MusicAutoProjectionService : Service() {
     private fun applyPlaybackProbe() {
         if (!LyricsSettingsRepository.load(applicationContext).autoProjection) {
             stopSelf()
+            return
+        }
+        if (!MusicProjectionController.isNotificationListenerEnabled(this)) {
+            LogHelper.wThrottled(
+                TAG,
+                "NotificationListener 未启用或不可用：自动投屏暂停探测（请先开启通知使用权，并检查 MIUI 自启动/后台限制）",
+                THROTTLE_MISSING_NLS_MS,
+            )
             return
         }
         val playing = MusicProjectionController.hasAnyPlayingSession(this)
@@ -269,13 +276,19 @@ class MusicAutoProjectionService : Service() {
             }
         }
         tracked.clear()
+        val chargingRunning = ChargingService.isInstanceRunning()
         super.onDestroy()
+        try {
+            stopForeground(Service.STOP_FOREGROUND_REMOVE)
+        } catch (_: Exception) {
+        }
+        if (chargingRunning) {
+            ChargingService.refreshMainForegroundNotificationIfRunning()
+        }
     }
 
     companion object {
         private const val TAG = "MusicAutoProjectionSvc"
-        private const val NOTIF_ID = 10047
-        private const val CHANNEL_ID = "miroot_music_auto_projection"
 
         /** 确认进入播放后再投屏，减轻切歌瞬间误判 */
         private const val DELAY_START_MS = 700L
@@ -284,5 +297,11 @@ class MusicAutoProjectionService : Service() {
         private const val DELAY_STOP_MS = 3200L
 
         private const val POLL_MS = 3500L
+
+        private const val POLL_MISSING_PERMISSION_MS = 30_000L
+        private const val THROTTLE_MISSING_NLS_MS = 10 * 60 * 1000L
     }
+
+    private fun pollIntervalMs(): Long =
+        if (MusicProjectionController.isNotificationListenerEnabled(this)) POLL_MS else POLL_MISSING_PERMISSION_MS
 }

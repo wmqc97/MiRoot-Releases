@@ -43,6 +43,11 @@ public class AbyssalMirrorSensorManager implements SensorEventListener {
     private static final float FIXED_DELTA = 1.0f / 60.0f; // 固定物理帧率 60fps
     private float physicsAccumulator = 0;
     private long lastEulerLogTime = 0; // 诊断：节流输出 euler
+    private long lastDispatchTimeMs = 0;
+    private static final long DISPATCH_MIN_INTERVAL_MS = 28L;
+    private static final long DISPATCH_IDLE_INTERVAL_MS = 85L;
+    private static final float DISPATCH_DELTA_EPSILON = 0.0045f;
+    private final float[] lastDispatchedEuler = new float[]{0, 0, 0};
     
     // 回调接口
     public interface OnRotationChangedListener {
@@ -152,6 +157,10 @@ public class AbyssalMirrorSensorManager implements SensorEventListener {
         qAnchor = new float[]{0, 0, 0, 1};
         eulerDiff = new float[]{0, 0, 0};
         physicsAccumulator = 0;
+        lastDispatchTimeMs = 0;
+        lastDispatchedEuler[0] = 0f;
+        lastDispatchedEuler[1] = 0f;
+        lastDispatchedEuler[2] = 0f;
     }
     
     @Override
@@ -211,11 +220,25 @@ public class AbyssalMirrorSensorManager implements SensorEventListener {
         
         // 回调通知
         if (listener != null) {
+            long now = System.currentTimeMillis();
             float mag = Math.abs(eulerDiff[0]) + Math.abs(eulerDiff[1]) + Math.abs(eulerDiff[2]);
+            float eulerDelta = Math.abs(eulerDiff[0] - lastDispatchedEuler[0])
+                + Math.abs(eulerDiff[1] - lastDispatchedEuler[1])
+                + Math.abs(eulerDiff[2] - lastDispatchedEuler[2]);
+            long minDispatchInterval = mag < 0.08f ? DISPATCH_IDLE_INTERVAL_MS : DISPATCH_MIN_INTERVAL_MS;
+            boolean intervalReady = (now - lastDispatchTimeMs) >= minDispatchInterval;
+            boolean changedEnough = eulerDelta >= DISPATCH_DELTA_EPSILON;
+            if (!intervalReady && !changedEnough) {
+                return;
+            }
             if (mag > 0.02f && System.currentTimeMillis() - lastEulerLogTime > 600) {
                 LogHelper.d(TAG, "euler->listener: [" + eulerDiff[0] + "," + eulerDiff[1] + "," + eulerDiff[2] + "]");
                 lastEulerLogTime = System.currentTimeMillis();
             }
+            lastDispatchTimeMs = now;
+            lastDispatchedEuler[0] = eulerDiff[0];
+            lastDispatchedEuler[1] = eulerDiff[1];
+            lastDispatchedEuler[2] = eulerDiff[2];
             listener.onRotationChanged(eulerDiff);
         }
     }

@@ -25,6 +25,13 @@ public final class ChargingIntents {
     public static final String ACTION_UPDATE_CHARGING_BATTERY =
         "com.wmqc.miroot.charging.UPDATE_CHARGING_BATTERY";
 
+    /**
+     * 充电动画 task 已迁移到背屏：用于解决某些机型/时序下 {@code getDisplay()} / onConfigurationChanged 更新滞后，
+     * 导致背屏短暂黑屏（Activity 仍处在主屏透明占位阶段、未 inflate UI）。
+     */
+    public static final String ACTION_NOTIFY_CHARGING_TASK_MOVED_TO_REAR =
+        "com.wmqc.miroot.charging.NOTIFY_CHARGING_TASK_MOVED_TO_REAR";
+
     private ChargingIntents() {
     }
 }

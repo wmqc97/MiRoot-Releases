@@ -6,12 +6,20 @@ import android.content.Intent
 import com.wmqc.miroot.lyrics.LogHelper
 
 /**
- * 车控外部广播入口：投屏仅 `com.wmqc.miroot.car.ACTION_*_CAR_CONTROL_PROJECTION`；指令与查询支持 tgwgroup / MiRoot 两套 action。
+ * 车控外部广播入口：仅 [CarControlDeviceGate] 白名单设备会处理；投屏仅 `com.wmqc.miroot.car.ACTION_*_CAR_CONTROL_PROJECTION`；指令与查询支持 tgwgroup / MiRoot 两套 action。
+ *
+ * [CarControlIntents.ACTION_OPEN_CAR_CONTROL_PROJECTION] 在未带 [CarControlIntents.EXTRA_CAR_PROJECTION_OP]（或为空）时：
+ * 若车控背屏界面已在运行则停止投屏，否则启动；显式 `start`/`stop` 时仍按原语义转发。
+ * [CarControlIntents.ACTION_STOP_CAR_CONTROL_PROJECTION] 行为不变。
  */
 class CarControlBroadcastReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent == null) return
+        if (!CarControlDeviceGate.isAllowed(context)) {
+            LogHelper.w(TAG, "设备未授权，忽略车控广播")
+            return
+        }
         val action = intent.action ?: return
         LogHelper.d(TAG, "📡 收到广播: $action")
         try {
@@ -49,10 +57,15 @@ class CarControlBroadcastReceiver : BroadcastReceiver() {
     }
 
     private fun openCarControlProjection(context: Context, intent: Intent) {
+        val rawOp = intent.getStringExtra(CarControlIntents.EXTRA_CAR_PROJECTION_OP)?.trim().orEmpty()
+        if (rawOp.isEmpty() && ProjectionHelper.isCarControlProjectionUiActive()) {
+            stopCarControlProjection(context)
+            return
+        }
         val serviceIntent = Intent(context, CarControlProjectionService::class.java).apply {
             setAction(CarControlIntents.ACTION_OPEN_CAR_CONTROL_PROJECTION)
-            intent.getStringExtra(CarControlIntents.EXTRA_CAR_PROJECTION_OP)?.let { op ->
-                putExtra(CarControlIntents.EXTRA_CAR_PROJECTION_OP, op)
+            if (rawOp.isNotEmpty()) {
+                putExtra(CarControlIntents.EXTRA_CAR_PROJECTION_OP, rawOp)
             }
         }
         context.startService(serviceIntent)

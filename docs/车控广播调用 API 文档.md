@@ -14,9 +14,9 @@
 
 - **两套 Action（指令与查询任选其一；投屏仅 MiRoot）**
 
-  | 用途 | 兼容 MiRearScreenSwitcher 3.x | MiRoot 命名空间 |
-  |------|-------------------------------|-----------------|
-  | 打开/停止投屏（见 §1） | — | `com.wmqc.miroot.car.ACTION_OPEN_CAR_CONTROL_PROJECTION`（+ Extra）或 `…ACTION_STOP_CAR_CONTROL_PROJECTION` |
+  | 用途 | 历史 Action（`com.tgwgroup…` 前缀，见下文示例） | MiRoot 命名空间 |
+  |------|--------------------------------------------------|-----------------|
+  | 打开/停止投屏（见 §1） | — | `ACTION_OPEN_CAR_CONTROL_PROJECTION`：无 Extra 时**一键切换**；或带 Extra `start`/`stop`；另有 `ACTION_STOP_CAR_CONTROL_PROJECTION` 专用停止 |
   | **仅停止**投屏（见 §1） | — | `com.wmqc.miroot.car.ACTION_STOP_CAR_CONTROL_PROJECTION` |
   | 车控指令 | `…ACTION_CAR_CONTROL_COMMAND` | `com.wmqc.miroot.car.ACTION_CAR_CONTROL_COMMAND` |
   | 车控回执（默认） | `…ACTION_CAR_CONTROL_COMMAND_RESULT` | `com.wmqc.miroot.car.ACTION_CAR_CONTROL_COMMAND_RESULT`（仅作 `replyAction` 等字符串使用） |
@@ -31,7 +31,9 @@
 
 用于打开背屏的车控投屏界面（`RearScreenCarControlActivity`），或关闭车控投屏。投屏广播**仅**注册 MiRoot Action（见 `AndroidManifest` 中 `CarControlBroadcastReceiver`）。
 
-### 方式 A：统一 Action + Extra `com.wmqc.miroot.car.EXTRA_CAR_PROJECTION_OP`
+对 **`ACTION_OPEN_CAR_CONTROL_PROJECTION`**：**不传** `EXTRA_CAR_PROJECTION_OP`（或传空）时，MiRoot 根据当前背屏车控界面是否已在运行**自动在启停间切换**；传入显式 `start` / `stop` 时行为与旧版一致（固定开始或停止）。
+
+### 方式 A：统一 Action，可选 Extra `com.wmqc.miroot.car.EXTRA_CAR_PROJECTION_OP`
 
 **广播 Action**
 
@@ -41,7 +43,7 @@ com.wmqc.miroot.car.ACTION_OPEN_CAR_CONTROL_PROJECTION
 
 ### 方式 B：专用「停止」Action（无需 Extra）
 
-等价于方式 A 且 `EXTRA_CAR_PROJECTION_OP=stop`。
+等价于方式 A 且 `EXTRA_CAR_PROJECTION_OP=stop`（显式停止；与「无 Extra 一键切换」不同）。
 
 ```text
 com.wmqc.miroot.car.ACTION_STOP_CAR_CONTROL_PROJECTION
@@ -51,11 +53,19 @@ com.wmqc.miroot.car.ACTION_STOP_CAR_CONTROL_PROJECTION
 
 | 参数 | 类型 | 必填 | 说明 | 示例 |
 |------|------|------|------|------|
-| `com.wmqc.miroot.car.EXTRA_CAR_PROJECTION_OP` | string | 否 | `start`（开启）/ `stop`（关闭），默认 `start` | `start` |
+| `com.wmqc.miroot.car.EXTRA_CAR_PROJECTION_OP` | string | 否 | **省略或空**：一键切换。`start` / `stop`：显式开启或关闭 | `start` |
 
 ### 示例
 
-**开启（Java）**
+**一键切换（Java，推荐主题单按钮）**
+
+```java
+Intent intent = new Intent("com.wmqc.miroot.car.ACTION_OPEN_CAR_CONTROL_PROJECTION");
+intent.setPackage("com.wmqc.miroot");
+context.sendBroadcast(intent);
+```
+
+**显式开启（Java）**
 
 ```java
 Intent intent = new Intent("com.wmqc.miroot.car.ACTION_OPEN_CAR_CONTROL_PROJECTION");
@@ -78,7 +88,7 @@ adb shell am broadcast -a com.wmqc.miroot.car.ACTION_OPEN_CAR_CONTROL_PROJECTION
   com.wmqc.miroot
 ```
 
-更多示例见 `docs/外部广播启动投屏.md` § 三。
+更多示例见 `docs/外部广播启动投屏.md` § 四。
 
 ---
 
@@ -320,5 +330,5 @@ adb shell am broadcast -a com.wmqc.miroot.car.ACTION_QUERY_VEHICLE_STATUS \
 ## 相关文档与源码
 
 - 总览（含音乐投屏等）：[外部调API文档.md](./外部调API文档.md)
-- 主题侧 MAML 发送 / 绑定思路可参考 MiRearScreenSwitcher 仓库中的《车控主题对接说明》（Action 字符串可与本文 MiRoot / tgwgroup 两套对照使用）。
+- 主题侧 MAML 发送时 Action 与 Extra 键名请以本文 §2 / §3 为准；若沿用历史 `com.tgwgroup…` 前缀的 Action 字符串，与本表左列及代码示例中的完整名等价。
 - 源码：`CarControlIntents`、`CarControlBroadcastReceiver`、`CarControlProjectionService`、`CarControlCommandService`、`VehicleStatusQueryService`、`VehicleControlService`、`VehicleStatusService`（`buildVehicleQueryBroadcastJson` 及展示用解析工具方法）。

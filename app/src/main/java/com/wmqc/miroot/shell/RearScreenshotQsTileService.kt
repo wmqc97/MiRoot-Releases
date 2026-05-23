@@ -1,4 +1,5 @@
 package com.wmqc.miroot.shell
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.os.Build
 import android.os.Handler
@@ -37,21 +38,21 @@ class RearScreenshotQsTileService : TileService() {
                 val priv = privilegedShellAvailable()
                 if (!priv) {
                     mainHandler.post {
-                        Toast.makeText(
+                        MainDisplayUi.showToast(
                             this@RearScreenshotQsTileService,
                             R.string.privilege_shell_required,
                             Toast.LENGTH_LONG,
-                        ).show()
+                        )
                     }
                     return@thread
                 }
                 val composite = DeviceGeometry.isScreenshotShellEnabled(applicationContext)
                 RearScreenshotCoordinator.capture(applicationContext, composite) { ok, msg ->
-                    Toast.makeText(
+                    MainDisplayUi.showToast(
                         applicationContext,
                         msg,
                         if (ok) Toast.LENGTH_SHORT else Toast.LENGTH_LONG,
-                    ).show()
+                    )
                 }
             }
         }

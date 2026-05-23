@@ -1,9 +1,11 @@
 package com.wmqc.miroot.car
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import android.widget.Toast
 import java.util.concurrent.Executors
 
 /**
@@ -18,6 +20,10 @@ object CarControlEntry {
     @JvmStatic
     fun openCarControlSettingsFromFeatures(context: Context) {
         val app = context.applicationContext
+        if (!CarControlDeviceGate.isAllowed(app)) {
+            MainDisplayUi.showToast(app, "当前设备未授权使用车控", Toast.LENGTH_SHORT)
+            return
+        }
         executor.execute {
             val expired = try {
                 LoginService.isLoginExpired(app)

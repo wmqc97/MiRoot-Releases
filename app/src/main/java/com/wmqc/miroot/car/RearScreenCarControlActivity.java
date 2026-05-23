@@ -13,18 +13,26 @@
 
 package com.wmqc.miroot.car;
 
+import com.wmqc.miroot.display.MainDisplayUi;
 import com.wmqc.miroot.R;
 import com.wmqc.miroot.MainActivity;
 import com.wmqc.miroot.BottomSwipeExitHelper;
 import com.wmqc.miroot.RearDisplayInputHelper;
+import com.wmqc.miroot.charging.ChargingService;
+import com.wmqc.miroot.charging.RearChargingAnimationCoordinator;
 import com.wmqc.miroot.lyrics.LogHelper;
+import com.wmqc.miroot.lyrics.RearScreenLyricsActivity;
 import com.wmqc.miroot.lyrics.ITaskService;
 import com.wmqc.miroot.lyrics.RootTaskService;
 import com.wmqc.miroot.lyrics.RearScreenWakeManager;
 import com.wmqc.miroot.lyrics.RearScreenWakeService;
+import com.wmqc.miroot.rear.OfficialSubscreenMiRootProjectionSession;
 import com.wmqc.miroot.rear.OfficialSubscreenServiceGate;
+import com.wmqc.miroot.rear.ProjectionOngoingNotifications;
 import com.wmqc.miroot.rear.ProjectionOnlyNotificationHelper;
 import com.wmqc.miroot.rear.RearAssistPrefs;
+import com.wmqc.miroot.lyrics.RootTaskServiceConnector;
+import com.wmqc.miroot.rear.RearMirootProjectionLifecycle;
 import com.wmqc.miroot.rear.RearProjectionProximitySession;
 import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.content.res.AppCompatResources;
@@ -46,6 +54,7 @@ import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.os.Build;
 import android.os.Bundle;
@@ -133,17 +142,15 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             return;
         }
         LogHelper.d(TAG, "🛑 通知广播：在背屏结束车控投屏");
+        ProjectionOngoingNotifications.cancelAll(a.getApplicationContext());
         try {
-            a.performCleanupAndExit();
-            if (!a.isFinishing()) {
-                a.finish();
-            }
+            a.finishProjectionFromUser("notification");
         } catch (Exception e) {
             LogHelper.e(TAG, "通知结束车控投屏失败", e);
             try {
                 currentInstance = null;
                 if (!a.isFinishing()) {
-                    a.finish();
+                    a.finishProjectionTask();
                 }
             } catch (Exception e2) {
                 LogHelper.e(TAG, "强制 finish 失败", e2);
@@ -153,6 +160,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
 
     private static void bestEffortCleanupCarProjectionFromNotification(Context appContext) {
         try {
+            ProjectionOngoingNotifications.cancelAll(appContext);
             ProjectionOnlyNotificationHelper.cancelCar(appContext);
             RearScreenWakeManager.getInstance().stopWakeService(appContext, RearScreenCarControlActivity.class);
             if (!RearScreenWakeManager.getInstance().hasRegisteredActivities()) {
@@ -248,7 +256,6 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     // Handler和Runnable（用于避免内存泄漏）
     private Handler mainHandler;
     private Runnable refreshCarInfoRunnable; // 5秒延迟刷新车辆信息
-    private Runnable checkGestureRunnable; // 延迟检查手势服务
     private Runnable retryDisableGestureRunnable; // 重试屏蔽手势服务
     private Runnable retryEnableGestureRunnable; // 重试恢复手势服务
     private Runnable delayedResumeCheckRunnable; // onResume延迟检查
@@ -265,14 +272,14 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     // 双击手势检测器
     private GestureDetector gestureDetector;
 
-    /** 底部区域上滑结束投屏：按下位置在屏高最下若干比例内，或落在底部车控按钮条（ViewPager）内，且垂直上滑超过阈值 */
-    /** 条带 + 按钮条并集：背屏较矮时仅靠比例会漏掉按钮上半区域；并集后上滑仍要求 minUp，短按按钮不误触退出 */
-    private static final float BOTTOM_SWIPE_EXIT_ZONE_FRACTION = 0.18f;
-    private static final float BOTTOM_SWIPE_EXIT_MIN_UP_DP = 32f;
-    /** 垂直位移相对水平的倍数，略放宽以便底边左右角起滑仍易识别为「上滑」 */
-    private static final float BOTTOM_SWIPE_EXIT_VERTICAL_DOMINANCE = 0.85f;
+    /** 屏底窄条内左右滑结束投屏（不含车控按钮条，避免与 ViewPager 横滑翻页冲突） */
+    private static final float BOTTOM_SWIPE_EXIT_ZONE_FRACTION = 0.10f;
+    private static final float BOTTOM_SWIPE_EXIT_MIN_HORIZ_DP = 48f;
+    private static final float BOTTOM_SWIPE_EXIT_HORIZONTAL_DOMINANCE = 1.35f;
     private boolean bottomSwipeExitPointerDownInZone;
     private boolean bottomSwipeExitTriggered;
+    /** 与背屏桌面一致：手势退出已排队，忽略后续触摸直到 Activity 结束。 */
+    private boolean bottomSwipeExitPending;
     private float bottomSwipeExitStartY;
     private float bottomSwipeExitStartX;
 
@@ -294,19 +301,35 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
      */
     private static final long REAR_STOP_EXIT_GRACE_MS = 800L;
     private Runnable rearStopExitGraceRunnable;
+    private long rearStopExitGraceDeadlineElapsedMs = 0L;
+    private long rearStopExitGraceRemainingMs = 0L;
+    private boolean rearStopExitGracePausedForScreenOff;
 
     /** 主屏透明占位等待迁往背屏的最长时间（与歌词投屏一致） */
     private static final long MAIN_SCREEN_PLACEHOLDER_TIMEOUT_MS = 3500L;
     private Runnable mainScreenPlaceholderTimeoutRunnable;
 
+    /** 迁屏后轮询背屏 displayId，尽快初始化 UI 并恢复触摸/系统返回（替代固定 2500ms 盲等）。 */
+    private static final long REAR_UI_INIT_POLL_INTERVAL_MS = 40L;
+    private static final int REAR_UI_INIT_POLL_MAX_ATTEMPTS = 45;
+    private Runnable rearUiInitPollRunnable;
+    private int rearUiInitPollAttempts;
+
     /** 与既有行为一致：返回键退出投屏（仅注册一次） */
     private boolean carBackPressedCallbackRegistered;
+
+    /** 已走统一退出序列，避免重复清理。 */
+    private boolean projectionExitFlowStarted;
+    /** 对齐充电动画：MiRoot 主动结束（返回/滑退/通知），onDestroy 后再 restore 官方背屏。 */
+    private boolean finishRequestedByMiRoot;
     
     private final ServiceConnection taskServiceConnection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder binder) {
             taskService = ITaskService.Stub.asInterface(binder);
             LogHelper.d(TAG, "✓ TaskService已连接");
+            checkAndDisableOfficialGesture();
+            RearMirootProjectionLifecycle.reinforceOfficialSubscreenDisabled(getApplicationContext());
             
             // TaskService连接后，初始化缓存并应用安全区域（如果尚未初始化）
             if (!DisplayInfoCache.getInstance().isInitialized()) {
@@ -326,18 +349,6 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 }
             }
             
-            // TaskService连接后，延迟检查是否需要屏蔽官方手势服务
-            if (mainHandler != null) {
-                if (checkGestureRunnable != null) {
-                    mainHandler.removeCallbacks(checkGestureRunnable);
-                }
-                checkGestureRunnable = () -> {
-                    if (!isFinishing() && !isDestroyed()) {
-                        checkAndDisableOfficialGesture();
-                    }
-                };
-                mainHandler.postDelayed(checkGestureRunnable, 500);
-            }
         }
         
         @Override
@@ -355,6 +366,9 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         
         // 初始化Handler（复用实例，避免内存泄漏）
         mainHandler = new Handler(Looper.getMainLooper());
+        registerCarControlBackPressedCallback();
+        RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+        RootTaskServiceConnector.prewarm(this);
 
         // 立即设置窗口背景为透明（在setContentView之前，避免闪烁）
         // 这样可以确保窗口从开始就是透明的，不会显示默认背景
@@ -374,7 +388,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 performCleanupAndExit();
                 
                 // 立即销毁Activity，不使用延迟
-                finish();
+                finishProjectionTask();
             } catch (Exception e) {
                 LogHelper.e(TAG, "❌ 处理停止Intent时发生异常", e);
                 // 即使发生异常，也尝试清理资源并销毁Activity
@@ -384,14 +398,14 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                     // 强制清理
                     if (!isFinishing()) {
                         performCleanupAndExit();
-                        finish();
+                        finishProjectionTask();
                     }
                 } catch (Exception e2) {
                     LogHelper.e(TAG, "❌ 清理资源失败", e2);
                     // 最后的保障：强制清除静态实例
                     currentInstance = null;
                     try {
-                        finish();
+                        finishProjectionTask();
                     } catch (Exception e3) {
                         LogHelper.e(TAG, "❌ 强制销毁Activity失败", e3);
                     }
@@ -414,9 +428,12 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         // ✅ 如果在主屏(displayId == 0)，什么都不做，等待被移动到背屏（参考充电动画的实现）
         if (displayId == 0) {
             LogHelper.d(TAG, "💤 在主屏启动，保持透明占位符，等待移动");
+            currentInstance = this;
+            RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(
+                    this, RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_TRANSPARENT_PLACEHOLDER);
             scheduleMainScreenPlaceholderTimeout();
-            // 不设置currentInstance，因为这只是占位符，等待移动到背屏后才会真正初始化
-            return; // 不设置内容，不添加flags，只是透明占位符
+            schedulePollRearUiInitAfterMove();
+            return;
         }
         
         // 保存静态实例（只有在背屏时才保存）
@@ -426,8 +443,8 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         
         // --- 以下代码只在背屏(displayId == 1)执行 ---
         LogHelper.d(TAG, "🎯 在背屏执行，开始设置汽车控制界面");
+        RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
         
-        // 先设置窗口属性（在setContentView之前，避免闪烁）
         setupWindow();
         
         // 创建UI布局（createUI内部会调用setContentView）
@@ -459,7 +476,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     }
 
     /**
-     * 注册背屏常亮开关状态变化监听（与主界面 Flutter {@code keep_screen_on_enabled} 同源，默认开启）
+     * 注册 Flutter 侧 {@code flutter.keep_screen_on_enabled} 监听（遗留入口；功能页与投屏以 [RearAssistPrefs] 为准）。
      */
     private void registerKeepScreenOnPreferenceListener() {
         try {
@@ -468,43 +485,11 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 @Override
                 public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
                     if ("flutter.keep_screen_on_enabled".equals(key)) {
-                        // 开关状态变化，实时响应
-                        boolean keepScreenOnEnabled = sharedPreferences.getBoolean(key, true);
-                        LogHelper.d(TAG, "🔆 背屏常亮开关状态变化: " + (keepScreenOnEnabled ? "开启" : "关闭"));
-                        
-                        // 在主线程中处理
+                        LogHelper.d(TAG, "🔆 背屏常亮(Flutter)偏好变化 -> 同步 Wake 注册");
                         if (mainHandler != null) {
-                            mainHandler.post(() -> {
-                                try {
-                                    // 检查是否在背屏
-                                    int displayId = 0;
-                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                                        try {
-                                            displayId = getDisplay().getDisplayId();
-                                        } catch (Exception e) {
-                                            // 忽略错误
-                                        }
-                                    }
-                                    
-                                    if (displayId == 1 && !isFinishing() && !isDestroyed()) {
-                                        if (keepScreenOnEnabled) {
-                                            ProjectionOnlyNotificationHelper.cancelCar(RearScreenCarControlActivity.this);
-                                            RearScreenWakeManager.getInstance().startWakeService(
-                                                    getApplicationContext(),
-                                                    RearScreenCarControlActivity.class);
-                                            RearScreenWakeService.requestNotificationRefresh(RearScreenCarControlActivity.this);
-                                        } else {
-                                            RearScreenWakeManager.getInstance().stopWakeService(
-                                                    getApplicationContext(),
-                                                    RearScreenCarControlActivity.class);
-                                            ProjectionOnlyNotificationHelper.showCar(RearScreenCarControlActivity.this);
-                                        }
-                                        setupWindow();
-                                    }
-                                } catch (Exception e) {
-                                    LogHelper.e(TAG, "❌ 处理背屏常亮开关状态变化失败", e);
-                                }
-                            });
+                            mainHandler.post(RearScreenCarControlActivity.this::applyCarControlKeepScreenWakeFromPrefs);
+                        } else {
+                            new Handler(Looper.getMainLooper()).post(RearScreenCarControlActivity.this::applyCarControlKeepScreenWakeFromPrefs);
                         }
                     }
                 }
@@ -531,6 +516,13 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                             mainHandler.post(RearScreenCarControlActivity.this::updateProjectionProximitySession);
                         } else {
                             new Handler(Looper.getMainLooper()).post(RearScreenCarControlActivity.this::updateProjectionProximitySession);
+                        }
+                    } else if (RearAssistPrefs.KEY_KEEP_SCREEN_ON.equals(key)) {
+                        LogHelper.d(TAG, "🔆 背屏常亮(miroot_rear_assist)变化 -> 同步 Wake 注册");
+                        if (mainHandler != null) {
+                            mainHandler.post(RearScreenCarControlActivity.this::applyCarControlKeepScreenWakeFromPrefs);
+                        } else {
+                            new Handler(Looper.getMainLooper()).post(RearScreenCarControlActivity.this::applyCarControlKeepScreenWakeFromPrefs);
                         }
                     }
                 }
@@ -609,16 +601,11 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                         LogHelper.d(TAG, "📱 检测到屏幕关闭（双击息屏），立即重新点亮屏幕");
                         new Handler(Looper.getMainLooper()).post(() -> {
                             try {
+                                pauseRearStopExitGraceForScreenOff();
                                 if (!isFinishing() && !isDestroyed() && getWindow() != null) {
-                                    // 检查背屏常亮开关
-                                    boolean keepScreenOnEnabled = false; // 与主界面背屏常亮默认一致
-                                    try {
-                                        SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                                        keepScreenOnEnabled = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                                    } catch (Exception e) {
-                                        // 忽略错误
-                                    }
-                                    
+                                    // 检查背屏常亮开关（与功能页一致）
+                                    boolean keepScreenOnEnabled = isProjectionKeepScreenOnEnabled();
+
                                     // 将变量声明为final，以便在内部lambda中使用
                                     final boolean keepScreenOnEnabledFinal = keepScreenOnEnabled;
                                     
@@ -684,6 +671,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                                         }, 100); // 100ms延迟
                                         
                                         LogHelper.d(TAG, "✅ 已重新应用常亮flags（双击息屏后）");
+                                        ensureProjectionWakeServiceAfterScreenOff();
                                     }
                                 }
                             } catch (Exception e) {
@@ -695,16 +683,11 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                         LogHelper.d(TAG, "📱 屏幕点亮/解锁，立即重新应用常亮flags");
                         new Handler(Looper.getMainLooper()).post(() -> {
                             try {
+                                handleProjectionForegroundAfterStopGrace();
                                 if (!isFinishing() && !isDestroyed() && getWindow() != null) {
-                                    // 检查背屏常亮开关
-                                    boolean keepScreenOnEnabled = false; // 与主界面背屏常亮默认一致
-                                    try {
-                                        SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                                        keepScreenOnEnabled = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                                    } catch (Exception e) {
-                                        // 忽略错误
-                                    }
-                                    
+                                    // 检查背屏常亮开关（与功能页一致）
+                                    boolean keepScreenOnEnabled = isProjectionKeepScreenOnEnabled();
+
                                     if (keepScreenOnEnabled) {
                                         // 立即重新应用常亮flags（与未投屏时常亮实现方式一致）
                                         getWindow().addFlags(
@@ -784,6 +767,10 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
      */
     private void handleDoubleTap() {
         try {
+            if (!CarControlDeviceGate.isAllowed(this)) {
+                MainDisplayUi.showToast(this, "当前设备未授权使用车控", android.widget.Toast.LENGTH_SHORT);
+                return;
+            }
             // 检查是否已登录
             android.content.SharedPreferences prefs = getSharedPreferences("LoginPrefs", MODE_PRIVATE);
             String accessToken = prefs.getString("accessToken", "");
@@ -811,20 +798,12 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
      * 设置窗口属性（参考充电动画的实现）
      */
     private void setupWindow() {
-        // 确保窗口背景保持透明（避免闪烁和切换动画）
-        getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-        // 结束投屏等路径会临时加 FLAG_NOT_TOUCHABLE；副屏需可触摸、可聚焦才能收到系统手势
-        RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+        int opaqueBg = isCarControlNightUi() ? CAR_PROJECTION_NIGHT_BACKGROUND : 0xFF000000;
+        RearMirootProjectionLifecycle.applyRearOpaqueWindowBase(this, opaqueBg);
 
-        // 车控投屏时保持常亮（根据用户设置决定，参考音乐投屏）
-        boolean keepScreenOnEnabled = false; // 与主界面背屏常亮默认一致
-        try {
-            SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-            keepScreenOnEnabled = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-        } catch (Exception e) {
-            LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-        }
-        
+        // 车控投屏时保持常亮（与功能页「投屏常亮」一致）
+        boolean keepScreenOnEnabled = isProjectionKeepScreenOnEnabled();
+
         if (keepScreenOnEnabled) {
             // 保持常亮 + 锁屏显示 + 点亮屏幕
             getWindow().addFlags(
@@ -876,26 +855,34 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     }
     
     /**
-     * 隐藏系统 UI（全屏车控投屏）
+     * 背屏车控：仅隐藏状态栏，保留导航栏/手势 inset（与背屏桌面、音乐投屏一致），
+     * 避免沉浸式隐藏导航栏导致边缘手势需等待或与系统返回争用。
      */
+    private int hideSystemUiRetry = 0;
+
     private void hideSystemUI() {
+        RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
         View decorView = getWindow().getDecorView();
+        if (decorView.getWidth() <= 0 || decorView.getHeight() <= 0) {
+            // 迁屏/首帧阶段 decor 可能暂时为 0×0；延后一帧重试，避免 InsetsSource 警告刷屏。
+            if (hideSystemUiRetry++ < 6) {
+                decorView.postDelayed(this::hideSystemUI, 16L);
+            }
+            return;
+        }
+        hideSystemUiRetry = 0;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+ 使用新的API
             getWindow().setDecorFitsSystemWindows(false);
             android.view.WindowInsetsController controller = decorView.getWindowInsetsController();
             if (controller != null) {
-                controller.hide(android.view.WindowInsets.Type.statusBars() | android.view.WindowInsets.Type.navigationBars());
-                controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                controller.show(android.view.WindowInsets.Type.navigationBars());
+                controller.hide(android.view.WindowInsets.Type.statusBars());
+                controller.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_DEFAULT);
             }
         } else {
-            // Android 10 及以下使用旧API
-            int uiOptions = View.SYSTEM_UI_FLAG_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+            int uiOptions = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN;
             decorView.setSystemUiVisibility(uiOptions);
         }
     }
@@ -930,12 +917,70 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             mainHandler.removeCallbacks(rearStopExitGraceRunnable);
             rearStopExitGraceRunnable = null;
         }
+        rearStopExitGraceDeadlineElapsedMs = 0L;
+        rearStopExitGraceRemainingMs = 0L;
+        rearStopExitGracePausedForScreenOff = false;
+    }
+
+    private void pauseRearStopExitGraceForScreenOff() {
+        if (mainHandler == null || rearStopExitGraceRunnable == null) {
+            return;
+        }
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (rearStopExitGraceDeadlineElapsedMs > now) {
+            rearStopExitGraceRemainingMs = rearStopExitGraceDeadlineElapsedMs - now;
+        }
+        mainHandler.removeCallbacks(rearStopExitGraceRunnable);
+        rearStopExitGraceRunnable = null;
+        rearStopExitGraceDeadlineElapsedMs = 0L;
+        rearStopExitGracePausedForScreenOff = true;
+        LogHelper.d(TAG, "息屏：暂停车控退出宽限，剩余 " + rearStopExitGraceRemainingMs + "ms");
+    }
+
+    private void handleProjectionForegroundAfterStopGrace() {
+        if (rearStopExitGracePausedForScreenOff) {
+            rearStopExitGracePausedForScreenOff = false;
+            cancelRearStopExitGrace();
+            LogHelper.d(TAG, "车控已恢复可见，取消息屏期间暂停的退出宽限");
+            return;
+        }
+        cancelRearStopExitGrace();
+    }
+
+    private void ensureProjectionWakeServiceAfterScreenOff() {
+        if (!isProjectionKeepScreenOnEnabled()) {
+            return;
+        }
+        if (getDisplayIdSafe() != 1 || isFinishing()) {
+            return;
+        }
+        try {
+            RearScreenWakeManager.getInstance().startWakeService(
+                    getApplicationContext(), RearScreenCarControlActivity.class);
+            RearScreenWakeService.requestNotificationRefresh(this);
+        } catch (Exception e) {
+            LogHelper.w(TAG, "息屏后确保 RearScreenWakeService 失败", e);
+        }
     }
 
     private void scheduleRearStopExitGraceIfNeeded(String reason) {
+        if (rearStopExitGracePausedForScreenOff) {
+            LogHelper.d(TAG, reason + "：息屏暂停宽限中，跳过重新安排退出宽限");
+            return;
+        }
         cancelRearStopExitGrace();
         if (mainHandler == null || isFinishing() || isChangingConfigurations()) {
             return;
+        }
+        // 充电动画会短暂顶替车控投屏为前台；对齐 3.4：此时不触发宽限自毁/清理，
+        // 避免车控清理流程恢复官方手势/Launcher，进而把充电动画也冲掉（表现为“两边都立刻销毁”）。
+        try {
+            if (RearChargingAnimationCoordinator.getCurrentAnimation()
+                == RearChargingAnimationCoordinator.AnimationType.CHARGING) {
+                LogHelper.d(TAG, reason + "：检测到充电动画播放中，跳过背屏 onStop 宽限自毁");
+                return;
+            }
+        } catch (Throwable ignored) {
         }
         if (!hasCarMainUi()) {
             return;
@@ -945,6 +990,8 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         }
         rearStopExitGraceRunnable = () -> {
             rearStopExitGraceRunnable = null;
+            rearStopExitGraceDeadlineElapsedMs = 0L;
+            rearStopExitGraceRemainingMs = 0L;
             if (isFinishing()) {
                 return;
             }
@@ -958,11 +1005,102 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 LogHelper.e(TAG, "背屏 onStop 宽限退出清理失败", e);
             }
             if (!isFinishing()) {
-                finish();
-                overridePendingTransition(0, 0);
+                finishProjectionTask();
             }
         };
+        rearStopExitGraceDeadlineElapsedMs = android.os.SystemClock.elapsedRealtime() + REAR_STOP_EXIT_GRACE_MS;
         mainHandler.postDelayed(rearStopExitGraceRunnable, REAR_STOP_EXIT_GRACE_MS);
+    }
+
+    /**
+     * 主屏占位迁背屏后：短间隔轮询 displayId，一旦落背屏立即 {@link #initCarControlUiOnRearIfNeeded}，
+     * 避免固定延迟 + 窗口仍带 {@link WindowManager.LayoutParams#FLAG_NOT_TOUCHABLE} 导致系统边缘返回长时间无效。
+     */
+    private void schedulePollRearUiInitAfterMove() {
+        cancelRearUiInitPoll();
+        if (mainHandler == null || mainLayout != null) {
+            return;
+        }
+        rearUiInitPollAttempts = 0;
+        rearUiInitPollRunnable = this::pollRearUiInitStep;
+        mainHandler.post(rearUiInitPollRunnable);
+    }
+
+    private void cancelRearUiInitPoll() {
+        if (mainHandler != null && rearUiInitPollRunnable != null) {
+            mainHandler.removeCallbacks(rearUiInitPollRunnable);
+        }
+        rearUiInitPollRunnable = null;
+        rearUiInitPollAttempts = 0;
+    }
+
+    private void pollRearUiInitStep() {
+        rearUiInitPollRunnable = null;
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        if (mainLayout != null) {
+            return;
+        }
+        if (getDisplayIdSafe() == 1) {
+            RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
+            LogHelper.d(TAG, "迁屏轮询：已到背屏，初始化车控 UI (attempt=" + (rearUiInitPollAttempts + 1) + ")");
+            initCarControlUiOnRearIfNeeded("poll");
+            return;
+        }
+        rearUiInitPollAttempts++;
+        if (rearUiInitPollAttempts < REAR_UI_INIT_POLL_MAX_ATTEMPTS && mainHandler != null) {
+            rearUiInitPollRunnable = this::pollRearUiInitStep;
+            mainHandler.postDelayed(rearUiInitPollRunnable, REAR_UI_INIT_POLL_INTERVAL_MS);
+        } else {
+            LogHelper.w(TAG, "迁屏轮询超时仍未到背屏 (attempts=" + rearUiInitPollAttempts + ")");
+        }
+    }
+
+    /**
+     * 在背屏创建车控 UI（onCreate 直启 / 迁屏轮询 / onResume / onWindowFocusChanged 共用）。
+     *
+     * @return true 表示本次完成了初始化
+     */
+    private boolean initCarControlUiOnRearIfNeeded(String reason) {
+        if (mainLayout != null || isFinishing()) {
+            return false;
+        }
+        if (getDisplayIdSafe() != 1) {
+            return false;
+        }
+        cancelMainScreenPlaceholderTimeout();
+        cancelRearUiInitPoll();
+        LogHelper.d(TAG, "🎯 背屏初始化车控 UI (" + reason + ")");
+        currentInstance = this;
+        initialDisplayId = 1;
+        RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
+        setupWindow();
+        createUI();
+        loadCarModelImage();
+        initCarInfo();
+        setupButtons();
+        bindTaskService();
+        if (screenReceiver == null) {
+            registerScreenReceiver();
+        }
+        if (keepScreenOnPreferenceListener == null) {
+            registerKeepScreenOnPreferenceListener();
+        }
+        startCarControlWakeService();
+        android.view.View decor = getWindow() != null ? getWindow().getDecorView() : null;
+        if (decor != null) {
+            decor.post(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                RearDisplayInputHelper.ensureApplicationWindowReceivesInput(RearScreenCarControlActivity.this);
+                if (getDisplayIdSafe() == 1) {
+                    hideSystemUI();
+                }
+            });
+        }
+        return true;
     }
 
     private void scheduleMainScreenPlaceholderTimeout() {
@@ -1002,13 +1140,11 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         if (mainHandler != null) {
             mainHandler.postDelayed(() -> {
                 if (!isFinishing()) {
-                    finish();
-                    overridePendingTransition(0, 0);
+                    finishProjectionTask();
                 }
             }, 50);
         } else if (!isFinishing()) {
-            finish();
-            overridePendingTransition(0, 0);
+            finishProjectionTask();
         }
     }
 
@@ -1481,7 +1617,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             } catch (Exception e) {
                 LogHelper.e(TAG, "长按更新时间文本执行清理失败", e);
             }
-            finish();
+            finishProjectionTask();
             return true;
         });
         
@@ -1555,8 +1691,10 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         applySafeAreaPadding();
         updateCarScreenAnchoredChildMargins();
 
-        // 立即设置系统UI可见性（在setContentView之后，避免闪烁）
-        // 使用post确保decorView已创建
+        // 首帧即应用手势区策略，post 再刷一次以贴合 layout/insets 稳定后的状态
+        if (!isFinishing() && !isDestroyed()) {
+            hideSystemUI();
+        }
         getWindow().getDecorView().post(() -> {
             if (!isFinishing() && !isDestroyed()) {
                 hideSystemUI();
@@ -1572,7 +1710,6 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             });
         }
 
-        registerCarControlBackPressedCallback();
     }
 
     @Override
@@ -1582,11 +1719,56 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     }
 
     /**
-     * 背屏车控：从屏幕底部区域向上滑动结束投屏（注销常亮等与返回键一致）。
+     * 对齐 {@link com.wmqc.miroot.charging.RearScreenChargingActivity#finishFromMiRoot}：
+     * 不压黑、不在 finish 前 restore；{@link #finish()} 内唤醒背屏，官方背屏在 onDestroy 后恢复。
+     */
+    private void finishProjectionFromUser(String reason) {
+        if (projectionExitFlowStarted || isFinishing()) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed()) {
+            return;
+        }
+        projectionExitFlowStarted = true;
+        finishRequestedByMiRoot = true;
+        LogHelper.d(TAG, "🚪 车控投屏结束: " + reason);
+        ProjectionOngoingNotifications.cancelAll(getApplicationContext());
+        RearMirootProjectionLifecycle.hideWindowBeforeProjectionFinish(this);
+        // 主屏 HOME 仅在 finish() 中发送一次（避免与 finish / onDestroy restore 连发）
+        finish();
+    }
+
+    /**
+     * 充电动画覆盖层收起时：唤醒背屏并露出下层歌词（车控自身结束不走此路径）。
+     */
+    private void prepareRearDisplayBeforeGestureFinish() {
+        if (getDisplayIdSafe() != 1) {
+            return;
+        }
+        try {
+            ITaskService ts = taskService;
+            if (ts == null) {
+                ts = ChargingService.getTaskService();
+            }
+            if (ts != null) {
+                ts.executeShellCommand("input -d 1 keyevent KEYCODE_WAKEUP");
+            }
+        } catch (Exception e) {
+            LogHelper.w(TAG, "手势退出前唤醒背屏失败: " + e.getMessage());
+        }
+        try {
+            RearScreenLyricsActivity.forceShowProjectionUiAfterChargingOverlay();
+        } catch (Throwable t) {
+            LogHelper.w(TAG, "手势退出前强制歌词 UI 可见失败: " + t.getMessage());
+        }
+    }
+
+    /**
+     * 背屏车控：在屏底窄条内向左或向右滑动结束投屏（注销常亮等与返回键一致）。
      * 滑动过程中达到阈值即触发，无需等手指抬起。
      */
     private void tryTrackBottomSwipeExit(MotionEvent ev) {
-        if (getDisplayIdSafe() != 1 || isFinishing() || isCleaningUp) {
+        if (getDisplayIdSafe() != 1 || isFinishing() || isCleaningUp || bottomSwipeExitPending) {
             return;
         }
         View decor = getWindow().getDecorView();
@@ -1604,8 +1786,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
 
         if (action == MotionEvent.ACTION_DOWN && ev.getPointerCount() == 1) {
             bottomSwipeExitTriggered = false;
-            boolean inBottomStripe = h > 0 && y > h * (1f - BOTTOM_SWIPE_EXIT_ZONE_FRACTION);
-            bottomSwipeExitPointerDownInZone = inBottomStripe || isPointInButtonBarForSwipeExit(decor, x, y);
+            bottomSwipeExitPointerDownInZone = h > 0 && y > h * (1f - BOTTOM_SWIPE_EXIT_ZONE_FRACTION);
             bottomSwipeExitStartY = y;
             bottomSwipeExitStartX = x;
             return;
@@ -1630,68 +1811,25 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         }
     }
 
-    /**
-     * 车控四个按钮所在 ViewPager 区域（decor 坐标）：与底部条带做并集作为上滑起始区。
-     * 不拦截触摸；仅当 {@link #maybeFireBottomSwipeExit} 判定为明显上滑时才退出，短按/长按仍交给按钮。
-     */
-    private boolean isPointInButtonBarForSwipeExit(View decor, float decorX, float decorY) {
-        if (buttonPageContainer == null || buttonPageContainer.getVisibility() != View.VISIBLE) {
-            return false;
-        }
-        int[] loc = new int[2];
-        buttonPageContainer.getLocationOnScreen(loc);
-        int[] decorLoc = new int[2];
-        decor.getLocationOnScreen(decorLoc);
-        float left = loc[0] - decorLoc[0];
-        float top = loc[1] - decorLoc[1];
-        float right = left + buttonPageContainer.getWidth();
-        float bottom = top + buttonPageContainer.getHeight();
-        float pad = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP,
-                6f,
-                getResources().getDisplayMetrics());
-        return decorX >= left - pad
-                && decorX <= right + pad
-                && decorY >= top - pad
-                && decorY <= bottom + pad;
-    }
-
     private void maybeFireBottomSwipeExit(float endY, float endX) {
-        float upDist = bottomSwipeExitStartY - endY;
-        float horiz = Math.abs(endX - bottomSwipeExitStartX);
+        float horizDist = Math.abs(endX - bottomSwipeExitStartX);
+        float vertDist = Math.abs(endY - bottomSwipeExitStartY);
         float touchSlop = ViewConfiguration.get(this).getScaledTouchSlop();
-        if (horiz < touchSlop * 2.5f) {
-            horiz = 0f;
+        if (vertDist < touchSlop * 2.5f) {
+            vertDist = 0f;
         }
-        float minUp = TypedValue.applyDimension(
+        float minHoriz = TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP,
-                BOTTOM_SWIPE_EXIT_MIN_UP_DP,
+                BOTTOM_SWIPE_EXIT_MIN_HORIZ_DP,
                 getResources().getDisplayMetrics());
-        if (upDist < minUp || upDist < horiz * BOTTOM_SWIPE_EXIT_VERTICAL_DOMINANCE) {
+        if (horizDist < minHoriz || horizDist < vertDist * BOTTOM_SWIPE_EXIT_HORIZONTAL_DOMINANCE) {
             return;
         }
         bottomSwipeExitTriggered = true;
         bottomSwipeExitPointerDownInZone = false;
-        LogHelper.d(TAG, "👆 底部上滑结束车控投屏 (upDist=" + upDist + "px)");
-        Runnable exit = () -> {
-            if (isFinishing() || isDestroyed()) {
-                return;
-            }
-            try {
-                performCleanupAndExit();
-            } catch (Exception e) {
-                LogHelper.e(TAG, "底部上滑退出清理失败", e);
-            }
-            if (!isFinishing()) {
-                finish();
-                overridePendingTransition(0, 0);
-            }
-        };
-        if (mainHandler != null) {
-            mainHandler.post(exit);
-        } else {
-            exit.run();
-        }
+        bottomSwipeExitPending = true;
+        LogHelper.d(TAG, "👆 底部左右滑结束车控投屏 (horizDist=" + horizDist + "px)");
+        finishProjectionFromUser("bottom-swipe");
     }
 
     private void registerCarControlBackPressedCallback() {
@@ -1703,8 +1841,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             @Override
             public void handleOnBackPressed() {
                 LogHelper.d(TAG, "🔙 用户按返回键，手动退出车控投屏");
-                performCleanupAndExit();
-                finish();
+                finishProjectionFromUser("back-pressed");
             }
         });
     }
@@ -2096,7 +2233,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     }
 
     /**
-     * 加载车模：自定义路径 → assets/car/xingrui.png → {@code R.drawable.xingrui}（矢量须用 Drawable，勿 decodeResource）。
+     * 加载车模：自定义路径 → assets/car/xingrui.webp → {@code R.drawable.xingrui}（矢量须用 Drawable，勿 decodeResource）。
      */
     private void loadCarModelImage() {
         try {
@@ -2115,12 +2252,12 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 }
             }
             
-            // 如果没有自定义车模图片，优先 assets/car/xingrui.png，再 res/drawable
-            String carAssetPath = CarControlAssets.pngPath("xingrui");
+            // 如果没有自定义车模图片，优先 assets/car/xingrui.webp，再 res/drawable
+            String carAssetPath = CarControlAssets.webpPath("xingrui");
             if (CarControlAssets.exists(this, carAssetPath)) {
                 Bitmap assetBitmap = CarControlAssets.decodeBitmap(this, carAssetPath);
                 if (assetBitmap != null) {
-                    LogHelper.d(TAG, "✓ 车模图片加载成功（assets/car/xingrui.png，尺寸: " + assetBitmap.getWidth() + "x" + assetBitmap.getHeight() + "）");
+                    LogHelper.d(TAG, "✓ 车模图片加载成功（assets/car/xingrui.webp，尺寸: " + assetBitmap.getWidth() + "x" + assetBitmap.getHeight() + "）");
                     applyCarModelImageBitmap(assetBitmap);
                     return;
                 }
@@ -2187,10 +2324,10 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
      * 从assets加载车模图片（备用方案）
      */
     private void loadCarModelImageFromAssets() {
-        String carPath = CarControlAssets.pngPath("xingrui");
+        String carPath = CarControlAssets.webpPath("xingrui");
         try (InputStream is = CarControlAssets.exists(this, carPath)
                 ? getAssets().open(carPath)
-                : getAssets().open("xingrui.png")) {
+                : getAssets().open("car/xingrui.webp")) {
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inPreferredConfig = Bitmap.Config.ARGB_8888;
             options.inScaled = false;
@@ -2584,7 +2721,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                                     Intent intent = new Intent(RearScreenCarControlActivity.this, CarControlLoginActivity.class);
                                     intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
                                     startActivity(intent);
-                                    finish();
+                                    finishProjectionTask();
                                 } else {
                                     // 网络可用但登录未失效，可能是其他错误，使用默认值
                                     LogHelper.w(TAG, "⚠️ 获取车辆信息失败：网络可用但获取失败，可能是服务器错误");
@@ -3165,10 +3302,9 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     }
     
     /**
-     * 背屏常亮总开关开启时注册 {@link RearScreenWakeService}（合并通知）；关闭时仅显示「投屏」通知。
+     * 背屏常亮总开关（与 [RearAssistPrefs] / 功能页一致）开启时注册 {@link RearScreenWakeService}；关闭时仅显示「投屏」通知。
      */
-    private void startCarControlWakeService() {
-        registerRearAssistProximityPreferenceListener();
+    private void applyCarControlKeepScreenWakeFromPrefs() {
         int displayId = 0;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             try {
@@ -3177,13 +3313,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 LogHelper.e(TAG, "获取displayId失败", e);
             }
         }
-        boolean keepOn = true;
-        try {
-            SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-            keepOn = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-        } catch (Exception e) {
-            LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-        }
+        boolean keepOn = RearAssistPrefs.INSTANCE.isKeepScreenOnEnabled(this);
         if (displayId == 1 && mainLayout != null && !isFinishing()) {
             try {
                 if (keepOn) {
@@ -3204,7 +3334,18 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         } else {
             LogHelper.d(TAG, "⏸️ 未注册背屏前台服务 (displayId=" + displayId + ", mainLayout=" + (mainLayout != null) + ", isFinishing=" + isFinishing() + ")");
         }
+        if (displayId == 1 && mainLayout != null && !isFinishing() && !isDestroyed()) {
+            setupWindow();
+        }
         updateProjectionProximitySession();
+    }
+
+    /**
+     * 背屏常亮总开关开启时注册 {@link RearScreenWakeService}（合并通知）；关闭时仅显示「投屏」通知。
+     */
+    private void startCarControlWakeService() {
+        registerRearAssistProximityPreferenceListener();
+        applyCarControlKeepScreenWakeFromPrefs();
     }
     
     /**
@@ -3232,14 +3373,16 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         stopCarControlWakeService(false);
     }
 
+    /** 功能页「投屏常亮」与 [RearAssistPrefs] 一致（手势/广播/按钮入口共用）。 */
+    private boolean isProjectionKeepScreenOnEnabled() {
+        return RearAssistPrefs.INSTANCE.isKeepScreenOnEnabled(this);
+    }
+
     /**
-     * 检查并屏蔽官方手势服务：仅当功能页「禁用官方背屏服务」总开关开启（与音乐投屏一致）。
+     * 与 3.4 / {@link com.wmqc.miroot.car.ProjectionHelper} 一致：TaskService 就绪后再次
+     * {@link #disableOfficialGesture()}（Session 已在投屏启动时禁用一次）。
      */
     private void checkAndDisableOfficialGesture() {
-        if (!OfficialSubscreenServiceGate.isDisableEnabled(this)) {
-            LogHelper.d(TAG, "「禁用官方背屏服务」未开启，跳过屏蔽官方手势服务");
-            return;
-        }
         disableOfficialGesture();
     }
     
@@ -3252,8 +3395,12 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             return;
         }
         
-        if (taskService == null) {
-            LogHelper.w(TAG, "⚠️ TaskService未连接，无法屏蔽官方手势服务，延迟500ms后重试");
+        ITaskService ts = taskService;
+        if (ts == null) {
+            ts = RootTaskServiceConnector.getIfConnected();
+        }
+        if (ts == null) {
+            LogHelper.w(TAG, "⚠️ TaskService未连接，无法屏蔽官方手势服务，延迟200ms后重试");
             // 延迟重试
             if (mainHandler != null) {
                 if (retryDisableGestureRunnable != null) {
@@ -3269,7 +3416,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                         }
                     }
                 };
-                mainHandler.postDelayed(retryDisableGestureRunnable, 500);
+                mainHandler.postDelayed(retryDisableGestureRunnable, 200);
             }
             return;
         }
@@ -3283,9 +3430,12 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         try {
             LogHelper.d(TAG, "🚫 开始屏蔽官方手势服务（com.xiaomi.subscreencenter）");
             // 使用disableSubScreenLauncher方法
-            boolean success = taskService.disableSubScreenLauncher();
+            boolean success = ts.disableSubScreenLauncher();
             if (success) {
                 isOfficialGestureDisabled = true;
+                if (taskService == null) {
+                    taskService = ts;
+                }
                 LogHelper.d(TAG, "✅ 已屏蔽官方手势服务（com.xiaomi.subscreencenter）");
                 
                 // 验证是否成功（延迟检查进程是否还在运行）
@@ -3406,46 +3556,20 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     }
     
     /**
-     * 显示Toast提示
-     */
-    /**
-     * 显示Toast（只显示文本，不显示图标）
+     * 在主屏显示 Toast（背屏车控界面不占用背屏提示）。
      */
     private void showToast(String message) {
         if (mainHandler == null) {
-            return; // Handler未初始化，无法显示Toast
+            return;
         }
-        
         mainHandler.post(() -> {
-            // 检查Activity状态，避免在Activity销毁后显示Toast
             if (isFinishing() || isDestroyed()) {
                 LogHelper.d(TAG, "⚠️ Activity已销毁，跳过显示Toast: " + message);
                 return;
             }
-            
             try {
-                // 使用自定义TextView创建Toast，去掉图标，只显示文本
-                TextView textView = new TextView(this);
-                textView.setText(message);
-                textView.setTextColor(0xFFFFFFFF); // 白色文字
-                textView.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14);
-                textView.setPadding(32, 16, 32, 16); // 设置内边距
-                textView.setGravity(Gravity.CENTER); // 文字居中
-                
-                // 设置圆角背景（半透明黑色）
-                GradientDrawable background = new GradientDrawable();
-                background.setColor(0xE6000000); // 半透明黑色
-                background.setCornerRadius(8); // 圆角
-                textView.setBackground(background);
-                
-                // 使用自定义视图创建Toast（去掉图标）
-                Toast toast = new Toast(this);
-                toast.setView(textView);
-                toast.setDuration(Toast.LENGTH_SHORT);
-                toast.setGravity(Gravity.CENTER, 0, 0); // 居中显示
-                toast.show();
+                MainDisplayUi.showToast(this, message, Toast.LENGTH_SHORT);
             } catch (Exception e) {
-                // 捕获异常，避免崩溃（例如Activity已销毁但Handler消息还在队列中）
                 LogHelper.w(TAG, "⚠️ 显示Toast失败: " + e.getMessage());
             }
         });
@@ -3464,7 +3588,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 performCleanupAndExit();
                 
                 // 直接销毁Activity，避免在主屏显示
-                finish();
+                finishProjectionTask();
                 // 确保立即返回，不执行后续代码
                 return;
             } catch (Exception e) {
@@ -3476,14 +3600,14 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                     // 强制清理
                     if (!isFinishing()) {
                         performCleanupAndExit();
-                        finish();
+                        finishProjectionTask();
                     }
                 } catch (Exception e2) {
                     LogHelper.e(TAG, "❌ 销毁Activity时发生异常", e2);
                     // 最后的保障：强制清除静态实例
                     currentInstance = null;
                     try {
-                        finish();
+                        finishProjectionTask();
                     } catch (Exception e3) {
                         LogHelper.e(TAG, "❌ 强制销毁Activity失败", e3);
                     }
@@ -3496,48 +3620,20 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     @Override
     protected void onResume() {
         super.onResume();
-        cancelRearStopExitGrace();
+        handleProjectionForegroundAfterStopGrace();
         LogHelper.d(TAG, "🔵 onResume");
         
         // 检查是否是停止车控投屏的Intent，或者Activity正在finishing
-        if (isFinishing()) {
-            LogHelper.d(TAG, "🛑 Activity正在finishing，跳过onResume后续逻辑");
+        if (RearMirootProjectionLifecycle.shouldSkipProjectionResume(
+                isFinishing(), projectionExitFlowStarted, finishRequestedByMiRoot)) {
+            LogHelper.d(TAG, "🛑 投屏结束中，跳过 onResume 后续逻辑");
             return;
         }
         
         if (getIntent() != null && "ACTION_STOP_CAR_CONTROL".equals(getIntent().getAction())) {
-            LogHelper.d(TAG, "🛑 onResume中收到结束投屏请求，立即销毁Activity");
-            try {
-                // 使用统一的清理方法
-                performCleanupAndExit();
-                
-                // 销毁Activity
-                finish();
-                // 确保立即返回，不执行后续代码
-                return;
-            } catch (Exception e) {
-                LogHelper.e(TAG, "❌ 处理结束投屏请求时发生异常", e);
-                // 即使发生异常，也尝试清理资源并销毁Activity
-                try {
-                    // 确保静态实例被清除
-                    currentInstance = null;
-                    // 强制清理
-                    if (!isFinishing()) {
-                        performCleanupAndExit();
-                        finish();
-                    }
-                } catch (Exception e2) {
-                    LogHelper.e(TAG, "❌ 销毁Activity时发生异常", e2);
-                    // 最后的保障：强制清除静态实例
-                    currentInstance = null;
-                    try {
-                        finish();
-                    } catch (Exception e3) {
-                        LogHelper.e(TAG, "❌ 强制销毁Activity失败", e3);
-                    }
-                }
-                return;
-            }
+            LogHelper.d(TAG, "🛑 onResume中收到结束投屏请求");
+            finishProjectionFromUser("onResume-stop-intent");
+            return;
         }
 
         if (getDisplayIdSafe() == 1) {
@@ -3545,6 +3641,11 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         }
         if (finishIfIllegalCarProjectionSurface("onResume")) {
             return;
+        }
+
+        RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+        if (getDisplayIdSafe() == 1) {
+            RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
         }
         
         // 重新设置Display Cutout模式（防止切换画面时摄像头区域黑屏）
@@ -3555,18 +3656,22 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             getWindow().setAttributes(params);
         }
         
-        // 只在必要时重新设置系统 UI（避免重复设置导致闪烁；与基线一致）
-        View decorViewResume = getWindow().getDecorView();
-        if (decorViewResume != null) {
-            int currentVisibility = decorViewResume.getSystemUiVisibility();
-            int targetVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
-            if (currentVisibility != targetVisibility) {
-                decorViewResume.setSystemUiVisibility(targetVisibility);
+        // API 30+ 必须用 WindowInsetsController，勿再用 systemUiVisibility 拉沉浸式，否则会盖掉「保留手势区」策略
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (getDisplayIdSafe() == 1 && !isFinishing() && !isDestroyed()) {
+                RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+                hideSystemUI();
+            }
+        } else {
+            View decorViewResume = getWindow().getDecorView();
+            if (decorViewResume != null && getDisplayIdSafe() == 1) {
+                int currentVisibility = decorViewResume.getSystemUiVisibility();
+                int targetVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN;
+                if (currentVisibility != targetVisibility) {
+                    decorViewResume.setSystemUiVisibility(targetVisibility);
+                }
             }
         }
 
@@ -3579,141 +3684,24 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             }
         }
 
-        // 如果UI未创建且在主屏，可能是正在从主屏移动到背屏，等待一下再检查
-        if (displayId == 0 && mainLayout == null) {
-            LogHelper.d(TAG, "⏳ onResume时在主屏且UI未创建，可能是正在移动中，延迟检查");
-            // 延迟2500ms后再次检查displayId（给ProjectionHelper足够时间完成移动操作）
-            // ProjectionHelper最多需要1800ms获取taskId + 100ms移动 + 缓冲 = 2500ms
-            if (mainHandler != null) {
-                if (delayedResumeCheckRunnable != null) {
-                    mainHandler.removeCallbacks(delayedResumeCheckRunnable);
-                }
-                delayedResumeCheckRunnable = () -> {
-                if (isFinishing()) {
-                    return;
-                }
-                int delayedDisplayId = 0;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    try {
-                        delayedDisplayId = getDisplay().getDisplayId();
-                    } catch (Exception e) {
-                        LogHelper.e(TAG, "延迟检查时获取displayId失败", e);
-                    }
-                }
-                LogHelper.d(TAG, "⏳ 延迟检查后displayId=" + delayedDisplayId + ", mainLayout=" + (mainLayout != null));
-                
-                // 如果移动到背屏了，初始化UI
-                if (delayedDisplayId == 1 && mainLayout == null) {
-                    LogHelper.d(TAG, "🎯 延迟检查：已移动到背屏，开始初始化UI");
-                    cancelMainScreenPlaceholderTimeout();
-                    // 记录首次成功创建UI时所在的displayId，后续如果被系统移动到其他屏幕就主动销毁
-                    initialDisplayId = delayedDisplayId;
-                    currentInstance = this;
-                    setupWindow();
-                    createUI();
-                    loadCarModelImage();
-                    initCarInfo();
-                    setupButtons();
-                    bindTaskService();
-                    startCarControlWakeService();
-                } else if (delayedDisplayId == 0) {
-                    // 如果还在主屏，销毁Activity（说明移动操作失败或超时）
-                    LogHelper.w(TAG, "⚠️ 延迟检查后仍在主屏，清理资源并销毁Activity");
-                    try {
-                        getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-                        getWindow().setFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, 
-                            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
-                        performCleanupAndExit();
-                        if (mainHandler != null) {
-                            mainHandler.postDelayed(() -> {
-                                if (!isFinishing()) {
-                                    finish();
-                                }
-                            }, 50);
-                        }
-                    } catch (Exception e) {
-                        LogHelper.e(TAG, "❌ 延迟检查后处理主屏异常情况时发生异常", e);
-                    }
-                }
-                };
-                mainHandler.postDelayed(delayedResumeCheckRunnable, 2500); // 增加到2500ms，给ProjectionHelper足够时间完成移动操作
-            }
-            return; // 先返回，等待延迟检查结果
-        }
-        
-        // 如果在主屏且UI已创建，这是异常情况，应该清理并销毁Activity（与按钮启动的流程一致）
-        if (displayId == 0) {
-            LogHelper.w(TAG, "⚠️ onResume时在主屏（异常情况），清理资源并销毁Activity");
-            try {
-                // 先设置窗口为透明，避免销毁时闪烁
-                getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-                // 立即隐藏窗口，避免显示内容
-                getWindow().setFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE, 
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE);
-                
-                // 使用统一的清理方法
-                performCleanupAndExit();
-                
-                // 销毁Activity（延迟一点，确保窗口属性已设置）
-                if (mainHandler != null) {
-                    mainHandler.postDelayed(() -> {
-                        if (!isFinishing()) {
-                            finish();
-                        }
-                    }, 50);
-                }
-            } catch (Exception e) {
-                LogHelper.e(TAG, "❌ 处理主屏异常情况时发生异常", e);
-                // 即使发生异常，也尝试清理资源并销毁Activity
-                try {
-                    currentInstance = null;
-                    stopCarControlWakeService();
-                    cleanupWindow();
-                    enableOfficialGesture();
-                    restoreOfficialLauncher();
-                    if (taskService != null) {
-                        try {
-                            unbindService(taskServiceConnection);
-                        } catch (Exception ignored) {}
-                        taskService = null;
-                    }
-                    if (!isFinishing()) {
-                        finish();
-                    }
-                } catch (Exception e2) {
-                    LogHelper.e(TAG, "❌ 清理资源失败", e2);
-                }
+        int mainDisplayMode = RearMirootProjectionLifecycle.resolveMainDisplayProjectionMode(
+                displayId, false, mainLayout != null);
+        if (RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainDisplayMode)) {
+            if (mainDisplayMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
+                LogHelper.w(TAG, "⚠️ 主屏禁止展示车控 UI，结束投屏");
+                finishProjectionFromUser("main-display-no-ui-allowed");
+            } else if (mainLayout == null) {
+                LogHelper.d(TAG, "⏳ onResume 主屏透明占位，轮询迁背屏");
+                schedulePollRearUiInitAfterMove();
             }
             return;
         }
-        
+
         // 只有在背屏时才继续执行
         if (displayId == 1 && !isFinishing()) {
             cancelMainScreenPlaceholderTimeout();
-            // 检查UI是否已创建（如果Activity在主屏启动时没有创建UI，移动到背屏后需要初始化）
             if (mainLayout == null) {
-                LogHelper.d(TAG, "🎯 在背屏但UI未创建，开始初始化UI（从主屏移动过来）");
-                
-                // 保存静态实例
-                currentInstance = this;
-                
-                // 先设置窗口属性（在setContentView之前，避免闪烁）
-                setupWindow();
-                
-                // 创建UI布局（createUI内部会调用setContentView）
-                createUI();
-                
-                // 加载车模图片
-                loadCarModelImage();
-                
-                // 初始化车辆信息
-                initCarInfo();
-                
-                // 设置按钮点击事件
-                setupButtons();
-                
-                // 绑定TaskService（用于屏蔽/恢复官方手势服务）
-                bindTaskService();
+                initCarControlUiOnRearIfNeeded("onResume");
             } else {
                 // UI已创建，重新应用常亮flags（确保屏幕不会熄灭）
                 // 与未投放应用时的实现方式一致
@@ -3733,37 +3721,16 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             
             // 启动汽车控制背屏常亮服务（根据设置决定是否启动）
             startCarControlWakeService();
-            
-            // 投屏显示正确后，延迟检查是否需要屏蔽官方手势服务（确保TaskService已连接）
-            if (mainHandler != null) {
-                if (checkGestureRunnable != null) {
-                    mainHandler.removeCallbacks(checkGestureRunnable);
-                }
-                checkGestureRunnable = () -> {
-                    if (!isFinishing() && !isDestroyed()) {
-                        checkAndDisableOfficialGesture();
-                    }
-                };
-                mainHandler.postDelayed(checkGestureRunnable, 500);
-            }
         } else if (displayId != 1) {
-            // 不在背屏（其他displayId），也清理并销毁
-            LogHelper.w(TAG, "⚠️ onResume时不在背屏（displayId=" + displayId + "），清理资源并销毁Activity");
+            LogHelper.w(TAG, "⚠️ onResume时不在背屏（displayId=" + displayId + "），结束投屏");
             try {
-                performCleanupAndExit();
-                if (mainHandler != null) {
-                    mainHandler.postDelayed(() -> {
-                        if (!isFinishing()) {
-                            finish();
-                        }
-                    }, 50);
-                }
+                finishProjectionFromUser("onResume-not-on-rear");
             } catch (Exception e) {
                 LogHelper.e(TAG, "❌ 处理异常情况时发生异常", e);
                 currentInstance = null;
                 try {
                     if (!isFinishing()) {
-                        finish();
+                        finishProjectionTask();
                     }
                 } catch (Exception e2) {
                     LogHelper.e(TAG, "❌ 强制销毁Activity失败", e2);
@@ -3776,8 +3743,11 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     @Override
     protected void onStart() {
         super.onStart();
-        cancelRearStopExitGrace();
-        // 在onStart中再次禁用动画，确保动画被完全禁用
+        handleProjectionForegroundAfterStopGrace();
+        RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+        if (getDisplayIdSafe() == 1) {
+            RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
+        }
         overridePendingTransition(0, 0);
     }
     
@@ -3799,15 +3769,9 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             }
             
             if (!isFinishing() && displayId == 1 && getWindow() != null) {
-                // 检查背屏常亮开关
-                boolean keepScreenOnEnabledPause = false; // 与主界面背屏常亮默认一致
-                try {
-                    SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                    keepScreenOnEnabledPause = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                } catch (Exception e) {
-                    LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-                }
-                
+                // 检查背屏常亮开关（与功能页一致）
+                boolean keepScreenOnEnabledPause = isProjectionKeepScreenOnEnabled();
+
                 if (keepScreenOnEnabledPause) {
                     // 重新应用常亮flags，防止系统在onPause时清除（与未投屏时常亮实现方式一致）
                     getWindow().addFlags(
@@ -3866,22 +3830,14 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 LogHelper.e(TAG, "❌ onStop中执行清理时发生异常", e);
             }
             if (!isFinishing()) {
-                finish();
-                // 去掉转场动画，避免任何闪烁
-                overridePendingTransition(0, 0);
+                finishProjectionTask();
             }
         } else {
             // 仍在初始显示屏上（通常是背屏），保持原有行为：根据开关状态维持常亮flags
             try {
                 if (getWindow() != null) {
-                    boolean keepScreenOnEnabledStop = false; // 与主界面背屏常亮默认一致
-                    try {
-                        SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                        keepScreenOnEnabledStop = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                    } catch (Exception e) {
-                        LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-                    }
-                    
+                    boolean keepScreenOnEnabledStop = isProjectionKeepScreenOnEnabled();
+
                     if (keepScreenOnEnabledStop) {
                         getWindow().addFlags(
                             WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
@@ -3922,14 +3878,8 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             }
             
             if (!isFinishing() && displayId == 1 && getWindow() != null) {
-                boolean keepScreenOnEnabled = false; // 与主界面背屏常亮默认一致
-                try {
-                    SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                    keepScreenOnEnabled = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                } catch (Exception e) {
-                    // 忽略错误
-                }
-                
+                boolean keepScreenOnEnabled = isProjectionKeepScreenOnEnabled();
+
                 if (keepScreenOnEnabled) {
                     // 重新应用常亮flags（与未投屏时常亮实现方式一致）
                     getWindow().addFlags(
@@ -3958,6 +3908,13 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         if (hasFocus) {
             cancelRearStopExitGrace();
         }
+
+        // 与背屏桌面/歌词一致：获焦时清除 NOT_TOUCHABLE，否则系统边缘返回长时间无响应
+        if (hasFocus && !isFinishing() && !isDestroyed() && getDisplayIdSafe() == 1) {
+            RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+            RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
+            hideSystemUI();
+        }
         
         // 如果窗口获得焦点，重新设置Display Cutout模式和常亮flags（防止切换画面时摄像头区域黑屏和屏幕熄灭）
         if (hasFocus && !isFinishing()) {
@@ -3973,15 +3930,9 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             
             // 在背屏时重新应用常亮flags（确保屏幕不会熄灭，防止双击息屏）
             if (displayId == 1) {
-                // 检查背屏常亮开关
-                boolean keepScreenOnEnabledFocus = false; // 与主界面背屏常亮默认一致
-                try {
-                    SharedPreferences prefs = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE);
-                    keepScreenOnEnabledFocus = prefs.getBoolean("flutter.keep_screen_on_enabled", true);
-                } catch (Exception e) {
-                    LogHelper.w(TAG, "读取背屏常亮设置失败，使用默认值", e);
-                }
-                
+                // 检查背屏常亮开关（与功能页一致）
+                boolean keepScreenOnEnabledFocus = isProjectionKeepScreenOnEnabled();
+
                 if (keepScreenOnEnabledFocus) {
                     // 立即重新应用常亮flags（与未投放应用时的实现方式一致）
                     getWindow().addFlags(
@@ -4039,34 +3990,8 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 }
             }
             
-            // 如果在背屏但UI未创建，初始化UI
             if (displayId == 1 && mainLayout == null) {
-                LogHelper.d(TAG, "🎯 onWindowFocusChanged: 在背屏但UI未创建，开始初始化UI");
-                cancelMainScreenPlaceholderTimeout();
-                
-                // 保存静态实例
-                currentInstance = this;
-                
-                // 先设置窗口属性（在setContentView之前，避免闪烁）
-                setupWindow();
-                
-                // 创建UI布局（createUI内部会调用setContentView）
-                createUI();
-                
-                // 加载车模图片
-                loadCarModelImage();
-                
-                // 初始化车辆信息
-                initCarInfo();
-                
-                // 设置按钮点击事件
-                setupButtons();
-                
-                // 绑定TaskService（用于屏蔽/恢复官方手势服务）
-                bindTaskService();
-                
-                // 启动汽车控制背屏常亮服务
-                startCarControlWakeService();
+                initCarControlUiOnRearIfNeeded("onWindowFocusChanged");
             }
         }
     }
@@ -4075,93 +4000,122 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
      * 执行清理并退出（统一处理所有退出场景）
      */
     private void performCleanupAndExit() {
-        // 防止重复清理导致二次动画；但若上次清理在设置 isCleaningUp 后异常中断，仍须注销常亮
+        performProjectionResourceCleanup(true);
+    }
+
+    /**
+     * 资源清理；用户手势/返回退出时由 {@link #onDestroy()} 调用，不在 finish 前执行以免黑屏停留。
+     *
+     * @param restoreOfficial 是否同步恢复官方背屏（异常/非统一退出路径）
+     */
+    private void performProjectionResourceCleanup(boolean restoreOfficial) {
         if (isCleaningUp) {
             LogHelper.d(TAG, "⚠️ 清理已在进行中，仍尝试注销背屏常亮");
             stopCarControlWakeService(true);
             releaseProjectionProximitySession();
             return;
         }
-        
+
         isCleaningUp = true;
         cancelMainScreenPlaceholderTimeout();
+        cancelRearUiInitPoll();
         cancelRearStopExitGrace();
-        
+        if (mainHandler != null) {
+            mainHandler.removeCallbacksAndMessages(null);
+        }
+
         try {
-            LogHelper.d(TAG, "🧹 开始执行清理并退出");
-            
-            // 首先清除静态实例，避免被其他逻辑重新使用
+            LogHelper.d(TAG, "🧹 车控资源清理 (restoreOfficial=" + restoreOfficial + ")");
+
             if (currentInstance == this) {
                 currentInstance = null;
-                LogHelper.d(TAG, "✅ 已清除静态实例");
             } else if (currentInstance != null) {
-                // 如果静态实例不是当前实例，也清除（可能是旧的实例）
-                LogHelper.w(TAG, "⚠️ 检测到静态实例不是当前实例，强制清除");
                 currentInstance = null;
             }
-            
-            // 注销屏幕关闭监听
+
             if (screenReceiver != null) {
                 try {
                     unregisterReceiver(screenReceiver);
                     screenReceiver = null;
-                    LogHelper.d(TAG, "✅ 已注销屏幕关闭监听");
                 } catch (Exception e) {
                     LogHelper.w(TAG, "注销屏幕关闭监听失败", e);
                 }
             }
-            
-            // 清理窗口资源（清除窗口标志和属性，恢复系统UI可见性）
-            cleanupWindow();
-            
-            // 恢复官方手势服务（如果已屏蔽）
-            // 注意：Launcher恢复改为在onDestroy中延迟执行，确保平滑切换
-            enableOfficialGesture();
-            
-            // 注意：恢复官方Launcher现在在onDestroy中延迟执行，确保Activity完全销毁后再恢复，避免显示切换动画
-            
-            // 解绑TaskService（在恢复官方服务之后）
+
+            if (!projectionExitFlowStarted) {
+                cleanupWindow(false);
+            }
+
+            if (restoreOfficial && !finishRequestedByMiRoot) {
+                ITaskService tsSnapshot = taskService;
+                try {
+                    OfficialSubscreenMiRootProjectionSession.release(getApplicationContext(), tsSnapshot);
+                } catch (Exception e) {
+                    LogHelper.w(TAG, "恢复官方背屏服务（Session）失败", e);
+                }
+            }
+
             if (taskService != null) {
                 try {
                     unbindService(taskServiceConnection);
-                    LogHelper.d(TAG, "✓ TaskService已解绑");
                 } catch (Exception e) {
                     LogHelper.e(TAG, "解绑TaskService失败", e);
                 }
                 taskService = null;
-            } else {
-                // TaskService未连接时，尝试重新绑定并恢复服务
-                LogHelper.w(TAG, "⚠️ TaskService未连接，尝试重新绑定并恢复服务");
-                bindTaskService();
-                // 延迟后再次尝试恢复
-                if (mainHandler != null) {
-                    mainHandler.postDelayed(() -> {
-                        if (!isFinishing() && !isDestroyed()) {
-                            enableOfficialGesture();
-                            // 注意：恢复官方Launcher现在在onDestroy中延迟执行，避免显示切换动画
-                        }
-                    }, 300);
-                }
             }
-            
-            LogHelper.d(TAG, "✅ 清理并退出完成");
         } catch (Exception e) {
-            LogHelper.e(TAG, "❌ 执行清理并退出时发生异常", e);
-            // 即使发生异常，也确保静态实例被清除
+            LogHelper.e(TAG, "❌ 车控资源清理异常", e);
             currentInstance = null;
         } finally {
             stopCarControlWakeService(true);
             releaseProjectionProximitySession();
         }
-        // 注意：不重置 isCleaningUp 标志，防止 onDestroy() 中重复调用导致二次动画
-        // Activity 即将销毁，不需要重置标志
     }
     
     @Override
     public void finish() {
+        if (finishRequestedByMiRoot || projectionExitFlowStarted) {
+            RearMirootProjectionLifecycle.hideWindowBeforeProjectionFinish(this);
+            RearMirootProjectionLifecycle.sendMainDisplayHomeBeforeProjectionEnd(taskService);
+            RearMirootProjectionLifecycle.prepareRearDisplayBeforeFinish(getDisplayIdSafe(), taskService);
+            if (initialDisplayId == 1 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                if (Build.VERSION.SDK_INT >= 34) {
+                    try {
+                        overrideActivityTransition(Activity.OVERRIDE_TRANSITION_CLOSE, 0, 0);
+                    } catch (Exception ignored) {
+                    }
+                }
+                finishAndRemoveTask();
+                overridePendingTransition(0, 0);
+                return;
+            }
+        }
         super.finish();
-        // 禁用转场动画（去掉背屏切换界面的动画）
         overridePendingTransition(0, 0);
+    }
+
+    /** 异常/门禁路径可 finishAndRemoveTask；用户主动结束走 {@link #finish()}。 */
+    private void finishProjectionTask() {
+        if (finishRequestedByMiRoot || projectionExitFlowStarted) {
+            finish();
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 34) {
+            try {
+                overrideActivityTransition(Activity.OVERRIDE_TRANSITION_CLOSE, 0, 0);
+            } catch (Exception ignored) {
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try {
+                finishAndRemoveTask();
+                overridePendingTransition(0, 0);
+                return;
+            } catch (RuntimeException e) {
+                LogHelper.w(TAG, "finishAndRemoveTask 失败，回退 finish: " + e.getMessage());
+            }
+        }
+        finish();
     }
     
     @Override
@@ -4182,22 +4136,22 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         // 尽早注销常亮，避免后续 performCleanupAndExit 因 isCleaningUp 早退而漏掉 stopWakeService
         stopCarControlWakeService(true);
         
-        // 在销毁前确保窗口背景为透明，避免显示灰色背景
-        try {
-            if (getWindow() != null) {
-                getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-                View decorView = getWindow().getDecorView();
-                if (decorView != null) {
-                    decorView.setBackgroundColor(0x00000000);
+        // 用户主动结束保持不透明底直至销毁；仅异常路径透明兜底。
+        if (!finishRequestedByMiRoot && !projectionExitFlowStarted) {
+            try {
+                if (getWindow() != null) {
+                    View decorView = getWindow().getDecorView();
+                    getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+                    if (decorView != null) {
+                        decorView.setBackgroundColor(0x00000000);
+                    }
+                    if (mainLayout != null) {
+                        mainLayout.setVisibility(View.GONE);
+                    }
                 }
-                // 隐藏主布局（如果存在）
-                if (mainLayout != null) {
-                    mainLayout.setVisibility(View.GONE);
-                }
-                LogHelper.d(TAG, "✅ 已在onDestroy中设置窗口背景为透明");
+            } catch (Exception e) {
+                LogHelper.w(TAG, "⚠️ onDestroy 窗口透明化失败", e);
             }
-        } catch (Exception e) {
-            LogHelper.w(TAG, "⚠️ 在onDestroy中设置窗口背景透明失败", e);
         }
         
         // 清理所有Handler的Runnable，避免内存泄漏
@@ -4205,10 +4159,6 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             if (refreshCarInfoRunnable != null) {
                 mainHandler.removeCallbacks(refreshCarInfoRunnable);
                 refreshCarInfoRunnable = null;
-            }
-            if (checkGestureRunnable != null) {
-                mainHandler.removeCallbacks(checkGestureRunnable);
-                checkGestureRunnable = null;
             }
             if (retryDisableGestureRunnable != null) {
                 mainHandler.removeCallbacks(retryDisableGestureRunnable);
@@ -4218,6 +4168,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 mainHandler.removeCallbacks(retryEnableGestureRunnable);
                 retryEnableGestureRunnable = null;
             }
+            cancelRearUiInitPoll();
             if (delayedResumeCheckRunnable != null) {
                 mainHandler.removeCallbacks(delayedResumeCheckRunnable);
                 delayedResumeCheckRunnable = null;
@@ -4275,29 +4226,13 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         // 执行清理逻辑（统一处理）
         // 注意：performCleanupAndExit() 内部有 isCleaningUp 标志防止重复调用
         // 如果已经在其他地方（如 onResume）调用过，这里会被跳过，避免重复清理和二次动画
-        performCleanupAndExit();
-        
+        performProjectionResourceCleanup(!finishRequestedByMiRoot);
+
         super.onDestroy();
-        
-        // 在背屏恢复官方Launcher（延迟执行，确保Activity完全销毁后再恢复，避免显示切换动画）
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            int currentDisplayId = getDisplay() != null ? getDisplay().getDisplayId() : 0;
-            LogHelper.d(TAG, String.format("📍 当前displayId=%d，准备延迟恢复Launcher", currentDisplayId));
-            
-            if (currentDisplayId == 1) {
-                // 在后台线程执行恢复操作，不阻塞onDestroy
-                new Thread(() -> {
-                    try {
-                        // 等待50ms让Activity完全销毁
-                        Thread.sleep(50);
-                        
-                        LogHelper.d(TAG, "⚡ 开始恢复官方Launcher（车控投屏结束）");
-                        restoreOfficialLauncherInBackground();
-                    } catch (Exception e) {
-                        LogHelper.e(TAG, "恢复Launcher失败", e);
-                    }
-                }).start();
-            }
+
+        if (finishRequestedByMiRoot) {
+            RearMirootProjectionLifecycle.scheduleOfficialSubscreenRestoreAfterDestroy(
+                    getApplicationContext(), null);
         }
     }
     
@@ -4329,63 +4264,89 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 LogHelper.e(TAG, "❌ onConfigurationChanged中执行清理时发生异常", e);
             }
             if (!isFinishing()) {
-                finish();
-                // 去掉转场动画，避免闪烁
-                overridePendingTransition(0, 0);
+                finishProjectionTask();
             }
         }
     }
     
     /**
-     * 清理窗口资源（清除窗口标志和属性，恢复系统UI可见性）
-     * 确保用户手动退出投屏时正确清理窗口
+     * 清理窗口资源。
+     *
+     * @param restoreDecorAndBars {@code false} 在即将 {@link #finish()} 时：不做透明化、不恢复系统栏/insets，
+     *                            避免与歌词投屏相同机理的闪白；{@code true} 保留原完整清理（异常路径等）。
      */
-    private void cleanupWindow() {
+    private void cleanupWindow(boolean restoreDecorAndBars) {
         try {
-            LogHelper.d(TAG, "🧹 开始清理窗口资源");
+            LogHelper.d(TAG, "🧹 开始清理窗口资源 (restoreDecorAndBars=" + restoreDecorAndBars + ")");
             
             if (getWindow() == null) {
                 LogHelper.w(TAG, "⚠️ Window为null，跳过清理");
                 return;
             }
-            
-            // 首先设置窗口背景为透明，避免退出时显示灰色背景
-            try {
-                getWindow().setBackgroundDrawableResource(android.R.color.transparent);
-                LogHelper.d(TAG, "✅ 已设置窗口背景为透明");
-            } catch (Exception e) {
-                LogHelper.w(TAG, "⚠️ 设置窗口背景透明失败", e);
-            }
-            
-            // 隐藏或移除视图内容，避免显示灰色背景
+
             View decorView = getWindow().getDecorView();
-            if (decorView != null) {
-                // 隐藏主布局（如果存在）
+
+            if (restoreDecorAndBars) {
+                // 首先设置窗口背景为透明，避免退出时显示灰色背景
+                try {
+                    getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+                    LogHelper.d(TAG, "✅ 已设置窗口背景为透明");
+                } catch (Exception e) {
+                    LogHelper.w(TAG, "⚠️ 设置窗口背景透明失败", e);
+                }
+
+                // 隐藏或移除视图内容，避免显示灰色背景
+                if (decorView != null) {
+                    // 隐藏主布局（如果存在）
+                    if (mainLayout != null) {
+                        try {
+                            mainLayout.setVisibility(View.GONE);
+                            LogHelper.d(TAG, "✅ 已隐藏主布局");
+                        } catch (Exception e) {
+                            LogHelper.w(TAG, "⚠️ 隐藏主布局失败", e);
+                        }
+                    }
+
+                    // 设置DecorView背景为透明
+                    try {
+                        decorView.setBackgroundColor(0x00000000);
+                        LogHelper.d(TAG, "✅ 已设置DecorView背景为透明");
+                    } catch (Exception e) {
+                        LogHelper.w(TAG, "⚠️ 设置DecorView背景透明失败", e);
+                    }
+                }
+            } else {
+                // 与 blackout 一致：内容在透明主题下会盖住 window background，必须隐藏/压黑（仅不设透明、不拉系统栏）。
                 if (mainLayout != null) {
                     try {
                         mainLayout.setVisibility(View.GONE);
-                        LogHelper.d(TAG, "✅ 已隐藏主布局");
                     } catch (Exception e) {
                         LogHelper.w(TAG, "⚠️ 隐藏主布局失败", e);
                     }
                 }
-                
-                // 设置DecorView背景为透明
                 try {
-                    decorView.setBackgroundColor(0x00000000);
-                    LogHelper.d(TAG, "✅ 已设置DecorView背景为透明");
+                    View contentRoot = findViewById(android.R.id.content);
+                    if (contentRoot != null) {
+                        contentRoot.setBackgroundColor(0xFF000000);
+                    }
+                    if (decorView != null) {
+                        decorView.setBackgroundColor(0xFF000000);
+                    }
+                    getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF000000));
                 } catch (Exception e) {
-                    LogHelper.w(TAG, "⚠️ 设置DecorView背景透明失败", e);
+                    LogHelper.w(TAG, "⚠️ 压黑内容/窗口失败", e);
                 }
+                LogHelper.d(TAG, "✅ 跳过透明化与 Decor/insets 恢复（即将 finish，避免闪白）");
             }
-            
-            // 清除窗口标志（保持常亮、锁屏显示等），避免一直耗电
-            getWindow().clearFlags(
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-            );
+
+            int flagsToClear =
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON;
+            if (restoreDecorAndBars) {
+                flagsToClear |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+            }
+            getWindow().clearFlags(flagsToClear);
             
             // 清除新API设置，确保完全关闭常亮
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -4399,7 +4360,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             }
             
             // 恢复系统UI可见性（显示状态栏和导航栏）
-            if (decorView != null) {
+            if (restoreDecorAndBars && decorView != null) {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     // Android 11+ 使用新的API
                     try {

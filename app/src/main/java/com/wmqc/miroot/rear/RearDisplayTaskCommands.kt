@@ -80,13 +80,13 @@ object RearDisplayTaskCommands {
      * 3. `service call activity_task 50`（binder 回退）
      */
     fun moveTaskToDisplay(taskId: Int, displayId: Int): Boolean {
-        if (PrivilegedShell.runAndWait("am task move-task-to-display $taskId $displayId")) {
+        if (PrivilegedShell.execCmd("am task move-task-to-display $taskId $displayId")) {
             return true
         }
-        if (PrivilegedShell.runAndWait("am display move-stack $taskId $displayId")) {
+        if (PrivilegedShell.execCmd("am display move-stack $taskId $displayId")) {
             return true
         }
         val cmd = "service call activity_task 50 i32 $taskId i32 $displayId"
-        return PrivilegedShell.runAndWait(cmd)
+        return PrivilegedShell.execCmd(cmd)
     }
 }

@@ -1,4 +1,5 @@
 package com.wmqc.miroot.ui.music
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.ComponentName
 import android.content.Context
@@ -15,18 +16,23 @@ import com.wmqc.miroot.lyrics.MusicProjectionService
 import com.wmqc.miroot.lyrics.PrivilegeBackend
 import com.wmqc.miroot.lyrics.RearScreenLyricsActivity
 import com.wmqc.miroot.service.MiRootNotificationListenerService
+import kotlin.jvm.JvmOverloads
+import kotlin.jvm.JvmStatic
 
 object MusicProjectionController {
 
-    fun start(context: Context) {
+    @JvmStatic
+    @JvmOverloads
+    fun start(context: Context, directRearOnly: Boolean = false) {
         PrivilegeBackend.refreshSync()
         if (!PrivilegeBackend.isPrivileged()) {
-            Toast.makeText(context, R.string.music_need_privilege, Toast.LENGTH_LONG).show()
+            MainDisplayUi.showToast(context, R.string.music_need_privilege, Toast.LENGTH_LONG)
             return
         }
         val i = Intent(context, MusicProjectionService::class.java)
         i.action = LyricsIntents.ACTION_OPEN_MUSIC_PROJECTION
         i.putExtra(LyricsIntents.EXTRA_MUSIC_PROJECTION_OP, LyricsIntents.VALUE_MUSIC_PROJECTION_OP_START)
+        i.putExtra(LyricsIntents.EXTRA_MUSIC_PROJECTION_DIRECT_REAR_ONLY, directRearOnly)
         context.startService(i)
     }
 
@@ -35,17 +41,6 @@ object MusicProjectionController {
         i.action = LyricsIntents.ACTION_OPEN_MUSIC_PROJECTION
         i.putExtra(LyricsIntents.EXTRA_MUSIC_PROJECTION_OP, LyricsIntents.VALUE_MUSIC_PROJECTION_OP_STOP)
         context.startService(i)
-    }
-
-    fun hasActiveMediaSession(context: Context): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return true
-        return try {
-            val msm = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
-            val cn = ComponentName(context, MiRootNotificationListenerService::class.java)
-            msm.getActiveSessions(cn).isNotEmpty()
-        } catch (_: SecurityException) {
-            false
-        }
     }
 
     /**

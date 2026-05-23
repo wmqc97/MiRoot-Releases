@@ -319,57 +319,98 @@ public final class ThemeMetadataInjector {
     private static byte[] loadImageAsPngBytes(
             Context context, @Nullable String effectImageUri, @Nullable String effectImagePath)
             throws Exception {
-        InputStream in = null;
+        Bitmap bmp = decodeSampledBitmapForMaxDim(context, effectImageUri, effectImagePath, 1024);
+        if (bmp == null) {
+            return null;
+        }
+
+        int width = bmp.getWidth();
+        int height = bmp.getHeight();
+        if (width <= 0 || height <= 0) {
+            throw new Exception("效果图尺寸异常");
+        }
+
+        Bitmap scaled = bmp;
+        int maxDim = 1024;
+        if (width > maxDim || height > maxDim) {
+            float scale = (float) maxDim / (float) Math.max(width, height);
+            int targetW = Math.max(1, Math.round(width * scale));
+            int targetH = Math.max(1, Math.round(height * scale));
+            scaled = Bitmap.createScaledBitmap(bmp, targetW, targetH, true);
+        }
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        scaled.compress(Bitmap.CompressFormat.PNG, 100, baos);
+        byte[] bytes = baos.toByteArray();
+        if (bytes.length == 0) {
+            throw new Exception("效果图 PNG 数据为空");
+        }
+        return bytes;
+    }
+
+    @Nullable
+    private static Bitmap decodeSampledBitmapForMaxDim(
+            Context context,
+            @Nullable String effectImageUri,
+            @Nullable String effectImagePath,
+            int maxDim) {
         try {
             if (effectImageUri != null && !effectImageUri.isEmpty()) {
                 Uri uri = Uri.parse(effectImageUri);
-                in = context.getContentResolver().openInputStream(uri);
-            }
-
-            Bitmap bmp;
-            if (in != null) {
-                bmp = BitmapFactory.decodeStream(in);
-            } else {
-                if (effectImagePath == null || effectImagePath.isEmpty()) {
+                if (uri == null) {
                     return null;
                 }
-                bmp = BitmapFactory.decodeFile(effectImagePath);
-            }
-
-            if (bmp == null) {
-                return null;
-            }
-
-            int maxDim = 1024;
-            int width = bmp.getWidth();
-            int height = bmp.getHeight();
-            if (width <= 0 || height <= 0) {
-                throw new Exception("效果图尺寸异常");
-            }
-
-            Bitmap scaled = bmp;
-            if (width > maxDim || height > maxDim) {
-                float scale = (float) maxDim / (float) Math.max(width, height);
-                int targetW = Math.max(1, Math.round(width * scale));
-                int targetH = Math.max(1, Math.round(height * scale));
-                scaled = Bitmap.createScaledBitmap(bmp, targetW, targetH, true);
-            }
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            scaled.compress(Bitmap.CompressFormat.PNG, 100, baos);
-            byte[] bytes = baos.toByteArray();
-            if (bytes.length == 0) {
-                throw new Exception("效果图 PNG 数据为空");
-            }
-            return bytes;
-        } finally {
-            if (in != null) {
-                try {
-                    in.close();
-                } catch (Exception ignored) {
+                BitmapFactory.Options bounds = new BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                try (InputStream in1 = context.getContentResolver().openInputStream(uri)) {
+                    if (in1 == null) {
+                        return null;
+                    }
+                    BitmapFactory.decodeStream(in1, null, bounds);
+                }
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                    return null;
+                }
+                BitmapFactory.Options opts = new BitmapFactory.Options();
+                opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                opts.inSampleSize = computeInSampleSize(bounds.outWidth, bounds.outHeight, maxDim, maxDim);
+                try (InputStream in2 = context.getContentResolver().openInputStream(uri)) {
+                    if (in2 == null) {
+                        return null;
+                    }
+                    return BitmapFactory.decodeStream(in2, null, opts);
                 }
             }
+
+            if (effectImagePath != null && !effectImagePath.isEmpty()) {
+                BitmapFactory.Options bounds = new BitmapFactory.Options();
+                bounds.inJustDecodeBounds = true;
+                BitmapFactory.decodeFile(effectImagePath, bounds);
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                    return null;
+                }
+                BitmapFactory.Options opts = new BitmapFactory.Options();
+                opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+                opts.inSampleSize = computeInSampleSize(bounds.outWidth, bounds.outHeight, maxDim, maxDim);
+                return BitmapFactory.decodeFile(effectImagePath, opts);
+            }
+        } catch (Exception e) {
+            LogHelper.w(TAG, "decodeSampledBitmapForMaxDim", e);
         }
+        return null;
+    }
+
+    private static int computeInSampleSize(
+            int srcWidth, int srcHeight, int reqWidth, int reqHeight) {
+        int inSampleSize = 1;
+        if (srcHeight > reqHeight || srcWidth > reqWidth) {
+            int halfHeight = srcHeight / 2;
+            int halfWidth = srcWidth / 2;
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2;
+            }
+        }
+        return Math.max(1, inSampleSize);
     }
 
     private static byte[] updateVarConfigXmlFromStream(

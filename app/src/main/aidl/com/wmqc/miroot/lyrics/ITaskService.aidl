@@ -52,4 +52,24 @@ interface ITaskService {
 
     /** 充电动画专用：无条件对 com.xiaomi.subscreencenter force-stop，不受设置页「禁用官方背屏服务」开关约束。 */
     boolean forceStopOfficialSubscreenForCharging() = 23;
+
+    /**
+     * 第三方应用投屏：总开关 [OfficialSubscreenServiceGate] + 应用页范围策略
+     * [com.wmqc.miroot.rear.AppProjectionOfficialGesturePolicy] 均满足时才 force-stop
+     * com.xiaomi.subscreencenter。
+     */
+    boolean disableSubScreenLauncherForAppProjection(String packageName) = 26;
+
+    /** 与 {@link #disableSubScreenLauncherForAppProjection(String)} 同一策略，供 Keeper 初始杀进程使用。 */
+    boolean killLauncherProcessForAppProjection(String packageName) = 27;
+
+    /**
+     * 充电动画等对官方背屏中心 force-stop 之后：仅 {@code pm enable} 包与组件，
+     * 不执行 {@code am start} 拉起官方 Launcher，避免打断即将恢复的 MiRoot 背屏投屏；
+     * 便于副屏边缘返回手势所需进程尽快恢复。
+     */
+    boolean enableOfficialSubscreenPackageOnly() = 28;
+
+    /** 背屏栈顶 Activity 组件，格式 {@code pkg/cls:taskId}；解析失败返回 null。 */
+    String getForegroundComponentOnDisplay(int displayId) = 29;
 }

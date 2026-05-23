@@ -1426,11 +1426,24 @@ public class VideoReplacer {
 
             LogHelper.d(TAG, "准备将视频抽帧预览写入目录: " + directory);
             boolean replaced = copySourcePngToRearscreenPreviews(taskService, directory, previewPng);
+            LogHelper.dDebug(
+                    "DirCoverBind",
+                    "updatePreviewImage copySourcePngToRearscreenPreviews ok="
+                            + replaced
+                            + " mamlDir="
+                            + directory);
             if (replaced) {
                 LogHelper.d(TAG, "✅ 预览图更新完成（视频帧）");
                 try {
-                    DirectoryCoverBindingHelper.syncBoundCoverFromRearscreenPreview(
-                            context, taskService, directory);
+                    boolean boundSyncOk =
+                            DirectoryCoverBindingHelper.syncBoundCoverFromRearscreenPreview(
+                                    context, taskService, directory);
+                    LogHelper.dDebug(
+                            "DirCoverBind",
+                            "updatePreviewImage boundCoverSyncOk="
+                                    + boundSyncOk
+                                    + " mamlDir="
+                                    + directory);
                 } catch (Exception e) {
                     LogHelper.w(TAG, "同步绑定封面失败（已忽略）", e);
                 }

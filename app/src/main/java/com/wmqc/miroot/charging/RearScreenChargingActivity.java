@@ -7,20 +7,18 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Configuration;
 import android.graphics.PixelFormat;
-import android.hardware.display.DisplayManager;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.view.Choreographer;
 import android.view.Display;
 import android.view.View;
-import android.view.ViewTreeObserver;
+import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LinearInterpolator;
-import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import android.os.RemoteException;
@@ -32,12 +30,14 @@ import androidx.core.view.WindowInsetsCompat;
 
 import com.wmqc.miroot.R;
 import com.wmqc.miroot.RearDisplayInputHelper;
+import com.wmqc.miroot.lyrics.DeviceModelHelper;
+import com.wmqc.miroot.lyrics.DisplayInfoCache;
 import com.wmqc.miroot.lyrics.ITaskService;
 import com.wmqc.miroot.lyrics.LogHelper;
-import com.wmqc.miroot.lyrics.RearScreenWakeManager;
-import com.wmqc.miroot.rear.RearAssistService;
-import com.wmqc.miroot.rear.RearProjectionProximityGate;
+import com.wmqc.miroot.lyrics.RearDisplayHelper;
+import com.wmqc.miroot.rear.RearMirootProjectionLifecycle;
 import com.wmqc.miroot.rear.RearSwitchKeeperService;
+import com.wmqc.miroot.shell.SwitchToRearQsTileService;
 
 /**
  * 背屏充电动画 Activity。
@@ -47,30 +47,26 @@ import com.wmqc.miroot.rear.RearSwitchKeeperService;
  *   <li>若同一实例未重建：由 {@link Choreographer} 逐帧探测 displayId（优先于生命周期回调）、以及
  *       {@link #onConfigurationChanged}、{@link #onResume}、{@link DisplayManager.DisplayListener} 调用
  *       {@link #ensureChargingUiOnRearDisplay()}</li>
- *   <li>调试预览：{@link #EXTRA_DEBUG_MAIN_PREVIEW} 时仍用不透主题并立即展示</li>
  * </ul>
  */
 public class RearScreenChargingActivity extends ComponentActivity {
 
     private static final String TAG = "RearScreenChargingActivity";
-    /**
-     * 液面从 0 涨到 100% 时的总时长；实际时长 = 该值 × (当前电量/100)，保证「刻度/秒」恒定，
-     * 避免固定总时长导致低电量涨得慢、高电量涨得快。
-     */
-    /** 非「常亮」时约 8s 自动结束。 */
-    private static final long AUTO_FINISH_MS = 8000L;
-    private static final long RESUME_COMPENSATE_FINISH_MS = 5000L;
-    /** 主屏占位若一直未迁到背屏、未 inflate，否则窗口长期残留且不会走 PreDraw 的 8s 结束。 */
-    private static final long MAIN_PLACEHOLDER_TIMEOUT_MS = 12_000L;
-    /** inflate 后短暂等待 display 稳定，再判断是否错误地占在主屏。 */
-    private static final long VERIFY_ON_DEFAULT_DISPLAY_AFTER_INFLATE_MS = 450L;
+
+    // --- MiRoot-3.4 对齐：仅下方 AUTO/PROTECT/resume 时长；涨水仍读 ChargingAnimationPrefs + 线性刻度（非 3.4 液面曲线，勿改回）。除本人强制要求外请勿改动。---
+
+    /** 对齐 3.4：背屏 onCreate 后约 8s 自动关闭（非常亮模式）。 */
+    public static final long AUTO_FINISH_MS = 8_000L;
+    /** 对齐 3.4：主屏占位未安排 auto-finish 时，onResume 补偿 5s 后 finish。 */
+    private static final long RESUME_COMPENSATE_FINISH_MS = 5_000L;
+    /** dumpsys / insets 暂未可用时，17 Pro 背屏左摄像头区域保底避让（px）。 */
+    private static final int REAR_CAMERA_FALLBACK_LEFT_PX = 200;
 
     private static volatile RearScreenChargingActivity currentInstance;
     public static final String EXTRA_BATTERY_LEVEL = "batteryLevel";
     public static final String EXTRA_REAR_TASK_ID = "rearTaskId";
     /** 与 {@link com.wmqc.miroot.charging.ChargingService} 解析的副屏 id 一致，用于结束后 move / am start --display */
     public static final String EXTRA_REAR_DISPLAY_ID = "rearDisplayId";
-    public static final String EXTRA_DEBUG_MAIN_PREVIEW = "debugMainPreview";
 
     private int rearTaskId = -1;
     private int rearDisplayIdForRestore = 1;
@@ -78,113 +74,26 @@ public class RearScreenChargingActivity extends ComponentActivity {
     private GyroWaterRippleView waterView;
     private TextView batteryTextView;
     private float targetFillLevel;
-    private boolean debugMainPreview;
     private boolean chargingUiInflated;
     /** 防止 setContentView 重入时再次 inflate。 */
     private boolean rearInflateInProgress;
     private boolean fillPresentationStarted;
+    /** 首段涨水动画进行中时，忽略外部液位直设，避免被实时电量更新覆盖。 */
+    private boolean initialFillAnimating;
+    private ValueAnimator initialFillAnimator;
     /** 是否已安排自动 finish（含常亮模式下「已处理」）。 */
     private boolean autoFinishScheduled;
+    /** 仅拔电 / 8s 自动关闭 / 补偿 finish 等 MiRoot 主动结束；系统双击息屏销毁时为 false。 */
+    private boolean finishRequestedByMiRoot;
+    /** 背屏息屏期间暂停自动 finish，避免误关下层投屏。 */
+    private boolean rearScreenOffPaused;
+    private boolean screenStateReceiverRegistered;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable resumeCompensateFinishRunnable = this::finishFromMiRoot;
 
-    /** 主屏占位阶段：每帧检查是否已迁到背屏，避免苦等 onConfigurationChanged / onResume */
-    private boolean rearMigrationWatchActive;
-    private final Choreographer.FrameCallback rearMigrationFrameCallback = this::onRearMigrationFrame;
-    /**
-     * 迁屏过程中 {@link Activity#getDisplay()} 可能短暂非 0，若在主屏误 inflate 会闪一下或被系统纠正。
-     * 连续若干帧均为非默认屏后再加载 UI（Intent 里的副屏 id 仅用于结束后恢复，不与 getDisplay 强校验以免超时 finish）。
-     */
-    /** 迁屏后部分机型上 getDisplay() 会短暂抖动；与 3.1.5「仅背屏才 setContentView」 spirit 一致，多帧确认再 inflate。 */
-    private static final int REAR_DISPLAY_STABLE_FRAMES = 2;
-    private int rearDisplayStableFrames;
-
-    private DisplayManager displayManager;
-    private final DisplayManager.DisplayListener displayListener = new DisplayManager.DisplayListener() {
-        @Override
-        public void onDisplayAdded(int displayId) {
-        }
-
-        @Override
-        public void onDisplayRemoved(int displayId) {
-        }
-
-        @Override
-        public void onDisplayChanged(int displayId) {
-            View decor = getWindow() != null ? getWindow().getDecorView() : null;
-            if (decor != null) {
-                decor.post(() -> {
-                    if (waterView != null) {
-                        waterView.invalidate();
-                    }
-                    decor.invalidate();
-                    ensureChargingUiOnRearDisplay();
-                });
-            }
-        }
-    };
-
-    private final Runnable autoFinishRunnable = this::finish;
-
-    private final Runnable mainPlaceholderTimeoutRunnable = this::finishIfStuckMainPlaceholderWithoutUi;
-
-    private final Runnable verifyDefaultDisplayAfterInflateRunnable = () -> {
-        if (isFinishing() || !chargingUiInflated || debugMainPreview) {
-            return;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-            && getCurrentDisplayIdSafe() == Display.DEFAULT_DISPLAY) {
-            LogHelper.w(TAG, "充电视图已加载但窗口仍在默认屏，finish 避免占住主屏且不自动结束");
-            cancelMainPlaceholderTimeout();
-            finish();
-        }
-    };
-
-    private void finishIfStuckMainPlaceholderWithoutUi() {
-        if (isFinishing() || debugMainPreview || chargingUiInflated) {
-            return;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-            && getCurrentDisplayIdSafe() == Display.DEFAULT_DISPLAY) {
-            LogHelper.w(TAG, "主屏占位超时未迁背屏且无充电视图，finish 避免 Activity 不销毁");
-            finish();
-        }
-    }
-
-    private void scheduleMainPlaceholderTimeout(View decor) {
-        if (decor == null) {
-            return;
-        }
-        decor.removeCallbacks(mainPlaceholderTimeoutRunnable);
-        decor.postDelayed(mainPlaceholderTimeoutRunnable, MAIN_PLACEHOLDER_TIMEOUT_MS);
-    }
-
-    private void cancelMainPlaceholderTimeout() {
-        View decor = getWindow() != null ? getWindow().getDecorView() : null;
-        if (decor != null) {
-            decor.removeCallbacks(mainPlaceholderTimeoutRunnable);
-        }
-    }
-
-    /**
-     * 已加载充电视图却仍绑定 {@link Display#DEFAULT_DISPLAY} 时，说明误在主屏展示，应尽快 finish。
-     */
-    private void scheduleFinishIfInflatedOnDefaultDisplay() {
-        if (debugMainPreview || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            return;
-        }
-        View decor = getWindow() != null ? getWindow().getDecorView() : null;
-        if (decor == null) {
-            return;
-        }
-        decor.removeCallbacks(verifyDefaultDisplayAfterInflateRunnable);
-        decor.postDelayed(verifyDefaultDisplayAfterInflateRunnable, VERIFY_ON_DEFAULT_DISPLAY_AFTER_INFLATE_MS);
-    }
-
-    private void cancelVerifyDefaultDisplayAfterInflate() {
-        View decor = getWindow() != null ? getWindow().getDecorView() : null;
-        if (decor != null) {
-            decor.removeCallbacks(verifyDefaultDisplayAfterInflateRunnable);
-        }
-    }
+    private final Runnable autoFinishRunnable = this::finishFromMiRoot;
+    private final Runnable rehideSystemUiRunnable = this::hideSystemUi;
+    private int hideSystemUiRetry = 0;
 
     private final BroadcastReceiver finishReceiver = new BroadcastReceiver() {
         @Override
@@ -194,16 +103,23 @@ public class RearScreenChargingActivity extends ComponentActivity {
             }
             String action = intent.getAction();
             if (ChargingIntents.ACTION_FINISH_CHARGING_ANIMATION.equals(action)) {
-                LogHelper.d(TAG, "收到拔电/结束充电动画广播，finish");
-                finish();
+                LogHelper.d(TAG, "收到拔电广播，立即销毁");
+                finishFromMiRoot();
             } else if (ChargingIntents.ACTION_INTERRUPT_CHARGING_ANIMATION.equals(action)) {
-                LogHelper.d(TAG, "收到打断充电动画广播，finish");
-                finish();
+                LogHelper.d(TAG, "收到打断广播（新动画来了），立即销毁但不恢复背屏");
+                finishFromMiRoot();
             } else if (ChargingIntents.ACTION_UPDATE_CHARGING_BATTERY.equals(action)) {
                 int newLevel = intent.getIntExtra(EXTRA_BATTERY_LEVEL, -1);
                 if (newLevel >= 0) {
                     updateBatteryLevel(newLevel);
                 }
+            } else if (ChargingIntents.ACTION_NOTIFY_CHARGING_TASK_MOVED_TO_REAR.equals(action)) {
+                int movedDisplayId = intent.getIntExtra(EXTRA_REAR_DISPLAY_ID, rearDisplayIdForRestore);
+                if (movedDisplayId > 0) {
+                    rearDisplayIdForRestore = movedDisplayId;
+                }
+                LogHelper.d(TAG, "收到迁屏完成广播，立即加载背屏充电动画 UI");
+                runOnUiThread(RearScreenChargingActivity.this::ensureChargingUiOnRearDisplay);
             }
         }
     };
@@ -216,7 +132,48 @@ public class RearScreenChargingActivity extends ComponentActivity {
         inst.runOnUiThread(() -> inst.updateBatteryLevel(newLevel));
     }
 
-    /** 供 {@link RearScreenWakeManager} 反射检测实例是否存活。 */
+    /** MiRoot 主动结束充电动画（拔电、超时、占位补偿等）。 */
+    private void finishFromMiRoot() {
+        finishRequestedByMiRoot = true;
+        finish();
+    }
+
+    @Override
+    public void finish() {
+        if (finishRequestedByMiRoot) {
+            RearMirootProjectionLifecycle.sendMainDisplayHomeBeforeProjectionEnd(
+                    ChargingService.getTaskService());
+        }
+        prepareRearProjectionVisibleBeforeFinish();
+        super.finish();
+        overridePendingTransition(0, 0);
+    }
+
+    /**
+     * 与 {@link com.wmqc.miroot.car.RearScreenCarControlActivity#prepareRearDisplayBeforeGestureFinish} 对齐：
+     * 充电动画结束前唤醒背屏并露出底层音乐投屏，减轻收层后歌词逐字刷新卡顿/空窗。
+     */
+    private void prepareRearProjectionVisibleBeforeFinish() {
+        Log.d("CHARGING_FIX", "STEP 1: 唤醒背屏");
+        try {
+            ITaskService ts = ChargingService.getTaskService();
+            int d = rearDisplayIdForRestore > 0 ? rearDisplayIdForRestore : 1;
+            if (ts != null) {
+                ts.executeShellCommand("input -d " + d + " keyevent KEYCODE_WAKEUP");
+            }
+        } catch (Exception e) {
+            LogHelper.w(TAG, "充电动画结束前唤醒背屏失败: " + e.getMessage());
+        }
+        Log.d("CHARGING_FIX", "STEP 2: 调用 RearScreenLyricsActivity.forceShowProjectionUiAfterChargingOverlay()");
+        try {
+            com.wmqc.miroot.lyrics.RearScreenLyricsActivity.forceShowProjectionUiAfterChargingOverlay();
+        } catch (Throwable t) {
+            LogHelper.w(TAG, "充电动画结束前强制歌词 UI 可见失败: " + t.getMessage());
+        }
+        Log.d("CHARGING_FIX", "STEP 4: 准备关闭充电窗口，执行 finish()");
+    }
+
+    /** 供背屏唤醒等链路检测充电动画实例是否存活。 */
     public static RearScreenChargingActivity getCurrentInstance() {
         return currentInstance;
     }
@@ -224,13 +181,14 @@ public class RearScreenChargingActivity extends ComponentActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         Intent intent = getIntent();
-        debugMainPreview = intent.getBooleanExtra(EXTRA_DEBUG_MAIN_PREVIEW, false);
-        // 调试主屏预览或旧系统：透明主题；主屏占位时不绘制充电底色。
+        // 旧系统：透明主题；主屏占位时不绘制充电底色。
         // 背屏在 inflateChargingContentOnRear 里 setWindowBackground + 布局底色保证不透（避免副屏全黑）。
-        if (debugMainPreview || Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             setTheme(R.style.Theme_MiRoot_ChargingRear);
         }
         super.onCreate(savedInstanceState);
+        // 覆盖层进入也禁用系统默认切换动画，避免背屏闪白/淡入淡出。
+        overridePendingTransition(0, 0);
 
         rearTaskId = intent.getIntExtra(EXTRA_REAR_TASK_ID, -1);
         rearDisplayIdForRestore = intent.getIntExtra(EXTRA_REAR_DISPLAY_ID, 1);
@@ -242,72 +200,152 @@ public class RearScreenChargingActivity extends ComponentActivity {
         pendingBatteryLevel = level;
         targetFillLevel = level / 100f;
 
-        registerFinishReceiverAndDisplayListener();
-
-        if (debugMainPreview) {
-            getWindow().setFormat(PixelFormat.OPAQUE);
-            applyRearChargingWindowFlags();
-            hideSystemUi();
-            applyRearDensityBeforeInflateIfPossible();
-            setContentView(R.layout.activity_rear_screen_charging);
-            TextView badge = findViewById(R.id.charging_debug_badge);
-            if (badge != null) {
-                badge.setVisibility(View.VISIBLE);
-            }
-            bindChargingViews(level);
-            applySafeInsetsToBatteryText();
-            chargingUiInflated = true;
-            currentInstance = RearScreenChargingActivity.this;
-            startFillAndBatteryPresentation();
-            return;
-        }
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            int displayId = getCurrentDisplayIdSafe();
-            if (displayId == Display.DEFAULT_DISPLAY) {
-                LogHelper.d(TAG, "主屏占位：不 setContentView，等待迁屏；超时则 finish 避免窗口不销毁");
+            if (getCurrentDisplayIdSafe() == Display.DEFAULT_DISPLAY) {
+                // 对齐 3.4：主屏仅占位，等待 ChargingService 迁屏后重建本 Activity。
+                LogHelper.d(TAG, "在主屏启动，保持透明占位符，等待移动");
+                RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(
+                        this, RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_TRANSPARENT_PLACEHOLDER);
+                registerFinishReceiverOnly();
+                registerScreenStateReceiverIfNeeded();
                 currentInstance = this;
-                View decor = getWindow().getDecorView();
-                decor.post(this::startRearMigrationWatch);
-                scheduleMainPlaceholderTimeout(decor);
                 return;
             }
-            LogHelper.d(TAG, "非默认显示屏启动 displayId=" + displayId + "，加载充电动画");
-            inflateChargingContentOnRear();
-            startFillAndBatteryPresentation();
-            return;
         }
 
-        getWindow().setFormat(PixelFormat.OPAQUE);
-        applyRearChargingWindowFlags();
-        hideSystemUi();
-        applyRearDensityBeforeInflateIfPossible();
-        setContentView(R.layout.activity_rear_screen_charging);
-        bindChargingViews(level);
-        applySafeInsetsToBatteryText();
-        chargingUiInflated = true;
-        currentInstance = this;
-        startFillAndBatteryPresentation();
+        setupChargingUiOnRear(level);
     }
 
-    private void registerFinishReceiverAndDisplayListener() {
+    /** 背屏 displayId≠0 时加载充电视图与动画（3.4 onCreate 背屏分支；亦供迁屏后未重建时兜底）。 */
+    private void setupChargingUiOnRear(int level) {
+        if (chargingUiInflated || rearInflateInProgress) {
+            return;
+        }
+        rearInflateInProgress = true;
+        try {
+            registerFinishReceiverOnly();
+            registerScreenStateReceiverIfNeeded();
+            getWindow().setFormat(PixelFormat.OPAQUE);
+            getWindow().setBackgroundDrawableResource(R.color.charging_window_bg);
+            applyRearChargingWindowFlags();
+            applyRearDensityBeforeInflateIfPossible();
+            setContentView(R.layout.activity_rear_screen_charging);
+            bindChargingViews(level);
+            applySafeInsetsToBatteryText();
+            hideSystemUi();
+            chargingUiInflated = true;
+            currentInstance = this;
+            startFillAndBatteryPresentation();
+        } finally {
+            rearInflateInProgress = false;
+        }
+    }
+
+    private void registerFinishReceiverOnly() {
+        if (finishReceiverRegistered) {
+            return;
+        }
         IntentFilter filter = new IntentFilter();
         filter.addAction(ChargingIntents.ACTION_FINISH_CHARGING_ANIMATION);
         filter.addAction(ChargingIntents.ACTION_INTERRUPT_CHARGING_ANIMATION);
         filter.addAction(ChargingIntents.ACTION_UPDATE_CHARGING_BATTERY);
+        filter.addAction(ChargingIntents.ACTION_NOTIFY_CHARGING_TASK_MOVED_TO_REAR);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(finishReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
         } else {
             registerReceiver(finishReceiver, filter);
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            displayManager = getSystemService(DisplayManager.class);
-            if (displayManager != null) {
-                displayManager.registerDisplayListener(
-                    displayListener,
-                    new Handler(Looper.getMainLooper()));
+        finishReceiverRegistered = true;
+    }
+
+    private boolean finishReceiverRegistered;
+
+    private final BroadcastReceiver screenStateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent == null || intent.getAction() == null) {
+                return;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && getCurrentDisplayIdSafe() == Display.DEFAULT_DISPLAY) {
+                return;
+            }
+            if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                onRearChargingScreenOff();
+            } else if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
+                onRearChargingScreenOn();
             }
         }
+    };
+
+    private void registerScreenStateReceiverIfNeeded() {
+        if (screenStateReceiverRegistered) {
+            return;
+        }
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(Intent.ACTION_SCREEN_OFF);
+        filter.addAction(Intent.ACTION_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(screenStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(screenStateReceiver, filter);
+        }
+        screenStateReceiverRegistered = true;
+    }
+
+    private void onRearChargingScreenOff() {
+        if (rearScreenOffPaused || isFinishing()) {
+            return;
+        }
+        rearScreenOffPaused = true;
+        LogHelper.d(TAG, "背屏息屏：暂停充电动画自动关闭，保留下层投屏");
+        cancelScheduledFinishes();
+        prepareRearProjectionVisibleBeforeFinish();
+        try {
+            ITaskService ts = ChargingService.getTaskService();
+            int d = rearDisplayIdForRestore > 0 ? rearDisplayIdForRestore : 1;
+            if (ts != null) {
+                ts.executeShellCommand("input -d " + d + " keyevent KEYCODE_WAKEUP");
+            }
+        } catch (Exception e) {
+            LogHelper.w(TAG, "息屏后唤醒背屏失败: " + e.getMessage());
+        }
+    }
+
+    private void onRearChargingScreenOn() {
+        if (!rearScreenOffPaused) {
+            return;
+        }
+        rearScreenOffPaused = false;
+        LogHelper.d(TAG, "背屏亮屏：恢复充电动画层");
+        if (!chargingUiInflated || isFinishing()) {
+            return;
+        }
+        hideSystemUi();
+        ensureChargingUiOnRearDisplay();
+    }
+
+    private void cancelScheduledFinishes() {
+        mainHandler.removeCallbacks(resumeCompensateFinishRunnable);
+        View decor = getWindow() != null ? getWindow().getDecorView() : null;
+        if (decor != null) {
+            decor.removeCallbacks(autoFinishRunnable);
+        }
+        View container = findViewById(R.id.charging_container);
+        if (container != null) {
+            container.removeCallbacks(autoFinishRunnable);
+        }
+    }
+
+    private void ensureChargingUiOnRearDisplay() {
+        if (chargingUiInflated || rearInflateInProgress) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+            && getCurrentDisplayIdSafe() == Display.DEFAULT_DISPLAY) {
+            return;
+        }
+        setupChargingUiOnRear(pendingBatteryLevel);
     }
 
     private static int getCurrentDisplayIdSafe(ComponentActivity activity) {
@@ -326,8 +364,8 @@ public class RearScreenChargingActivity extends ComponentActivity {
         return getCurrentDisplayIdSafe(this);
     }
 
-    /** 副屏可能是 1、2 等，不能写死 == 1 */
-    private boolean isOnNonDefaultDisplay() {
+    /** 对齐 3.4：只要不在 DEFAULT_DISPLAY 即视为可渲染背屏。 */
+    private boolean isOnExpectedRearDisplay() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             return false;
         }
@@ -336,10 +374,12 @@ public class RearScreenChargingActivity extends ComponentActivity {
 
     private void applyRearChargingWindowFlags() {
         RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
+        // 对齐 3.4：KEEP_SCREEN_ON + 锁屏显示 + 点亮屏幕
         getWindow().addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                 | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
+                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+        );
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true);
             setTurnScreenOn(true);
@@ -396,141 +436,91 @@ public class RearScreenChargingActivity extends ComponentActivity {
         if (batteryTextView == null) {
             return;
         }
+        Insets initialSafe = computeInitialBatterySafeInsets();
+        applyBatteryTextSafePadding(initialSafe.left, initialSafe.top, initialSafe.right, initialSafe.bottom);
         ViewCompat.setOnApplyWindowInsetsListener(batteryTextView, (v, insets) -> {
             Insets cut = insets.getInsets(WindowInsetsCompat.Type.displayCutout());
             Insets sys = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             int left = Math.max(cut.left, sys.left);
-            int top = Math.max(cut.top, sys.top);
             int right = Math.max(cut.right, sys.right);
-            int bottom = Math.max(cut.bottom, sys.bottom);
-            if (left == 0 && top == 0 && right == 0 && bottom == 0) {
-                return insets;
-            }
-            FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) v.getLayoutParams();
-            if (p != null) {
-                p.leftMargin = left;
-                p.topMargin = top;
-                p.rightMargin = right;
-                p.bottomMargin = bottom;
-                v.setLayoutParams(p);
-            }
+            // 关键：首帧前已应用一次安全区，后续 insets 只允许“增量修正”，防止出现先贴左再跳右。
+            int resolvedLeft = Math.max(v.getPaddingLeft(), left);
+            int resolvedRight = Math.max(v.getPaddingRight(), right);
+            // 仅对左右做 cutout/system bars 安全区，保持垂直方向严格居中。
+            applyBatteryTextSafePadding(resolvedLeft, 0, resolvedRight, 0);
             return insets;
         });
         ViewCompat.requestApplyInsets(batteryTextView);
     }
 
-    private void startRearMigrationWatch() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || debugMainPreview || chargingUiInflated) {
+    private void applyBatteryTextSafePadding(int left, int top, int right, int bottom) {
+        if (batteryTextView == null) {
             return;
         }
-        if (rearMigrationWatchActive) {
+        if (batteryTextView.getPaddingLeft() == left
+            && batteryTextView.getPaddingTop() == top
+            && batteryTextView.getPaddingRight() == right
+            && batteryTextView.getPaddingBottom() == bottom) {
             return;
         }
-        rearDisplayStableFrames = 0;
-        rearMigrationWatchActive = true;
-        Choreographer.getInstance().postFrameCallback(rearMigrationFrameCallback);
+        // 通过 padding 把可绘制区域限制到安全区，gravity=center 会自然落在“右侧可视区居中”。
+        batteryTextView.setPadding(left, top, right, bottom);
     }
 
-    private void stopRearMigrationWatch() {
-        if (!rearMigrationWatchActive) {
-            return;
-        }
-        rearMigrationWatchActive = false;
-        Choreographer.getInstance().removeFrameCallback(rearMigrationFrameCallback);
-    }
-
-    private void onRearMigrationFrame(long frameTimeNanos) {
-        if (!rearMigrationWatchActive || isFinishing() || chargingUiInflated) {
-            rearMigrationWatchActive = false;
-            return;
-        }
-        if (isDestroyed()) {
-            rearMigrationWatchActive = false;
-            return;
-        }
-        if (isOnNonDefaultDisplay()) {
-            rearDisplayStableFrames++;
-            if (rearDisplayStableFrames >= REAR_DISPLAY_STABLE_FRAMES) {
-                ensureChargingUiOnRearDisplay();
+    private Insets computeInitialBatterySafeInsets() {
+        int left = 0;
+        int right = 0;
+        try {
+            DisplayInfoCache cache = DisplayInfoCache.getInstance();
+            if (!cache.isInitialized()) {
+                ITaskService ts = ChargingService.getTaskService();
+                if (ts != null) {
+                    cache.initialize(ts);
+                }
             }
-        } else {
-            rearDisplayStableFrames = 0;
+            RearDisplayHelper.RearDisplayInfo info = cache.getCachedInfo();
+            if (info != null && info.cutout != null) {
+                left = Math.max(left, info.cutout.left);
+                right = Math.max(right, info.cutout.right);
+            }
+        } catch (Exception e) {
+            LogHelper.w(TAG, "读取缓存 cutout 失败: " + e.getMessage());
         }
-        if (chargingUiInflated || isFinishing()) {
-            rearMigrationWatchActive = false;
-            return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                Display display = getDisplay();
+                if (display != null && display.getCutout() != null) {
+                    left = Math.max(left, display.getCutout().getSafeInsetLeft());
+                    right = Math.max(right, display.getCutout().getSafeInsetRight());
+                }
+            } catch (Exception ignored) {
+            }
         }
-        if (getWindow() == null) {
-            rearMigrationWatchActive = false;
-            return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                WindowInsets wi = getWindow().getDecorView().getRootWindowInsets();
+                if (wi != null && wi.getDisplayCutout() != null) {
+                    left = Math.max(left, wi.getDisplayCutout().getSafeInsetLeft());
+                    right = Math.max(right, wi.getDisplayCutout().getSafeInsetRight());
+                }
+            } catch (Exception ignored) {
+            }
         }
-        Choreographer.getInstance().postFrameCallback(rearMigrationFrameCallback);
+        if (left <= 0 && isOnExpectedRearDisplay() && !DeviceModelHelper.isProMaxModel()) {
+            // 17 Pro 上偶发首帧拿不到 cutout，先给稳定回退值，避免数字贴在摄像头后再跳位。
+            left = REAR_CAMERA_FALLBACK_LEFT_PX;
+        }
+        return Insets.of(left, 0, right, 0);
     }
 
     private void bindChargingViews(int level) {
         waterView = findViewById(R.id.gyro_water_ripple);
         batteryTextView = findViewById(R.id.battery_text);
         batteryTextView.setText(level + "%");
-        if (level > 20) {
-            batteryTextView.setTextColor(0xFF66FF99);
-        } else {
-            batteryTextView.setTextColor(0xFFFFC896);
-        }
+        // 对齐 3.4 activity_rear_screen_charging：中央电量为纯白字。
+        batteryTextView.setTextColor(0xFFFFFFFF);
         waterView.setBatteryPercentForTint(level);
         waterView.setFillLevel(0f);
-    }
-
-    /**
-     * 在背屏（任意非 DEFAULT_DISPLAY）加载不透充电视图；可从主屏占位或重建后的 onCreate 调用。
-     */
-    private void inflateChargingContentOnRear() {
-        if (chargingUiInflated || rearInflateInProgress) {
-            return;
-        }
-        cancelMainPlaceholderTimeout();
-        stopRearMigrationWatch();
-        rearDisplayStableFrames = 0;
-        rearInflateInProgress = true;
-        try {
-            applyRearChargingWindowFlags();
-            getWindow().setFormat(PixelFormat.OPAQUE);
-            getWindow().setBackgroundDrawableResource(R.color.charging_window_bg);
-
-            hideSystemUi();
-            applyRearDensityBeforeInflateIfPossible();
-            setContentView(R.layout.activity_rear_screen_charging);
-            bindChargingViews(pendingBatteryLevel);
-            applySafeInsetsToBatteryText();
-            batteryTextView.setAlpha(0f);
-            batteryTextView.setScaleX(0.8f);
-            batteryTextView.setScaleY(0.8f);
-            if (waterView != null) {
-                waterView.invalidate();
-            }
-            chargingUiInflated = true;
-            currentInstance = this;
-            scheduleFinishIfInflatedOnDefaultDisplay();
-        } finally {
-            rearInflateInProgress = false;
-        }
-    }
-
-    /**
-     * 同一 Activity 实例从主屏被迁到背屏且未走重建时，在此补载 UI（兜底）。
-     */
-    private void ensureChargingUiOnRearDisplay() {
-        if (debugMainPreview || chargingUiInflated || rearInflateInProgress) {
-            return;
-        }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            return;
-        }
-        if (!isOnNonDefaultDisplay()) {
-            return;
-        }
-        LogHelper.d(TAG, "ensureChargingUi：副屏 displayId=" + getCurrentDisplayIdSafe());
-        inflateChargingContentOnRear();
-        startFillAndBatteryPresentation();
     }
 
     private void startFillAndBatteryPresentation() {
@@ -540,14 +530,35 @@ public class RearScreenChargingActivity extends ComponentActivity {
         fillPresentationStarted = true;
 
         waterView.setFillLevel(0f);
-        // 液面上涨：恒定刻度速率（Linear），时长随目标电量比例变化；基准时长由 prefs 涨水速度调节
+        initialFillAnimating = true;
+        if (initialFillAnimator != null) {
+            initialFillAnimator.cancel();
+            initialFillAnimator = null;
+        }
+        initialFillAnimator = ValueAnimator.ofFloat(0f, targetFillLevel);
+        // 涨水：保留功能页「涨水速度」与线性刻度（与 3.4 老版固定 2s 减速液面不同，勿改回老版曲线）。
         int speedPercent = ChargingAnimationPrefs.getFillRiseSpeedPercent(this);
-        long baseMsForFull = Math.round(ChargingAnimationPrefs.FILL_MS_FOR_FULL_SCALE * 100.0 / (double) Math.max(1, speedPercent));
-        ValueAnimator fillAnim = ValueAnimator.ofFloat(0f, targetFillLevel);
-        fillAnim.setDuration(Math.max(0L, Math.round(targetFillLevel * baseMsForFull)));
-        fillAnim.setInterpolator(new LinearInterpolator());
-        fillAnim.addUpdateListener(a -> waterView.setFillLevel((Float) a.getAnimatedValue()));
-        fillAnim.start();
+        int fullFillMs = ChargingAnimationPrefs.fillDurationMsForFullFill(speedPercent);
+        long durationMs = Math.max(1L, Math.round(fullFillMs * Math.max(0f, targetFillLevel)));
+        initialFillAnimator.setDuration(durationMs);
+        initialFillAnimator.setInterpolator(new LinearInterpolator());
+        initialFillAnimator.addUpdateListener(a -> waterView.setFillLevel((Float) a.getAnimatedValue()));
+        initialFillAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                initialFillAnimating = false;
+                if (waterView != null) {
+                    // 动画期间可能收到电量更新，结束后对齐到最新目标值。
+                    waterView.setFillLevel(targetFillLevel);
+                }
+            }
+
+            @Override
+            public void onAnimationCancel(android.animation.Animator animation) {
+                initialFillAnimating = false;
+            }
+        });
+        initialFillAnimator.start();
 
         batteryTextView.setAlpha(0f);
         batteryTextView.setScaleX(0.8f);
@@ -558,48 +569,24 @@ public class RearScreenChargingActivity extends ComponentActivity {
             .scaleY(1f)
             .setDuration(800)
             .setStartDelay(600)
-            .setInterpolator(new DecelerateInterpolator(2f))
+            .setInterpolator(new DecelerateInterpolator(2.0f))
             .start();
 
-        if (!debugMainPreview) {
-            View container = findViewById(R.id.charging_container);
-            if (container != null) {
-                container.removeCallbacks(autoFinishRunnable);
-                if (!isChargingAlwaysOn()) {
-                    // 8s 从「即将首帧绘制」起算，避免 Surface 未就绪时已倒计时结束 → 黑屏到快结束才闪一下
-                    scheduleAutoFinishAfterFirstPreDraw(container);
-                }
-                autoFinishScheduled = true;
-            }
-        }
-    }
-
-    private void scheduleAutoFinishAfterFirstPreDraw(View container) {
-        ViewTreeObserver observer = container.getViewTreeObserver();
-        if (!observer.isAlive()) {
-            container.postDelayed(autoFinishRunnable, AUTO_FINISH_MS);
-            return;
-        }
-        observer.addOnPreDrawListener(new ViewTreeObserver.OnPreDrawListener() {
-            @Override
-            public boolean onPreDraw() {
-                ViewTreeObserver obs = container.getViewTreeObserver();
-                if (obs.isAlive()) {
-                    obs.removeOnPreDrawListener(this);
-                }
-                if (isFinishing() || !chargingUiInflated) {
-                    return true;
-                }
-                container.removeCallbacks(autoFinishRunnable);
+        View container = findViewById(R.id.charging_container);
+        if (container != null) {
+            container.removeCallbacks(autoFinishRunnable);
+            if (!isChargingAlwaysOn() && !rearScreenOffPaused) {
                 container.postDelayed(autoFinishRunnable, AUTO_FINISH_MS);
-                return true;
+                LogHelper.d(TAG, "动画已启动，" + (AUTO_FINISH_MS / 1000L) + " 秒后自动关闭");
+            } else {
+                LogHelper.d(TAG, "动画已启动，充电常亮模式，不自动关闭");
             }
-        });
+            autoFinishScheduled = true;
+        }
     }
 
     private boolean isChargingAlwaysOn() {
-        return getSharedPreferences(ChargingAnimationPrefs.PREFS_NAME, MODE_PRIVATE)
-            .getBoolean(ChargingAnimationPrefs.KEY_ALWAYS_ON, false);
+        return ChargingAnimationPrefs.isAlwaysOn(this);
     }
 
     private void updateBatteryLevel(int newLevel) {
@@ -608,16 +595,15 @@ public class RearScreenChargingActivity extends ComponentActivity {
         targetFillLevel = newLevel / 100f;
         try {
             if (waterView != null) {
-                waterView.setFillLevel(newLevel / 100f);
+                // 首段涨水动画期间仅更新目标值，不直接跳液位，避免覆盖滑块控制的时长。
+                if (!initialFillAnimating) {
+                    waterView.setFillLevel(targetFillLevel);
+                }
                 waterView.setBatteryPercentForTint(newLevel);
             }
             if (batteryTextView != null) {
                 batteryTextView.setText(newLevel + "%");
-                if (newLevel > 20) {
-                    batteryTextView.setTextColor(0xFF66FF99);
-                } else {
-                    batteryTextView.setTextColor(0xFFFFC896);
-                }
+                batteryTextView.setTextColor(0xFFFFFFFF);
             }
         } catch (Exception e) {
             LogHelper.w(TAG, "updateBatteryLevel: " + e.getMessage());
@@ -627,6 +613,16 @@ public class RearScreenChargingActivity extends ComponentActivity {
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            int mainMode = RearMirootProjectionLifecycle.resolveMainDisplayProjectionMode(
+                    getCurrentDisplayIdSafe(), false, chargingUiInflated);
+            if (RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode)) {
+                if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
+                    finishFromMiRoot();
+                }
+                return;
+            }
+        }
         ensureChargingUiOnRearDisplay();
     }
 
@@ -634,9 +630,7 @@ public class RearScreenChargingActivity extends ComponentActivity {
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            if (chargingUiInflated) {
-                hideSystemUi();
-            }
+            hideSystemUi();
             ensureChargingUiOnRearDisplay();
         }
     }
@@ -645,58 +639,73 @@ public class RearScreenChargingActivity extends ComponentActivity {
     protected void onResume() {
         super.onResume();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            int did = getCurrentDisplayIdSafe();
-            if (did != Display.DEFAULT_DISPLAY && !chargingUiInflated) {
-                applyRearChargingWindowFlags();
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                    setShowWhenLocked(true);
-                    setTurnScreenOn(true);
+            int mainMode = RearMirootProjectionLifecycle.resolveMainDisplayProjectionMode(
+                    getCurrentDisplayIdSafe(), false, chargingUiInflated);
+            if (RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode)) {
+                if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
+                    LogHelper.w(TAG, "主屏禁止展示充电动画 UI，结束");
+                    finishFromMiRoot();
                 }
+                return;
             }
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+        }
+        getWindow().addFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         ensureChargingUiOnRearDisplay();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             int did = getCurrentDisplayIdSafe();
-            if (did != Display.DEFAULT_DISPLAY && !autoFinishScheduled && chargingUiInflated && !debugMainPreview) {
-                if (!isChargingAlwaysOn()) {
-                    LogHelper.d(TAG, "未安排自动销毁，补偿 " + RESUME_COMPENSATE_FINISH_MS + "ms 后 finish");
-                    new Handler(Looper.getMainLooper()).postDelayed(this::finish, RESUME_COMPENSATE_FINISH_MS);
-                }
+            if (did != Display.DEFAULT_DISPLAY
+                && !chargingUiInflated
+                && !autoFinishScheduled
+                && !isChargingAlwaysOn()
+                && !rearScreenOffPaused) {
+                LogHelper.d(TAG, "未安排自动销毁，补偿 " + RESUME_COMPENSATE_FINISH_MS + "ms 后 finish");
+                mainHandler.removeCallbacks(resumeCompensateFinishRunnable);
+                mainHandler.postDelayed(resumeCompensateFinishRunnable, RESUME_COMPENSATE_FINISH_MS);
                 autoFinishScheduled = true;
             }
         }
-        // 自动结束改由 scheduleAutoFinishAfterFirstPreDraw 在首帧前启动，不在每次 onResume 重置 8s，避免与 Surface 时序打架
     }
 
     /**
-     * 与 {@link com.wmqc.miroot.car.RearScreenCarControlActivity#hideSystemUI} 一致：仅隐藏状态栏，
-     * 保留导航栏/手势 inset，避免边缘滑动被系统当成「拉出系统栏」而非返回。
+     * 对齐 3.4：全屏显示，隐藏状态栏与导航栏。
      */
     private void hideSystemUi() {
-        RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
         View decor = getWindow().getDecorView();
+        if (decor.getWidth() <= 0 || decor.getHeight() <= 0) {
+            // 迁屏/首帧阶段 decor 可能为 0×0；此时强行 setDecorFitsSystemWindows/隐藏系统栏容易触发 InsetsSource 刷屏。
+            if (hideSystemUiRetry++ < 6) {
+                decor.postDelayed(this::hideSystemUi, 16L);
+            }
+            return;
+        }
+        hideSystemUiRetry = 0;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             getWindow().setDecorFitsSystemWindows(false);
             android.view.WindowInsetsController c = decor.getWindowInsetsController();
             if (c != null) {
-                c.show(android.view.WindowInsets.Type.navigationBars());
-                c.hide(android.view.WindowInsets.Type.statusBars());
-                c.setSystemBarsBehavior(
-                    android.view.WindowInsetsController.BEHAVIOR_DEFAULT);
+                c.hide(android.view.WindowInsets.Type.statusBars() | android.view.WindowInsets.Type.navigationBars());
+                c.setSystemBarsBehavior(android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
             }
         } else {
-            int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                | View.SYSTEM_UI_FLAG_FULLSCREEN;
+            int flags = View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
             decor.setSystemUiVisibility(flags);
         }
     }
 
     @Override
     protected void onDestroy() {
-        stopRearMigrationWatch();
-        cancelMainPlaceholderTimeout();
-        cancelVerifyDefaultDisplayAfterInflate();
         View decor = getWindow() != null ? getWindow().getDecorView() : null;
         if (decor != null) {
             decor.removeCallbacks(autoFinishRunnable);
@@ -705,17 +714,28 @@ public class RearScreenChargingActivity extends ComponentActivity {
         if (container != null) {
             container.removeCallbacks(autoFinishRunnable);
         }
-        if (displayManager != null) {
-            try {
-                displayManager.unregisterDisplayListener(displayListener);
-            } catch (Exception ignored) {
-            }
-            displayManager = null;
+        if (initialFillAnimator != null) {
+            initialFillAnimator.cancel();
+            initialFillAnimator = null;
         }
-        try {
-            unregisterReceiver(finishReceiver);
-        } catch (Exception e) {
-            LogHelper.w(TAG, "unregisterReceiver: " + e.getMessage());
+        initialFillAnimating = false;
+        mainHandler.removeCallbacks(rehideSystemUiRunnable);
+        mainHandler.removeCallbacks(resumeCompensateFinishRunnable);
+        if (finishReceiverRegistered) {
+            try {
+                unregisterReceiver(finishReceiver);
+            } catch (Exception e) {
+                LogHelper.w(TAG, "unregisterReceiver: " + e.getMessage());
+            }
+            finishReceiverRegistered = false;
+        }
+        if (screenStateReceiverRegistered) {
+            try {
+                unregisterReceiver(screenStateReceiver);
+            } catch (Exception e) {
+                LogHelper.w(TAG, "unregister screenStateReceiver: " + e.getMessage());
+            }
+            screenStateReceiverRegistered = false;
         }
         final int displayIdBeforeDestroy =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ? getCurrentDisplayIdSafe() : Display.DEFAULT_DISPLAY;
@@ -726,118 +746,203 @@ public class RearScreenChargingActivity extends ComponentActivity {
             return;
         }
 
-        RearScreenWakeManager.getInstance().stopWakeService(
-            getApplicationContext(), RearScreenChargingActivity.class);
-
         boolean shouldRestore = RearChargingAnimationCoordinator.endAnimation(
             RearChargingAnimationCoordinator.AnimationType.CHARGING);
         currentInstance = null;
+
         if (!shouldRestore) {
-            LogHelper.d(TAG, "充电动画被打断结束，跳过恢复背屏");
-            if (rearTaskId > 0) {
-                RearAssistService.resumeMonitoringAfterCharging();
-                RearSwitchKeeperService.resumeMonitoring();
-            }
+            LogHelper.d(TAG, "充电动画被打断，跳过恢复背屏");
             return;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            if (displayIdBeforeDestroy != Display.DEFAULT_DISPLAY) {
-                restoreRearAfterCharging();
-            }
+        int rearDisplay = rearDisplayIdForRestore > 0 ? rearDisplayIdForRestore : 1;
+        if (displayIdBeforeDestroy != rearDisplay) {
+            return;
         }
-    }
-
-    private void restoreRearAfterCharging() {
-        final int tid = rearTaskId;
-        final boolean resumeAssist = tid > 0;
+        if (!finishRequestedByMiRoot) {
+            restoreAfterOverlayDismissWithoutOfficialLauncher();
+            return;
+        }
+        final int finalTaskId = resolveUnderlyingProjectionTaskId();
         new Thread(() -> {
             try {
-                Thread.sleep(50);
-                ITaskService ts = ChargingService.getTaskService();
-                if (ts == null) {
-                    LogHelper.w(TAG, "恢复背屏：TaskService 为空，尝试特权 shell");
-                    if (tid > 0) {
-                        String cmd = "service call activity_task 50 i32 " + tid + " i32 " + rearDisplayIdForRestore;
-                        ChargingRestoreFallback.runPrivilegedShell(cmd);
-                        ChargingRestoreFallback.runPrivilegedShell(cmd);
-                    } else {
-                        ChargingRestoreFallback.runPrivilegedShell(
-                            "am start --display " + rearDisplayIdForRestore
-                                + " -n com.xiaomi.subscreencenter/.subscreenlauncher.SubScreenLauncherActivity");
-                    }
-                    return;
-                }
-                if (tid > 0) {
-                    restoreRearProjectedTask(ts, tid);
+                Thread.sleep(50L);
+                if (finalTaskId > 0) {
+                    restoreRearProjectedTask(finalTaskId);
                 } else {
-                    restoreRearOfficialLauncher(ts);
+                    restoreRearOfficialLauncher();
                 }
             } catch (Exception e) {
                 LogHelper.w(TAG, "恢复背屏失败: " + e.getMessage());
-            } finally {
-                if (resumeAssist) {
-                    RearAssistService.resumeMonitoringAfterCharging();
-                    RearProjectionProximityGate.resumeAfterCharging();
-                    RearSwitchKeeperService.resumeMonitoring();
-                }
             }
         }, "miroot-charging-restore").start();
     }
 
-    private void restoreRearProjectedTask(ITaskService ts, int taskId) {
-        int d = rearDisplayIdForRestore;
-        String shellMove = "service call activity_task 50 i32 " + taskId + " i32 " + d;
-        try {
-            ChargingOfficialSubscreen.applyDisableBeforeChargingFlow(getApplicationContext(), ts);
-            Thread.sleep(200);
-            ts.moveTaskToDisplay(taskId, d);
-            Thread.sleep(200);
-            ts.moveTaskToDisplay(taskId, d);
-            Thread.sleep(300);
-            if (!ts.isTaskOnDisplay(taskId, d)) {
-                LogHelper.w(TAG, "taskId=" + taskId + " 未在背屏，shell 再试并回退官方桌面");
-                ChargingRestoreFallback.runPrivilegedShell(shellMove);
-                ChargingRestoreFallback.runPrivilegedShell(shellMove);
-                restoreRearOfficialLauncher(ts);
-                return;
-            }
-            RearAssistService.sync(getApplicationContext());
-            LogHelper.d(TAG, "投屏 task 已恢复，已请求 RearAssistService.sync");
-        } catch (RemoteException e) {
-            LogHelper.w(TAG, "恢复投屏 task 失败: " + e.getMessage());
-            ChargingRestoreFallback.runPrivilegedShell(shellMove);
+    /**
+     * 双击息屏等系统销毁覆盖层：露出下层投屏，不拉起官方副屏 Launcher。
+     */
+    private void restoreAfterOverlayDismissWithoutOfficialLauncher() {
+        prepareRearProjectionVisibleBeforeFinish();
+        final int taskId = resolveUnderlyingProjectionTaskId();
+        new Thread(() -> {
             try {
-                restoreRearOfficialLauncher(ts);
-            } catch (Exception e2) {
-                LogHelper.w(TAG, "回退官方桌面失败: " + e2.getMessage());
+                Thread.sleep(50L);
+                ITaskService ts = ChargingService.getTaskService();
+                ChargingOfficialSubscreen.reviveOfficialPackageAfterChargingWithoutLauncher(
+                    getApplicationContext(), ts);
+                if (taskId > 0) {
+                    restoreRearProjectedTask(taskId);
+                } else {
+                    RearSwitchKeeperService.resumeMonitoring();
+                    int d = rearDisplayIdForRestore > 0 ? rearDisplayIdForRestore : 1;
+                    if (ts != null) {
+                        ts.executeShellCommand("input -d " + d + " keyevent KEYCODE_WAKEUP");
+                    }
+                    LogHelper.d(TAG, "覆盖层系统销毁：未解析到投屏 task，已跳过官方 Launcher");
+                }
+            } catch (Exception e) {
+                LogHelper.w(TAG, "覆盖层销毁后恢复投屏失败: " + e.getMessage());
+            }
+        }, "miroot-charging-overlay-dismiss").start();
+    }
+
+    /** 解析充电覆盖层下方的 MiRoot 投屏 task（歌词 / 车控 / 桌面）。 */
+    private int resolveUnderlyingProjectionTaskId() {
+        if (rearTaskId > 0) {
+            return rearTaskId;
+        }
+        String lastTask = SwitchToRearQsTileService.getLastMovedTask();
+        if (lastTask != null && lastTask.contains(":") && !lastTask.contains("RearScreenChargingActivity")) {
+            try {
+                String[] parts = lastTask.split(":");
+                int tid = Integer.parseInt(parts[parts.length - 1].trim());
+                ITaskService ts = ChargingService.getTaskService();
+                if (ts != null && ts.isTaskOnDisplay(tid, rearDisplayIdForRestore)) {
+                    return tid;
+                }
+            } catch (Exception e) {
+                LogHelper.w(TAG, "parse lastMovedTask: " + e.getMessage());
+            }
+        }
+        try {
+            ITaskService ts = ChargingService.getTaskService();
+            if (ts == null) {
+                return -1;
+            }
+            String stack = ts.executeShellCommandWithResult("am stack list");
+            if (stack == null || stack.isEmpty()) {
+                return -1;
+            }
+            int rearDisplay = rearDisplayIdForRestore > 0 ? rearDisplayIdForRestore : 1;
+            boolean inTargetDisplay = false;
+            for (String line : stack.split("\n")) {
+                if (line.startsWith("RootTask")) {
+                    int did = parseRootTaskDisplayIdFromLine(line);
+                    inTargetDisplay = (did == rearDisplay);
+                    continue;
+                }
+                if (!inTargetDisplay || !line.contains("taskId=")) {
+                    continue;
+                }
+                if (line.contains("RearScreenLyricsActivity")
+                    || line.contains("RearScreenCarControlActivity")
+                    || line.contains("RearScreenDesktopActivity")) {
+                    int tidStart = line.indexOf("taskId=") + 7;
+                    int tidEnd = line.indexOf(':', tidStart);
+                    if (tidEnd > tidStart) {
+                        return Integer.parseInt(line.substring(tidStart, tidEnd).trim());
+                    }
+                }
             }
         } catch (Exception e) {
-            LogHelper.w(TAG, "恢复投屏 task 异常: " + e.getMessage());
-            try {
-                restoreRearOfficialLauncher(ts);
-            } catch (Exception e2) {
-                LogHelper.w(TAG, "回退官方桌面失败: " + e2.getMessage());
-            }
+            LogHelper.w(TAG, "resolveUnderlyingProjectionTaskId: " + e.getMessage());
+        }
+        return -1;
+    }
+
+    private static int parseRootTaskDisplayIdFromLine(String line) {
+        int idx = line.indexOf("displayId=");
+        if (idx < 0) {
+            return -1;
+        }
+        int start = idx + 10;
+        int end = start;
+        while (end < line.length() && Character.isDigit(line.charAt(end))) {
+            end++;
+        }
+        if (end <= start) {
+            return -1;
+        }
+        try {
+            return Integer.parseInt(line.substring(start, end));
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 
-    /**
-     * 仅 {@code am start} 恢复官方副屏桌面，不先 {@code enableSubScreenLauncher}。
-     */
-    private void restoreRearOfficialLauncher(ITaskService ts) {
-        String am = "am start --display " + rearDisplayIdForRestore
-            + " -n com.xiaomi.subscreencenter/.subscreenlauncher.SubScreenLauncherActivity";
+    /** 对齐 3.4：恢复投送 app 并重启 Keeper，不 enable 官方 Launcher。 */
+    private void restoreRearProjectedTask(int taskId) {
         try {
+            ITaskService ts = ChargingService.getTaskService();
+            int d = rearDisplayIdForRestore > 0 ? rearDisplayIdForRestore : 1;
             if (ts != null) {
-                ts.executeShellCommand(am);
+                ts.forceStopOfficialSubscreenForCharging();
+                Thread.sleep(200L);
+                ts.executeShellCommand("service call activity_task 50 i32 " + taskId + " i32 " + d);
+                Thread.sleep(200L);
+                ts.executeShellCommand("service call activity_task 50 i32 " + taskId + " i32 " + d);
+                Thread.sleep(300L);
+                restartKeeperService();
+                LogHelper.d(TAG, "投送 app 已恢复 (taskId=" + taskId + ")");
             } else {
-                ChargingRestoreFallback.runPrivilegedShell(am);
+                ChargingRestoreFallback.runPrivilegedShell(
+                    "service call activity_task 50 i32 " + taskId + " i32 " + d);
             }
-            LogHelper.d(TAG, "已恢复官方副屏桌面");
+        } catch (Exception e) {
+            LogHelper.w(TAG, "恢复投送 app 失败: " + e.getMessage());
+            RearSwitchKeeperService.resumeMonitoring();
+            restoreRearOfficialLauncher();
+        }
+    }
+
+    /** 对齐 3.4：恢复官方副屏 Launcher。 */
+    private void restoreRearOfficialLauncher() {
+        try {
+            ITaskService ts = ChargingService.getTaskService();
+            int d = rearDisplayIdForRestore > 0 ? rearDisplayIdForRestore : 1;
+            String cmd = "am start --display " + d
+                + " -n com.xiaomi.subscreencenter/.subscreenlauncher.SubScreenLauncherActivity";
+            if (ts != null) {
+                ts.executeShellCommand(cmd);
+            } else {
+                ChargingRestoreFallback.runPrivilegedShell(cmd);
+            }
+            LogHelper.d(TAG, "官方副屏桌面已恢复");
         } catch (Exception e) {
             LogHelper.w(TAG, "恢复官方副屏桌面失败: " + e.getMessage());
-            ChargingRestoreFallback.runPrivilegedShell(am);
+        }
+    }
+
+    /** 对齐 3.4：恢复投送后重启 {@link RearSwitchKeeperService}。 */
+    private void restartKeeperService() {
+        try {
+            String lastTask = SwitchToRearQsTileService.getLastMovedTask();
+            if (lastTask == null) {
+                return;
+            }
+            Intent serviceIntent = new Intent(this, RearSwitchKeeperService.class);
+            serviceIntent.putExtra("lastMovedTask", lastTask);
+            boolean keepScreenOn = true;
+            try {
+                keepScreenOn = getSharedPreferences("FlutterSharedPreferences", MODE_PRIVATE)
+                    .getBoolean("flutter.keep_screen_on_enabled", true);
+            } catch (Exception ignored) {
+            }
+            serviceIntent.putExtra("keepScreenOnEnabled", keepScreenOn);
+            startService(serviceIntent);
+            LogHelper.d(TAG, "RearSwitchKeeperService 已重启: " + lastTask);
+        } catch (Exception e) {
+            LogHelper.w(TAG, "重启 Keeper 失败: " + e.getMessage());
         }
     }
 }

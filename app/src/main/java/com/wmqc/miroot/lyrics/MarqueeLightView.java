@@ -16,6 +16,7 @@
 package com.wmqc.miroot.lyrics;
 
 import android.content.Context;
+import android.os.SystemClock;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -54,7 +55,7 @@ public class MarqueeLightView extends View {
     private float systemCornerRadius = DEFAULT_CORNER_RADIUS; // 系统圆角半径（从系统获取）
     
     /**
-     * 固定圆角半径（px），非 null 时不检测系统圆角，直接使用此值（广播启动音乐投屏用 101px）
+     * 固定圆角半径（px），非 null 时不检测系统圆角，直接使用此值（广播/锁屏等场景见 {@link ProjectionHelper#REAR_PROJECTION_FIXED_CORNER_RADIUS_PX}）
      */
     private Float fixedCornerRadiusPx = null;
     
@@ -63,20 +64,66 @@ public class MarqueeLightView extends View {
      */
     private boolean isMainScreenLandscapeMode = false;
     private static final float SNAKE_LENGTH = 0.3f;          // 贪吃蛇长度（占路径总长度的比例，30%）
-    private static final long COLOR_CHANGE_INTERVAL_BASE = 3000;  // 基础颜色变化间隔（毫秒）
+    private static final long COLOR_CHANGE_INTERVAL_BASE = 5000;  // 基础颜色变化间隔（毫秒）
+    private static final long COLOR_CHANGE_INTERVAL_MIN_MS = 1000L;
+    private static final long COLOR_CHANGE_INTERVAL_MAX_MS = 10000L;
+    private static final long COLOR_SYNC_SAMPLE_INTERVAL_MS = 140L;
     private long currentColorChangeInterval = COLOR_CHANGE_INTERVAL_BASE;  // 当前颜色变化间隔（关联音谱）
     
     // 随机颜色相关
     private int[] lightColors = new int[LIGHT_COUNT];  // 每条光线的颜色
     private long lastColorChangeTime = 0;  // 上次颜色变化时间
+    private long lastColorSyncSampleTime = 0L;
+    private int lastSyncedColor = 0;
     private static final long DEBUG_COLOR_LOG_INTERVAL_MS = 5000L; // debug 下颜色日志最小间隔
     private long lastColorLogTime = 0L;
+    private long perfWindowStartMs = 0L;
+    private int perfFrameCount = 0;
+    private long perfTotalDrawNs = 0L;
+    private long perfMaxDrawNs = 0L;
+    private static final long PERF_WINDOW_MS = 10_000L;
+    private int consecutiveHeavyDrawCount = 0;
+    private int consecutiveCoolDrawCount = 0;
+    private static final long HEAVY_DRAW_NS = 8_000_000L;
+    private static final int HEAVY_DRAW_TRIGGER_COUNT = 6;
+    private static final int COOL_DRAW_RECOVER_COUNT = 160;
     
     // 动画
     private ValueAnimator animator;
     private float animationProgress = 0f;
     private long baseAnimationDuration = ANIMATION_DURATION;  // 基础动画时长
     private long currentAnimationDuration = ANIMATION_DURATION;  // 当前动画时长（根据节奏调整）
+
+    /**
+     * 某些机型/场景（息屏/锁屏、窗口短暂失焦、系统动画冻结、低内存）下，ValueAnimator 可能停止回调但不一定触发我们期望的生命周期。
+     * 这里增加一个轻量 watchdog：若检测到“长时间没有 onAnimationUpdate”，则主动重建动画，避免跑马灯卡住不转。
+     */
+    private static final long WATCHDOG_TICK_MS = 1500L;
+    private static final long WATCHDOG_STALE_MS = 2200L;
+    private long lastAnimatorTickUptimeMs = 0L;
+    private boolean watchdogRunning = false;
+    private final Runnable watchdogRunnable = new Runnable() {
+        @Override
+        public void run() {
+            watchdogRunning = false;
+            if (!shouldAnimateNow()) {
+                // 不需要动画时不循环，等待外部生命周期触发。
+                return;
+            }
+            boolean running = (animator != null && animator.isRunning());
+            long now = SystemClock.uptimeMillis();
+            boolean stale = (lastAnimatorTickUptimeMs > 0L) && (now - lastAnimatorTickUptimeMs) >= WATCHDOG_STALE_MS;
+            if (!running || stale) {
+                if (BuildConfig.DEBUG) {
+                    LogHelper.w(TAG, "⚠️ watchdog 检测到跑马灯可能卡住：running=" + running
+                            + ", stale=" + stale + ", lastTick=" + lastAnimatorTickUptimeMs + ", now=" + now
+                            + "，重启动画");
+                }
+                restartAnimationSafely();
+            }
+            scheduleWatchdog();
+        }
+    };
     
     
     // 绘图
@@ -121,6 +168,8 @@ public class MarqueeLightView extends View {
     }
     private ColorSyncCallback colorSyncCallback = null;  // 颜色同步回调
     private boolean colorSyncEnabled = false;  // 是否启用颜色联动
+    private boolean performanceGuardEnabled = false;
+    private boolean lightweightModeEnabled = false;
     
     // 跑马灯控制
     private boolean marqueeLightEnabled = true;  // 是否启用跑马灯（可以独立控制）
@@ -130,14 +179,15 @@ public class MarqueeLightView extends View {
     }
     
     /**
-     * 广播启动时使用：构造时即设固定 101px 圆角，避免 onSizeChanged 竞态导致跑马灯/霓虹灯圆角有时对有时错
+     * 广播启动时使用：构造时即设固定圆角，避免 onSizeChanged 竞态导致跑马灯/霓虹灯圆角有时对有时错
      */
-    public MarqueeLightView(Context context, boolean useFixedCornerRadius101) {
+    public MarqueeLightView(Context context, boolean useFixedRearProjectionCornerRadius) {
         super(context);
-        if (useFixedCornerRadius101) {
-            fixedCornerRadiusPx = 101f;
-            systemCornerRadius = 101f;
-            LogHelper.d(TAG, "✅ 广播启动：跑马灯/霓虹灯构造时即使用固定圆角 101px");
+        if (useFixedRearProjectionCornerRadius) {
+            fixedCornerRadiusPx = ProjectionHelper.REAR_PROJECTION_FIXED_CORNER_RADIUS_PX;
+            systemCornerRadius = ProjectionHelper.REAR_PROJECTION_FIXED_CORNER_RADIUS_PX;
+            LogHelper.d(TAG, "✅ 广播启动：跑马灯/霓虹灯构造时即使用固定圆角 "
+                    + ProjectionHelper.REAR_PROJECTION_FIXED_CORNER_RADIUS_PX + "px");
         }
         init();
     }
@@ -230,54 +280,20 @@ public class MarqueeLightView extends View {
     }
     
     /**
-     * 生成随机颜色：仅使用一组预设高亮色（保证始终为高亮颜色值）。
+     * 生成随机颜色（旧版风格：HSV 高饱和 + 高亮度连续随机）。
      */
     private void generateRandomColors() {
-        // 高亮色调色板（ARGB）：一律高饱和高亮，覆盖红橙黄绿青蓝紫等
-        final int[] highlightPalette = new int[] {
-                0xFFFF1744, // 亮红
-                0xFFFF4081, // 亮粉
-                0xFFFF6E40, // 橙红
-                0xFFFF9100, // 亮橙
-                0xFFFFC107, // 琥珀黄
-                0xFFFFEA00, // 柠檬黄
-                0xFFCDFF00, // 黄绿
-                0xFF00E676, // 祖母绿
-                0xFF69F0AE, // 鲜绿色
-                0xFF1DE9B6, // 青绿
-                0xFF00E5FF, // 湖蓝
-                0xFF40C4FF, // 亮蓝
-                0xFF2979FF, // 亮靛蓝
-                0xFF7C4DFF, // 亮紫
-                0xFFE040FB, // 品红紫
-                0xFFFF5252, // 强红
-                0xFFFF1744, // 亮红
-                0xFFFF80AB, // 浅粉
-                0xFFFFAB91, // 浅橘红
-                0xFFFFD740, // 金黄
-                0xFFFFF300, // 亮黄
-                0xFF76FF03, // 亮柠檬绿
-                0xFF64DD17, // 强绿
-                0xFF00C853, // 深绿
-                0xFF00BFA5, // 青绿
-                0xFF00C6FF, // 天蓝
-                0xFF00E5FF, // 亮青蓝
-                0xFF4D7CFF, // 蓝紫
-                0xFF3D5AFE, // 靛蓝
-                0xFF8C9EFF, // 淡靛蓝
-                0xFFD500F9, // 强紫
-                0xFFAA00FF  // 强紫红
-        };
-        final int n = highlightPalette.length;
         for (int i = 0; i < LIGHT_COUNT; i++) {
-            int idx = random.nextInt(n);
-            lightColors[i] = highlightPalette[idx];
+            float hue = random.nextFloat() * 360f;
+            float saturation = 0.85f + random.nextFloat() * 0.15f;
+            float value = 0.85f + random.nextFloat() * 0.15f;
+            lightColors[i] = Color.HSVToColor(new float[]{hue, saturation, value});
         }
         lastColorChangeTime = System.currentTimeMillis();
         if (BuildConfig.DEBUG) {
             LogHelper.d(
                     TAG,
-                    "🎨 高亮随机颜色: " +
+                    "🎨 生成随机颜色: " +
                             String.format("#%06X", lightColors[0] & 0x00FFFFFF) + ", " +
                             String.format("#%06X", lightColors[1] & 0x00FFFFFF)
             );
@@ -315,7 +331,7 @@ public class MarqueeLightView extends View {
      */
     private void detectSystemCornerRadius() {
         try {
-            // 广播启动时使用固定 101px 圆角，不检测系统（跑马灯和霓虹灯边框与深渊镜一致）
+            // 广播启动时使用固定圆角（与深渊镜一致），不检测系统
             if (fixedCornerRadiusPx != null) {
                 systemCornerRadius = fixedCornerRadiusPx;
                 LogHelper.d(TAG, "✅ 广播启动：跑马灯/霓虹灯使用固定圆角半径: " + systemCornerRadius + "px");
@@ -599,6 +615,7 @@ public class MarqueeLightView extends View {
             @Override
             public void onAnimationUpdate(ValueAnimator animation) {
                 animationProgress = (Float) animation.getAnimatedValue();
+                lastAnimatorTickUptimeMs = SystemClock.uptimeMillis();
                 postInvalidateOnAnimation();
             }
         });
@@ -618,6 +635,8 @@ public class MarqueeLightView extends View {
         });
         
         animator.start();
+        lastAnimatorTickUptimeMs = SystemClock.uptimeMillis();
+        scheduleWatchdog();
         LogHelper.d(TAG, "🚀 启动跑马灯动画");
     }
     
@@ -658,17 +677,82 @@ public class MarqueeLightView extends View {
     private int resolveBorderBaseColor() {
         if (colorSyncEnabled && colorSyncCallback != null) {
             try {
-                return colorSyncCallback.getSyncColor() & 0x00FFFFFF;
+                int c = colorSyncCallback.getSyncColor();
+                return sanitizeSyncedNeutralColor(c) & 0x00FFFFFF;
             } catch (Exception e) {
                 return NEON_BORDER_COLOR & 0x00FFFFFF;
             }
         }
         return NEON_BORDER_COLOR & 0x00FFFFFF;
     }
+
+    /**
+     * 当歌词侧关闭“随机颜色切换”时，回调通常会给出纯白/纯黑。
+     * 这里把纯白略微压暗、纯黑略微抬亮，边框/跑马灯更柔和且仍保持同色系。
+     */
+    private int sanitizeSyncedNeutralColor(int argb) {
+        int r = (argb >> 16) & 0xFF;
+        int g = (argb >> 8) & 0xFF;
+        int b = argb & 0xFF;
+        if (r >= 250 && g >= 250 && b >= 250) {
+            return 0xFFE6E6E6;
+        }
+        if (r <= 5 && g <= 5 && b <= 5) {
+            return 0xFF111111;
+        }
+        return argb;
+    }
+
+    private void noteDrawMetrics(long drawCostNs) {
+        long now = SystemClock.uptimeMillis();
+        if (perfWindowStartMs <= 0L) {
+            perfWindowStartMs = now;
+        }
+        perfFrameCount++;
+        perfTotalDrawNs += drawCostNs;
+        if (drawCostNs > perfMaxDrawNs) {
+            perfMaxDrawNs = drawCostNs;
+        }
+        if (drawCostNs >= HEAVY_DRAW_NS) {
+            consecutiveHeavyDrawCount++;
+            consecutiveCoolDrawCount = 0;
+        } else {
+            consecutiveCoolDrawCount++;
+            consecutiveHeavyDrawCount = 0;
+        }
+        if (performanceGuardEnabled) {
+            if (!lightweightModeEnabled && consecutiveHeavyDrawCount >= HEAVY_DRAW_TRIGGER_COUNT) {
+                lightweightModeEnabled = true;
+                LogHelper.w(TAG, "⚠️ 跑马灯进入轻量模式：连续重绘耗时偏高");
+            } else if (lightweightModeEnabled && consecutiveCoolDrawCount >= COOL_DRAW_RECOVER_COUNT) {
+                lightweightModeEnabled = false;
+                LogHelper.d(TAG, "✅ 跑马灯退出轻量模式：重绘恢复稳定");
+            }
+        }
+        if (BuildConfig.DEBUG && now - perfWindowStartMs >= PERF_WINDOW_MS) {
+            float fps = (perfFrameCount * 1000f) / Math.max(1f, (now - perfWindowStartMs));
+            float avgMs = perfTotalDrawNs / (float) Math.max(1, perfFrameCount) / 1_000_000f;
+            float maxMs = perfMaxDrawNs / 1_000_000f;
+            LogHelper.dThrottled(
+                    TAG,
+                    "📊 边框渲染窗口: fps=" + String.format(java.util.Locale.US, "%.1f", fps)
+                            + ", avgMs=" + String.format(java.util.Locale.US, "%.2f", avgMs)
+                            + ", maxMs=" + String.format(java.util.Locale.US, "%.2f", maxMs)
+                            + ", lightweight=" + lightweightModeEnabled
+                            + ", guard=" + performanceGuardEnabled,
+                    PERF_WINDOW_MS
+            );
+            perfWindowStartMs = now;
+            perfFrameCount = 0;
+            perfTotalDrawNs = 0L;
+            perfMaxDrawNs = 0L;
+        }
+    }
     
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        final long drawStartNs = System.nanoTime();
         
         if (pathLength == 0 || borderPath == null || screenWidth == 0 || screenHeight == 0) {
             return;
@@ -679,12 +763,14 @@ public class MarqueeLightView extends View {
             int baseColor = resolveBorderBaseColor();
             if (neonEffectsEnabled) {
                 int alphaValue = (int) (neonBorderAlpha * 255);
-                int outerColor1 = (int)(alphaValue * 0.15f) << 24 | baseColor;
-                neonBorderGlowPaint1.setColor(outerColor1);
-                canvas.drawPath(borderPath, neonBorderGlowPaint1);
-                int outerColor2 = (int)(alphaValue * 0.30f) << 24 | baseColor;
-                neonBorderGlowPaint2.setColor(outerColor2);
-                canvas.drawPath(borderPath, neonBorderGlowPaint2);
+                if (!lightweightModeEnabled) {
+                    int outerColor1 = (int)(alphaValue * 0.15f) << 24 | baseColor;
+                    neonBorderGlowPaint1.setColor(outerColor1);
+                    canvas.drawPath(borderPath, neonBorderGlowPaint1);
+                    int outerColor2 = (int)(alphaValue * 0.30f) << 24 | baseColor;
+                    neonBorderGlowPaint2.setColor(outerColor2);
+                    canvas.drawPath(borderPath, neonBorderGlowPaint2);
+                }
                 int outerColor3 = (int)(alphaValue * 0.50f) << 24 | baseColor;
                 neonBorderGlowPaint3.setColor(outerColor3);
                 canvas.drawPath(borderPath, neonBorderGlowPaint3);
@@ -702,30 +788,29 @@ public class MarqueeLightView extends View {
         long currentTime = System.currentTimeMillis();
         if (colorSyncEnabled && colorSyncCallback != null) {
             try {
-                // 从歌词获取颜色并更新跑马灯颜色（实时跟随，不依赖时间间隔）
-                int lyricsColor = colorSyncCallback.getSyncColor();
-                // 检查颜色是否变化，避免不必要的更新
-                boolean colorChanged = false;
-                for (int i = 0; i < LIGHT_COUNT; i++) {
-                    if (lightColors[i] != lyricsColor) {
-                        lightColors[i] = lyricsColor;
-                        colorChanged = true;
-                    }
-                }
-                if (colorChanged) {
-                    lastColorChangeTime = currentTime;
-                    if (BuildConfig.DEBUG && (currentTime - lastColorLogTime) >= DEBUG_COLOR_LOG_INTERVAL_MS) {
-                        lastColorLogTime = currentTime;
-                        LogHelper.d(TAG, "🎨 跑马灯颜色已更新为歌词颜色: " + String.format("#%06X", lyricsColor & 0x00FFFFFF));
+                // 颜色联动采样节流：避免每帧读取颜色回调导致额外负载。
+                if (lastColorSyncSampleTime == 0L || currentTime - lastColorSyncSampleTime >= COLOR_SYNC_SAMPLE_INTERVAL_MS) {
+                    lastColorSyncSampleTime = currentTime;
+                    int lyricsColor = sanitizeSyncedNeutralColor(colorSyncCallback.getSyncColor());
+                    if (lyricsColor != lastSyncedColor) {
+                        for (int i = 0; i < LIGHT_COUNT; i++) {
+                            lightColors[i] = lyricsColor;
+                        }
+                        lastSyncedColor = lyricsColor;
+                        lastColorChangeTime = currentTime;
+                        if (BuildConfig.DEBUG && (currentTime - lastColorLogTime) >= DEBUG_COLOR_LOG_INTERVAL_MS) {
+                            lastColorLogTime = currentTime;
+                            LogHelper.d(TAG, "🎨 跑马灯颜色已更新为歌词颜色: " + String.format("#%06X", lyricsColor & 0x00FFFFFF));
+                        }
                     }
                 }
             } catch (Exception e) {
                 // 如果回调抛出异常（如lyricsView为null），使用随机颜色
-                if (currentTime - lastColorChangeTime > currentColorChangeInterval) {
+                if (currentTime - lastColorChangeTime >= currentColorChangeInterval) {
                     generateRandomColors();
                 }
             }
-        } else if (currentTime - lastColorChangeTime > currentColorChangeInterval) {
+        } else if (currentTime - lastColorChangeTime >= currentColorChangeInterval) {
             // 使用随机颜色生成逻辑
             generateRandomColors();
         }
@@ -783,9 +868,11 @@ public class MarqueeLightView extends View {
                     Shader.TileMode.CLAMP
                 );
                 glowPaint.setShader(glowGradient);
-                glowPaint.setStrokeWidth(lightSize * 4f);
+                glowPaint.setStrokeWidth(lightweightModeEnabled ? (lightSize * 2.4f) : (lightSize * 4f));
                 glowPaint.setMaskFilter(marqueeGlowBlur);
-                canvas.drawPath(snakePathReuse, glowPaint);
+                if (!lightweightModeEnabled || lineIndex == 0) {
+                    canvas.drawPath(snakePathReuse, glowPaint);
+                }
                 glowPaint.setShader(null);
             }
             
@@ -808,6 +895,7 @@ public class MarqueeLightView extends View {
             // 清除shader，避免影响下一条光线
             paint.setShader(null);
         }
+        noteDrawMetrics(System.nanoTime() - drawStartNs);
     }
     
     @Override
@@ -816,9 +904,21 @@ public class MarqueeLightView extends View {
         if (visibility != View.VISIBLE) {
             if (animator != null) animator.cancel();
             stopNeonBorderAnimation();
+            stopWatchdog();
         } else if (screenWidth > 0 && screenHeight > 0) {
             startAnimation();
             if (borderFrameEnabled && neonEffectsEnabled) startNeonBorderAnimation();
+        }
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasWindowFocus) {
+        super.onWindowFocusChanged(hasWindowFocus);
+        if (hasWindowFocus) {
+            // 恢复焦点时确保动画活着（部分机型会在失焦后“冻结”动画但 view 仍可见）
+            if (shouldAnimateNow()) {
+                restartAnimationSafely();
+            }
         }
     }
     
@@ -833,6 +933,7 @@ public class MarqueeLightView extends View {
                 startAnimation();
             }
             if (borderFrameEnabled && neonEffectsEnabled) startNeonBorderAnimation();
+            scheduleWatchdog();
         }
     }
     
@@ -844,6 +945,39 @@ public class MarqueeLightView extends View {
             animator.cancel();
         }
         stopNeonBorderAnimation();
+        stopWatchdog();
+    }
+
+    private boolean shouldAnimateNow() {
+        if (getVisibility() != View.VISIBLE) return false;
+        if (getWindowVisibility() != View.VISIBLE) return false;
+        if (screenWidth <= 0 || screenHeight <= 0) return false;
+        if (borderPath == null || pathLength <= 0f) return false;
+        // 只有跑马灯/边框有任意一个开，才有必要跑动画（否则只会耗电）
+        return marqueeLightEnabled || (borderFrameEnabled && neonEffectsEnabled);
+    }
+
+    private void restartAnimationSafely() {
+        // 避免在非主线程/布局阶段触发；post 到 UI 线程下一帧。
+        post(() -> {
+            if (!shouldAnimateNow()) return;
+            // 统一走 startAnimation：内部会 cancel+recreate，避免 animator 处于异常状态（例如被冻结但 isRunning=true）。
+            startAnimation();
+            if (borderFrameEnabled && neonEffectsEnabled) startNeonBorderAnimation();
+        });
+    }
+
+    private void scheduleWatchdog() {
+        if (watchdogRunning) return;
+        if (!shouldAnimateNow()) return;
+        watchdogRunning = true;
+        removeCallbacks(watchdogRunnable);
+        postDelayed(watchdogRunnable, WATCHDOG_TICK_MS);
+    }
+
+    private void stopWatchdog() {
+        watchdogRunning = false;
+        removeCallbacks(watchdogRunnable);
     }
     
     /**
@@ -861,9 +995,26 @@ public class MarqueeLightView extends View {
      * 设置动画速度（毫秒）
      */
     public void setAnimationDuration(long duration) {
+        long safeDuration = Math.max(1200L, Math.min(12000L, duration));
+        baseAnimationDuration = safeDuration;
+        currentAnimationDuration = safeDuration;
         if (animator != null) {
-            animator.setDuration(duration);
+            animator.setDuration(safeDuration);
         }
+    }
+
+    /**
+     * 设置跑马灯颜色刷新节奏（毫秒），与歌词调试页保持同频。
+     */
+    public void setColorChangeIntervalMs(long intervalMs) {
+        long safeInterval = Math.max(COLOR_CHANGE_INTERVAL_MIN_MS, Math.min(COLOR_CHANGE_INTERVAL_MAX_MS, intervalMs));
+        if (currentColorChangeInterval == safeInterval) {
+            return;
+        }
+        currentColorChangeInterval = safeInterval;
+        // 参数更新后尽快切到新节奏，避免体感滞后。
+        lastColorChangeTime = 0L;
+        postInvalidateOnAnimation();
     }
     
     /**
@@ -917,7 +1068,7 @@ public class MarqueeLightView extends View {
         }
         
         neonBorderAnimator = ValueAnimator.ofFloat(0.3f, 1.0f);
-        neonBorderAnimator.setDuration(2000);  // 2秒一个周期
+        neonBorderAnimator.setDuration(lightweightModeEnabled ? 2800 : 2000);
         neonBorderAnimator.setInterpolator(new LinearInterpolator());
         neonBorderAnimator.setRepeatCount(ValueAnimator.INFINITE);
         neonBorderAnimator.setRepeatMode(ValueAnimator.REVERSE);  // 往返动画
@@ -1047,10 +1198,34 @@ public class MarqueeLightView extends View {
     public void setColorSyncEnabled(boolean enabled) {
         this.colorSyncEnabled = enabled;
     }
+
+    public void setPerformanceGuardEnabled(boolean enabled) {
+        performanceGuardEnabled = enabled;
+        if (!enabled) {
+            consecutiveHeavyDrawCount = 0;
+            consecutiveCoolDrawCount = 0;
+        }
+    }
+
+    public void setLightweightModeEnabled(boolean enabled) {
+        if (lightweightModeEnabled == enabled) {
+            return;
+        }
+        lightweightModeEnabled = enabled;
+        if (borderFrameEnabled && neonEffectsEnabled) {
+            startNeonBorderAnimation();
+        }
+        invalidate();
+        LogHelper.d(TAG, "🪶 跑马灯轻量模式: " + (enabled ? "启用" : "关闭"));
+    }
+
+    public boolean isLightweightModeEnabled() {
+        return lightweightModeEnabled;
+    }
     
     /**
-     * 设置固定圆角半径（px），用于广播启动的音乐投屏，跑马灯和霓虹灯边框使用 101px 固定值
-     * @param px 圆角半径（像素），如 101f；传 0 或负数可恢复为检测系统圆角
+     * 设置固定圆角半径（px）；默认广播场景可与 {@link ProjectionHelper#REAR_PROJECTION_FIXED_CORNER_RADIUS_PX} 对齐
+     * @param px 圆角半径（像素）；传 0 或负数可恢复为检测系统圆角
      */
     public void setFixedCornerRadiusPx(float px) {
         fixedCornerRadiusPx = (px > 0) ? px : null;

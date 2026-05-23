@@ -8,7 +8,7 @@ import java.io.File
 import java.util.Locale
 
 /**
- * 音乐投屏歌词字体：投屏模式与深渊镜模式各自可选。
+ * 背屏歌词字体（普通 / 分词 / 深渊镜共用一套偏好：projectionLyricsFont）。
  * 持久化 id 为 [ID_SYSTEM] / [ID_MFGEHEI] / [ID_CUSTOM]（自定义须配合应用内复制的绝对路径）。
  */
 object LyricsFontHelper {

@@ -1,4 +1,5 @@
 package com.wmqc.miroot.ui.features
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.app.Dialog
 import android.content.BroadcastReceiver
@@ -51,7 +52,6 @@ import com.wmqc.miroot.charging.RearScreenChargingActivity
 import com.wmqc.miroot.databinding.DialogCompositeXyBinding
 import com.wmqc.miroot.databinding.DialogStickerOverlayBinding
 import com.wmqc.miroot.databinding.FragmentFeaturesBinding
-import com.wmqc.miroot.rear.OfficialSubscreenServiceGate
 import com.wmqc.miroot.rear.RearAssistPrefs
 import com.wmqc.miroot.rear.RearAssistService
 import com.wmqc.miroot.rear.RearSwitchKeeperService
@@ -88,6 +88,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
 
     private val viewModel: MainPermissionViewModel by activityViewModels()
     private var suppressShellCallbacks = false
+    private var suppressRecordScreenshotCallbacks = false
 
     private val rearAssistUiReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -99,8 +100,6 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
     private var suppressRearAssistCallbacks = false
     private var suppressChargingAnimationCallbacks = false
     // 充电动画常亮已移除（3.x）：不再暴露该开关。
-    private var suppressOfficialSubscreenCallback = false
-
     private var rearDpiTaskService: ITaskService? = null
     private var rearDpiServiceBound = false
     private val rearDpiServiceConnection = object : ServiceConnection {
@@ -142,12 +141,12 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         if (uri == null) return@registerForActivityResult
         if (copyStickerFromUri(ctx, uri)) {
             b.switchStickerEnabled.isChecked = true
-            Toast.makeText(ctx, R.string.features_sticker_picked, Toast.LENGTH_SHORT).show()
+            MainDisplayUi.showToast(ctx, R.string.features_sticker_picked, Toast.LENGTH_SHORT)
             syncStickerDialogFileRow(b)
             autofillStickerDimensionsFromFile(ctx, b)
             b.root.post { refreshStickerPreview(b) }
         } else {
-            Toast.makeText(ctx, R.string.features_sticker_copy_fail, Toast.LENGTH_LONG).show()
+            MainDisplayUi.showToast(ctx, R.string.features_sticker_copy_fail, Toast.LENGTH_LONG)
         }
     }
 
@@ -179,11 +178,11 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                 bmp.recycle()
             }
             activity?.runOnUiThread {
-                Toast.makeText(
+                MainDisplayUi.showToast(
                     ctx,
                     if (ok) R.string.features_sticker_export_ok else R.string.features_sticker_export_fail,
                     Toast.LENGTH_SHORT,
-                ).show()
+                )
             }
         }
     }
@@ -202,7 +201,6 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         binding.textSectionFeaturesRearAssist.setOnClickListener {
             showSectionHelp(R.string.features_section_rear_assist, R.string.help_features_rear_assist)
         }
-
         binding.textFeaturesDeviceModel.text = if (DeviceGeometry.isProMaxModel()) {
             getString(R.string.features_device_model_promax)
         } else {
@@ -212,15 +210,6 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         syncShellUiFromPrefs()
         ensureShellCopiedToWorkDir()
         bindShellBackdropControls()
-
-        suppressOfficialSubscreenCallback = true
-        binding.switchOfficialSubscreenService.isChecked =
-            OfficialSubscreenServiceGate.isDisableEnabled(requireContext())
-        suppressOfficialSubscreenCallback = false
-        binding.switchOfficialSubscreenService.setOnCheckedChangeListener { _, checked ->
-            if (suppressOfficialSubscreenCallback) return@setOnCheckedChangeListener
-            OfficialSubscreenServiceGate.setDisableEnabled(requireContext(), checked)
-        }
 
         bindChargingAnimationSection()
 
@@ -240,11 +229,11 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         binding.buttonOpenRearRecord.setOnClickListener {
             val snap = viewModel.snapshot.value
             if (snap == null || !snap.privileged) {
-                Toast.makeText(requireContext(), R.string.privilege_shell_required, Toast.LENGTH_LONG).show()
+                MainDisplayUi.showToast(requireContext(), R.string.privilege_shell_required, Toast.LENGTH_LONG)
                 return@setOnClickListener
             }
             if (!RuntimePermissionGate.hasOverlay(requireContext())) {
-                Toast.makeText(requireContext(), R.string.record_need_overlay, Toast.LENGTH_LONG).show()
+                MainDisplayUi.showToast(requireContext(), R.string.record_need_overlay, Toast.LENGTH_LONG)
                 startActivity(
                     Intent(
                         Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -254,7 +243,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                 return@setOnClickListener
             }
             if (!RuntimePermissionGate.canPostNotifications(requireContext())) {
-                Toast.makeText(requireContext(), R.string.record_need_post_notifications, Toast.LENGTH_LONG).show()
+                MainDisplayUi.showToast(requireContext(), R.string.record_need_post_notifications, Toast.LENGTH_LONG)
                 startActivity(RuntimePermissionGate.intentAppNotificationSettings(requireContext()))
                 return@setOnClickListener
             }
@@ -267,6 +256,19 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         binding.switchScreenshotShell.setOnCheckedChangeListener { _, checked ->
             DeviceGeometry.persistScreenshotShellEnabled(requireContext(), checked)
         }
+        binding.switchRecordScreenshotKeepScreenOn.setOnCheckedChangeListener { _, checked ->
+            if (suppressRecordScreenshotCallbacks) return@setOnCheckedChangeListener
+            if (!requirePrivilege()) {
+                suppressRecordScreenshotCallbacks = true
+                binding.switchRecordScreenshotKeepScreenOn.isChecked = !checked
+                suppressRecordScreenshotCallbacks = false
+                return@setOnCheckedChangeListener
+            }
+            RearAssistPrefs.prefs(requireContext()).edit()
+                .putBoolean(RearAssistPrefs.KEY_RECORD_SCREENSHOT_KEEP_SCREEN_ON, checked)
+                .apply()
+        }
+        syncRecordScreenshotUiFromPrefs()
 
         binding.buttonCompositeXy.setOnClickListener {
             showCompositeXyDialog()
@@ -274,6 +276,10 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
 
         binding.buttonStickerOverlay.setOnClickListener {
             showStickerOverlayDialog()
+        }
+
+        binding.buttonRearGestureConfig.setOnClickListener {
+            startActivity(Intent(requireContext(), RearGestureConfigActivity::class.java))
         }
 
         binding.buttonScreenshot.setOnClickListener {
@@ -426,7 +432,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         }
         val ts = rearDpiTaskService
         if (ts == null) {
-            Toast.makeText(requireContext(), R.string.features_rear_dpi_service_waiting, Toast.LENGTH_SHORT).show()
+            MainDisplayUi.showToast(requireContext(), R.string.features_rear_dpi_service_waiting, Toast.LENGTH_SHORT)
             syncRearRotationToggleUi(rearDisplayRotation)
             bindRearDpiTaskService()
             return
@@ -447,13 +453,13 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                 if (ok) {
                     rearDisplayRotation = target
                     syncRearRotationToggleUi(target)
-                    Toast.makeText(
+                    MainDisplayUi.showToast(
                         requireContext(),
                         getString(R.string.features_rear_rotation_toast_ok, target * 90),
                         Toast.LENGTH_SHORT,
-                    ).show()
+                    )
                 } else {
-                    Toast.makeText(requireContext(), R.string.features_rear_rotation_fail, Toast.LENGTH_LONG).show()
+                    MainDisplayUi.showToast(requireContext(), R.string.features_rear_rotation_fail, Toast.LENGTH_LONG)
                     syncRearRotationToggleUi(rearDisplayRotation)
                 }
             }
@@ -464,13 +470,13 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         if (!requirePrivilege()) return
         val ts = rearDpiTaskService
         if (ts == null) {
-            Toast.makeText(requireContext(), R.string.features_rear_dpi_service_waiting, Toast.LENGTH_SHORT).show()
+            MainDisplayUi.showToast(requireContext(), R.string.features_rear_dpi_service_waiting, Toast.LENGTH_SHORT)
             bindRearDpiTaskService()
             return
         }
         val dpi = binding.editRearDpiValue.text?.toString()?.trim()?.toIntOrNull()
         if (dpi == null || dpi <= 0 || dpi > 9999) {
-            Toast.makeText(requireContext(), R.string.features_rear_dpi_invalid, Toast.LENGTH_SHORT).show()
+            MainDisplayUi.showToast(requireContext(), R.string.features_rear_dpi_invalid, Toast.LENGTH_SHORT)
             return
         }
         setRearDpiUiBusy(true)
@@ -485,14 +491,14 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                 if (!isAdded || _binding == null) return@runOnUiThread
                 setRearDpiUiBusy(false)
                 if (ok) {
-                    Toast.makeText(
+                    MainDisplayUi.showToast(
                         requireContext(),
                         getString(R.string.features_rear_dpi_toast_set, dpi),
                         Toast.LENGTH_SHORT,
-                    ).show()
+                    )
                     loadRearDpiFromService()
                 } else {
-                    Toast.makeText(requireContext(), R.string.features_rear_dpi_fail, Toast.LENGTH_LONG).show()
+                    MainDisplayUi.showToast(requireContext(), R.string.features_rear_dpi_fail, Toast.LENGTH_LONG)
                 }
             }
         }
@@ -502,26 +508,38 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         if (!requirePrivilege()) return
         val ts = rearDpiTaskService
         if (ts == null) {
-            Toast.makeText(requireContext(), R.string.features_rear_dpi_service_waiting, Toast.LENGTH_SHORT).show()
+            MainDisplayUi.showToast(requireContext(), R.string.features_rear_dpi_service_waiting, Toast.LENGTH_SHORT)
             bindRearDpiTaskService()
             return
         }
         setRearDpiUiBusy(true)
         thread(name = "MiRoot-ResetRearDpi") {
-            val ok = try {
+            val okDpi = try {
                 ts.resetRearDpi()
             } catch (e: RemoteException) {
                 LogHelper.w(LOG_TAG, "resetRearDpi: ${e.message}")
                 false
             }
+            var okRot = true
+            if (okDpi) {
+                okRot = try {
+                    ts.setDisplayRotation(REAR_DISPLAY_ID, 0)
+                } catch (e: RemoteException) {
+                    LogHelper.w(LOG_TAG, "resetRearDpi setDisplayRotation(0): ${e.message}")
+                    false
+                }
+            }
             activity?.runOnUiThread {
                 if (!isAdded || _binding == null) return@runOnUiThread
                 setRearDpiUiBusy(false)
-                if (ok) {
-                    Toast.makeText(requireContext(), R.string.features_rear_dpi_toast_reset, Toast.LENGTH_SHORT).show()
+                if (okDpi) {
+                    MainDisplayUi.showToast(requireContext(), R.string.features_rear_dpi_toast_reset, Toast.LENGTH_SHORT)
+                    if (!okRot) {
+                        MainDisplayUi.showToast(requireContext(), R.string.features_rear_rotation_fail, Toast.LENGTH_LONG)
+                    }
                     loadRearDpiFromService()
                 } else {
-                    Toast.makeText(requireContext(), R.string.features_rear_dpi_fail, Toast.LENGTH_LONG).show()
+                    MainDisplayUi.showToast(requireContext(), R.string.features_rear_dpi_fail, Toast.LENGTH_LONG)
                 }
             }
         }
@@ -536,11 +554,19 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                 suppressChargingAnimationCallbacks = true
                 binding.switchChargingAnimation.isChecked = !checked
                 suppressChargingAnimationCallbacks = false
+                setChargingFillSpeedSectionVisible(binding.switchChargingAnimation.isChecked)
                 return@setOnCheckedChangeListener
             }
             ChargingAnimationPrefs.setEnabled(requireContext(), checked)
             ChargingServiceSync.sync(requireContext(), viewModel.snapshot.value?.privileged == true)
+            setChargingFillSpeedSectionVisible(checked)
         }
+    }
+
+    private fun setChargingFillSpeedSectionVisible(enabled: Boolean) {
+        val v = if (enabled) View.VISIBLE else View.GONE
+        binding.textChargingFillSpeedValue.visibility = v
+        binding.composeChargingFillSpeedSlider.visibility = v
     }
 
     private fun setupChargingFillSpeedSliderCompose() {
@@ -593,9 +619,10 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
 
     private fun syncChargingAnimationUiFromPrefs() {
         suppressChargingAnimationCallbacks = true
-        binding.switchChargingAnimation.isChecked =
-            ChargingAnimationPrefs.isEnabled(requireContext())
+        val enabled = ChargingAnimationPrefs.isEnabled(requireContext())
+        binding.switchChargingAnimation.isChecked = enabled
         suppressChargingAnimationCallbacks = false
+        setChargingFillSpeedSectionVisible(enabled)
         val fillP = ChargingAnimationPrefs.getFillRiseSpeedPercent(requireContext())
         chargingFillSpeedStepState.intValue = fillSpeedStepFromPercent(fillP)
         binding.textChargingFillSpeedValue.text =
@@ -692,13 +719,18 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         }
     }
 
-    /** 应用投屏 Keeper 内 WAKEUP 与 WakeLock 与 [RearAssistPrefs.isKeepScreenOnEnabled] 一致。 */
+    /** 应用投屏 Keeper 与音乐/车控 [RearScreenWakeService] 内 WAKEUP / WakeLock 与 [RearAssistPrefs.isKeepScreenOnEnabled] 一致。 */
     private fun notifyRearSwitchKeeperKeepScreenFromPrefs(ctx: Context) {
         try {
             val on = RearAssistPrefs.isKeepScreenOnEnabled(ctx)
             ctx.startService(
                 Intent(ctx, RearSwitchKeeperService::class.java)
                     .setAction(RearSwitchKeeperService.ACTION_SET_KEEP_SCREEN_ON_ENABLED)
+                    .putExtra("enabled", on),
+            )
+            ctx.startService(
+                Intent(ctx, RearScreenWakeService::class.java)
+                    .setAction(RearScreenWakeService.ACTION_SET_KEEP_SCREEN_ON_ENABLED)
                     .putExtra("enabled", on),
             )
         } catch (_: Exception) {
@@ -710,7 +742,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         if (!enabled) return
         val ctx = requireContext()
         if (RuntimePermissionGate.canPostNotifications(ctx)) return
-        Toast.makeText(ctx, R.string.rear_assist_need_post_notifications, Toast.LENGTH_LONG).show()
+        MainDisplayUi.showToast(ctx, R.string.rear_assist_need_post_notifications, Toast.LENGTH_LONG)
         startActivity(RuntimePermissionGate.intentAppNotificationSettings(ctx))
     }
 
@@ -746,7 +778,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         val flutterKeep = ctx.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             .getBoolean(FLUTTER_KEEP_SCREEN_ON_KEY, true)
         binding.switchRearCoverDetection.isChecked = p.getBoolean(RearAssistPrefs.KEY_PROXIMITY, false)
-        binding.switchRearKeepScreenOn.isChecked = flutterKeep
+        binding.switchRearKeepScreenOn.isChecked = RearAssistPrefs.isKeepScreenOnEnabled(ctx)
         val nativeKeep = p.getBoolean(RearAssistPrefs.KEY_KEEP_SCREEN_ON, false)
         if (nativeKeep != flutterKeep) {
             p.edit().putBoolean(RearAssistPrefs.KEY_KEEP_SCREEN_ON, flutterKeep).apply()
@@ -760,6 +792,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         binding.textRearWakeIntervalValue.text =
             getString(R.string.features_rear_wake_interval_fmt, ms)
         suppressRearAssistCallbacks = false
+        syncRecordScreenshotUiFromPrefs()
         RearAssistService.sync(ctx, viewModel.snapshot.value?.privileged == true)
         RearSwitchKeeperService.syncProximityWithRearAssistPrefs(ctx)
     }
@@ -796,7 +829,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                     binding.switchPromaxShellFull.isChecked,
                 )
                 if (!ok) {
-                    Toast.makeText(ctx, R.string.features_shell_persist_fail, Toast.LENGTH_LONG).show()
+                    MainDisplayUi.showToast(ctx, R.string.features_shell_persist_fail, Toast.LENGTH_LONG)
                 }
                 updateShellColorChipLabels()
             },
@@ -807,7 +840,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
             val key = colorKeyFromCheckedChip()
             val ok = DeviceGeometry.persistShellBackdropSelection(ctx, key, checked)
             if (!ok) {
-                Toast.makeText(ctx, R.string.features_shell_persist_fail, Toast.LENGTH_LONG).show()
+                MainDisplayUi.showToast(ctx, R.string.features_shell_persist_fail, Toast.LENGTH_LONG)
             }
         }
     }
@@ -847,6 +880,13 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         binding.switchScreenshotShell.isChecked = DeviceGeometry.isScreenshotShellEnabled(ctx)
         suppressShellCallbacks = false
         updateShellColorChipLabels()
+    }
+
+    private fun syncRecordScreenshotUiFromPrefs() {
+        suppressRecordScreenshotCallbacks = true
+        binding.switchRecordScreenshotKeepScreenOn.isChecked =
+            RearAssistPrefs.isRecordScreenshotKeepScreenOnEnabled(requireContext())
+        suppressRecordScreenshotCallbacks = false
     }
 
     /** 勾选标记在文字后（Material Chip 默认勾选图标在左侧且不可改位置）。 */
@@ -921,17 +961,17 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
     private fun requirePrivilege(): Boolean {
         val ok = viewModel.snapshot.value?.privileged == true
         if (!ok) {
-            Toast.makeText(requireContext(), R.string.privilege_shell_required, Toast.LENGTH_LONG).show()
+            MainDisplayUi.showToast(requireContext(), R.string.privilege_shell_required, Toast.LENGTH_LONG)
         }
         return ok
     }
 
     private fun toastResult(ok: Boolean, msg: String) {
-        Toast.makeText(
+        MainDisplayUi.showToast(
             requireContext(),
             msg,
             if (ok) Toast.LENGTH_SHORT else Toast.LENGTH_LONG,
-        ).show()
+        )
     }
 
     private fun showCompositeXyDialog() {
@@ -955,7 +995,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         dialogBinding.buttonResetCompositeXy.setOnClickListener {
             DeviceGeometry.resetCompositeXYOverrides(ctx)
             fill()
-            Toast.makeText(ctx, R.string.settings_overlay_reset_ok, Toast.LENGTH_SHORT).show()
+            MainDisplayUi.showToast(ctx, R.string.settings_overlay_reset_ok, Toast.LENGTH_SHORT)
         }
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -964,12 +1004,12 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                 val fx = parseCoord(dialogBinding.editFullX.text?.toString().orEmpty())
                 val fy = parseCoord(dialogBinding.editFullY.text?.toString().orEmpty())
                 if (hx == null || hy == null || fx == null || fy == null) {
-                    Toast.makeText(ctx, R.string.settings_overlay_invalid, Toast.LENGTH_SHORT).show()
+                    MainDisplayUi.showToast(ctx, R.string.settings_overlay_invalid, Toast.LENGTH_SHORT)
                     return@setOnClickListener
                 }
                 DeviceGeometry.persistCompositeXYHalf(ctx, hx, hy)
                 DeviceGeometry.persistCompositeXYFull(ctx, fx, fy)
-                Toast.makeText(ctx, R.string.settings_overlay_saved, Toast.LENGTH_SHORT).show()
+                MainDisplayUi.showToast(ctx, R.string.settings_overlay_saved, Toast.LENGTH_SHORT)
                 dialog.dismiss()
             }
         }
@@ -1048,14 +1088,14 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
             DeviceGeometry.stickerOverlayFile(ctx).delete()
             syncStickerDialogFileRow(dialogBinding)
             refreshStickerPreview(dialogBinding)
-            Toast.makeText(ctx, R.string.features_sticker_cleared, Toast.LENGTH_SHORT).show()
+            MainDisplayUi.showToast(ctx, R.string.features_sticker_cleared, Toast.LENGTH_SHORT)
         }
         dialogBinding.buttonResetSticker.setOnClickListener {
             DeviceGeometry.resetStickerOverlay(ctx)
             fillStickerDialogFields(dialogBinding)
             syncStickerDialogFileRow(dialogBinding)
             refreshStickerPreview(dialogBinding)
-            Toast.makeText(ctx, R.string.settings_overlay_reset_ok, Toast.LENGTH_SHORT).show()
+            MainDisplayUi.showToast(ctx, R.string.settings_overlay_reset_ok, Toast.LENGTH_SHORT)
         }
         dialogBinding.imageStickerPreview.setOnClickListener {
             showStickerPreviewFullscreen(buildStickerPreviewOverlay(dialogBinding))
@@ -1077,16 +1117,16 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
             val w = parseStickerSizeForSave(dialogBinding.editStickerW.text?.toString().orEmpty())
             val h = parseStickerSizeForSave(dialogBinding.editStickerH.text?.toString().orEmpty())
             if (x == null || y == null || w == null || h == null) {
-                Toast.makeText(ctx, R.string.settings_overlay_invalid, Toast.LENGTH_SHORT).show()
+                MainDisplayUi.showToast(ctx, R.string.settings_overlay_invalid, Toast.LENGTH_SHORT)
                 return@setOnClickListener
             }
             if ((w > 0) xor (h > 0)) {
-                Toast.makeText(ctx, R.string.features_sticker_wh_invalid, Toast.LENGTH_SHORT).show()
+                MainDisplayUi.showToast(ctx, R.string.features_sticker_wh_invalid, Toast.LENGTH_SHORT)
                 return@setOnClickListener
             }
             val cornerDp = parseCornerDpForSave(dialogBinding.editStickerCornerDp.text?.toString().orEmpty())
             if (cornerDp == null) {
-                Toast.makeText(ctx, R.string.features_sticker_corner_dp_invalid, Toast.LENGTH_SHORT).show()
+                MainDisplayUi.showToast(ctx, R.string.features_sticker_corner_dp_invalid, Toast.LENGTH_SHORT)
                 return@setOnClickListener
             }
             DeviceGeometry.persistStickerEnabled(ctx, dialogBinding.switchStickerEnabled.isChecked)
@@ -1108,7 +1148,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                 DeviceGeometry.persistStickerXYHalf(ctx, x, y)
                 DeviceGeometry.persistStickerSizeHalf(ctx, w, h)
             }
-            Toast.makeText(ctx, R.string.features_sticker_saved, Toast.LENGTH_SHORT).show()
+            MainDisplayUi.showToast(ctx, R.string.features_sticker_saved, Toast.LENGTH_SHORT)
             dialog.dismiss()
         }
     }
@@ -1457,7 +1497,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                     imageView.setImageBitmap(bmp)
                     imageView.tag = bmp
                 } else {
-                    Toast.makeText(ctx, R.string.features_sticker_export_fail, Toast.LENGTH_SHORT).show()
+                    MainDisplayUi.showToast(ctx, R.string.features_sticker_export_fail, Toast.LENGTH_SHORT)
                     fullDialog.dismiss()
                 }
             }
@@ -1483,7 +1523,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                     return@runOnUiThread
                 }
                 if (bmp == null) {
-                    Toast.makeText(ctx, R.string.features_sticker_export_fail, Toast.LENGTH_LONG).show()
+                    MainDisplayUi.showToast(ctx, R.string.features_sticker_export_fail, Toast.LENGTH_LONG)
                     return@runOnUiThread
                 }
                 pendingStickerExportBitmap = bmp

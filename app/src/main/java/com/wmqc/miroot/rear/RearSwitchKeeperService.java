@@ -1,6 +1,6 @@
-
-
 package com.wmqc.miroot.rear;
+
+import com.wmqc.miroot.display.MainDisplayUi;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -22,12 +22,16 @@ import android.widget.Toast;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
 
+import com.wmqc.miroot.BuildConfig;
 import com.wmqc.miroot.MainActivity;
 import com.wmqc.miroot.R;
 import com.wmqc.miroot.lyrics.ITaskService;
 import com.wmqc.miroot.lyrics.LogHelper;
 import com.wmqc.miroot.lyrics.LyricsTaskTracking;
+import com.wmqc.miroot.lyrics.RearScreenWakeManager;
+import com.wmqc.miroot.lyrics.RearScreenWakeService;
 import com.wmqc.miroot.lyrics.RootTaskService;
+import com.wmqc.miroot.rear.desktop.RearScreenDesktopActivity;
 import com.wmqc.miroot.shell.SwitchToRearQsTileService;
 
 /**
@@ -50,6 +54,16 @@ public class RearSwitchKeeperService extends Service {
     public static final String ACTION_RETURN_TO_MAIN = "ACTION_RETURN_TO_MAIN";
     /** 与 [com.wmqc.miroot.lyrics.RearScreenWakeService] 同名 Action：投屏常亮总开关变更时同步 Keeper */
     public static final String ACTION_SET_KEEP_SCREEN_ON_ENABLED = "ACTION_SET_KEEP_SCREEN_ON_ENABLED";
+    /** [RearScreenDesktopActivity] 结束时：仅当当前监控任务仍为该 key 时才收口（避免误停应用投屏 Keeper）。 */
+    public static final String ACTION_RELEASE_MONITOR_IF_MATCH = "com.wmqc.miroot.rear.ACTION_RELEASE_MONITOR_IF_MATCH";
+    public static final String EXTRA_MONITOR_KEY = "monitorKey";
+    /** 为 true 时跳过 {@link #performInitialKills()}（不 force-stop 官方背屏中心，保留官方手势）。 */
+    public static final String EXTRA_SKIP_INITIAL_LAUNCHER_KILLS = "skipInitialLauncherKills";
+    /**
+     * 仅「应用列表直开背屏」迁第三方应用时应为 true：初始杀进程走 {@link AppProjectionOfficialGesturePolicy}。
+     * 磁贴迁屏等为 false：与 3.4 一致始终 {@link com.wmqc.miroot.lyrics.ITaskService#killLauncherProcess()}。
+     */
+    public static final String EXTRA_USE_APP_LIST_OFFICIAL_GESTURE_POLICY = "useAppListOfficialGesturePolicy";
     private static final String CHANNEL_ID = "rear_screen_keeper";
     private static final int NOTIFICATION_ID = MiRootNotificationIds.APP_PROJECTION_NOTIFICATION_ID;
 
@@ -60,13 +74,13 @@ public class RearSwitchKeeperService extends Service {
 
     // V12.3: 初始杀进程策略 - 只杀1次，不持续监控
     private static final int INITIAL_KILL_COUNT = 1; // 初始杀1次
-    private static final long KILL_INTERVAL_MS = 200; // 每次间隔200ms
+    private static final long KILL_INTERVAL_MS = 400; // 每次间隔400ms
 
     /** 接近传感器：背屏遮盖检测（见 [RearSwitchProximityController]） */
     private RearSwitchProximityController proximityController;
 
     // V14.5: 监听应用是否手动移回主屏
-    private static final long CHECK_TASK_INTERVAL_MS = 2000; // 每2秒检查一次
+    private static final long CHECK_TASK_INTERVAL_MS = 3000; // 每3秒检查一次
     private String monitoredTaskInfo = null; // 格式: "packageName:taskId"
     private static final String SUBSCREENCENTER_PKG = "com.xiaomi.subscreencenter";
     private static final int MAX_TRANSIENT_FOREGROUND_MISMATCH = 3;
@@ -91,6 +105,16 @@ public class RearSwitchKeeperService extends Service {
     private boolean displayStateRestored = false;
     private boolean unifiedExitTriggered = false;
 
+    /**
+     * 用户手势返回等常会先到官方背屏中心或短暂拿不到前台；原逻辑只走退避从不
+     * {@link #performUnifiedExit}，背屏 DPI/旋转不会恢复。连续若干次仍不在投屏任务上则收口。
+     */
+    private int offMonitoredRearStreak = 0;
+    private static final int OFF_MONITORED_STREAK_FOR_EXIT = 5;
+
+    /** 见 {@link #EXTRA_USE_APP_LIST_OFFICIAL_GESTURE_POLICY}。 */
+    private boolean useAppListOfficialGesturePolicyForInitialKill = false;
+
     public static void pauseMonitoring() {
         if (instance != null) {
             instance.monitoringPaused = true;
@@ -98,9 +122,9 @@ public class RearSwitchKeeperService extends Service {
             // ✅ 取消所有pending的检查任务
             if (instance.handler != null) {
                 instance.handler.removeCallbacks(instance.checkTaskRunnable);
-                LogHelper.d(TAG, "⏸️ Monitoring paused, all checks cancelled");
+                if (BuildConfig.DEBUG) LogHelper.d(TAG, "Monitoring paused, all checks cancelled");
             } else {
-                LogHelper.d(TAG, "⏸️ Monitoring paused");
+                if (BuildConfig.DEBUG) LogHelper.d(TAG, "Monitoring paused");
             }
         }
     }
@@ -108,13 +132,13 @@ public class RearSwitchKeeperService extends Service {
     public static void resumeMonitoring() {
         if (instance != null) {
             instance.monitoringPaused = false;
-            LogHelper.d(TAG, "▶️ Monitoring resumed");
+            if (BuildConfig.DEBUG) LogHelper.d(TAG, "Monitoring resumed");
 
             // ✅ 延迟5秒后才开始检查，给投送app足够时间恢复到前台
             if (instance.handler != null) {
                 instance.handler.removeCallbacks(instance.checkTaskRunnable);
                 instance.handler.postDelayed(instance.checkTaskRunnable, 5000);
-                LogHelper.d(TAG, "⏰ Next check scheduled in 5 seconds");
+                if (BuildConfig.DEBUG) LogHelper.d(TAG, "Next check scheduled in 5 seconds");
             }
         }
     }
@@ -139,9 +163,18 @@ public class RearSwitchKeeperService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
 
-        // V14.6: 处理点击通知返回主屏的事件
+        // V14.6: 处理点击通知返回主屏的事件（允许重复触发，避免上次收口中断后无法再次清理）
         if (intent != null && ACTION_RETURN_TO_MAIN.equals(intent.getAction())) {
+            unifiedExitTriggered = false;
             performUnifiedExit(true, true);
+            return START_NOT_STICKY;
+        }
+
+        if (intent != null && ACTION_RELEASE_MONITOR_IF_MATCH.equals(intent.getAction())) {
+            String key = intent.getStringExtra(EXTRA_MONITOR_KEY);
+            if (monitoredTaskInfo != null && key != null && key.equals(monitoredTaskInfo)) {
+                performUnifiedExit(false, false);
+            }
             return START_NOT_STICKY;
         }
 
@@ -157,11 +190,11 @@ public class RearSwitchKeeperService extends Service {
             boolean enabled = intent.getBooleanExtra("enabled", true);
             keepScreenOnEnabled = enabled;
 
-            LogHelper.d(TAG, "🔆 背屏常亮开关已" + (enabled ? "开启" : "关闭"));
+            if (BuildConfig.DEBUG) LogHelper.d(TAG, "背屏常亮开关已" + (enabled ? "开启" : "关闭"));
 
             if (!enabled && handler != null) {
                 handler.removeCallbacks(wakeupRearScreenRunnable);
-                LogHelper.d(TAG, "⏸️ 背屏WAKEUP发送已停止");
+                if (BuildConfig.DEBUG) LogHelper.d(TAG, "背屏WAKEUP发送已停止");
             } else if (enabled && handler != null) {
                 handler.removeCallbacks(wakeupRearScreenRunnable);
                 startRearScreenWakeup();
@@ -171,7 +204,7 @@ public class RearSwitchKeeperService extends Service {
                 try {
                     if (wakeLock != null && wakeLock.isHeld()) {
                         wakeLock.release();
-                        LogHelper.d(TAG, "✓ WakeLock released (keep off)");
+                        if (BuildConfig.DEBUG) LogHelper.d(TAG, "WakeLock released (keep off)");
                     }
                 } catch (Exception e) {
                     LogHelper.w(TAG, "WakeLock release failed", e);
@@ -185,7 +218,7 @@ public class RearSwitchKeeperService extends Service {
                                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
                                 "MiRoot::RearSwitchKeeper");
                         wakeLock.acquire();
-                        LogHelper.d(TAG, "✓ WakeLock acquired (keep on)");
+                        if (BuildConfig.DEBUG) LogHelper.d(TAG, "WakeLock acquired (keep on)");
                     }
                 } catch (Exception e) {
                     LogHelper.e(TAG, "WakeLock acquire failed", e);
@@ -213,16 +246,25 @@ public class RearSwitchKeeperService extends Service {
 
         try {
             // V14.7: 先从Intent获取要监控的任务信息
+            boolean skipInitialLauncherKills = false;
             if (intent != null) {
                 String newMonitoredTask = intent.getStringExtra("lastMovedTask");
                 if (newMonitoredTask != null) {
+                    if (monitoredTaskInfo == null || !monitoredTaskInfo.equals(newMonitoredTask)) {
+                        displayStateRestored = false;
+                        unifiedExitTriggered = false;
+                        offMonitoredRearStreak = 0;
+                    }
                     monitoredTaskInfo = newMonitoredTask;
                 }
+                skipInitialLauncherKills = intent.getBooleanExtra(EXTRA_SKIP_INITIAL_LAUNCHER_KILLS, false);
+                useAppListOfficialGesturePolicyForInitialKill =
+                        intent.getBooleanExtra(EXTRA_USE_APP_LIST_OFFICIAL_GESTURE_POLICY, false);
             }
             
             // 如果服务被系统重启但没有监控任务，说明应用已结束，停止服务
             if (monitoredTaskInfo == null) {
-                LogHelper.d(TAG, "⏸️ 没有监控任务，停止服务（可能是系统重启但应用已结束）");
+                if (BuildConfig.DEBUG) LogHelper.d(TAG, "没有监控任务，停止服务（可能是系统重启但应用已结束）");
                 stopForeground(Service.STOP_FOREGROUND_REMOVE);
                 stopSelf();
                 return START_NOT_STICKY;
@@ -234,7 +276,7 @@ public class RearSwitchKeeperService extends Service {
             } else {
                 keepScreenOnEnabled = RearAssistPrefs.INSTANCE.isKeepScreenOnEnabled(this);
             }
-            LogHelper.d(TAG, "🔆 背屏常亮开关状态: " + (keepScreenOnEnabled ? "开启" : "关闭"));
+            if (BuildConfig.DEBUG) LogHelper.d(TAG, "背屏常亮开关状态: " + (keepScreenOnEnabled ? "开启" : "关闭"));
             wakeupIntervalMs = RearAssistPrefs.INSTANCE.intervalMs(this);
 
             // V15.1: 立即显示通知，不等待其他操作
@@ -268,15 +310,17 @@ public class RearSwitchKeeperService extends Service {
                                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
                                 "MiRoot::RearSwitchKeeper");
                         wakeLock.acquire();
-                        LogHelper.d(TAG, "✓ WakeLock acquired (SCREEN_BRIGHT_WAKE_LOCK)");
+                        if (BuildConfig.DEBUG) LogHelper.d(TAG, "WakeLock acquired (SCREEN_BRIGHT_WAKE_LOCK)");
                     }
                 } catch (Exception e) {
                     LogHelper.e(TAG, "✗ Failed to acquire WakeLock", e);
                 }
             }
 
-            // 3. V12.2: 初始杀进程（只杀几次，不持续监控）
-            performInitialKills();
+            // 3. V12.2: 初始杀进程（背屏桌面 / MiRoot 自带投屏会话跳过，保留官方背屏手势/中心）
+            if (!skipInitialLauncherKills && !shouldSkipInitialLauncherKillsForMonitoredMiRootTask()) {
+                performInitialKills();
+            }
 
             // 4. V14.5: 启动定期检查任务
             if (monitoredTaskInfo != null) {
@@ -319,10 +363,25 @@ public class RearSwitchKeeperService extends Service {
                     // V15.2: 检查背屏(displayId=1)的前台应用是否还是我们监控的应用
                     String rearForegroundApp = taskService.getForegroundAppOnDisplay(REAR_DISPLAY_ID);
 
+                    // 以 taskId 为准：手势返回等会把任务迁离背屏，但 am stack list 仍可能在同屏段内保留旧 task 行，
+                    // 仅靠 getForegroundAppOnDisplay 字符串比对会漏收口。
+                    int monitoredTaskId = parseMonitoredTaskId();
+                    if (monitoredTaskId > 0
+                            && !taskService.isTaskOnDisplay(monitoredTaskId, REAR_DISPLAY_ID)) {
+                        offMonitoredRearStreak = 0;
+                        onDependencyHealthy();
+                        if (BuildConfig.DEBUG) {
+                            LogHelper.d(TAG, "monitored task left rear display tid=" + monitoredTaskId + " -> unified exit");
+                        }
+                        performUnifiedExit(false, false);
+                        return;
+                    }
+
                     // V2.3: 排除充电动画/通知动画（临时占用背屏，不应导致Service销毁）
                     if (rearForegroundApp != null && (rearForegroundApp.contains("RearScreenChargingActivity")
                             || rearForegroundApp.contains("RearScreenNotificationActivity"))) {
                         // 充电动画正在显示，跳过本次检查
+                        offMonitoredRearStreak = 0;
                         onDependencyHealthy();
                         handler.postDelayed(this, CHECK_TASK_INTERVAL_MS);
                         return;
@@ -330,13 +389,35 @@ public class RearSwitchKeeperService extends Service {
 
                     // 如果背屏前台应用不是我们监控的应用，说明它被关闭或切换了
                     if (rearForegroundApp == null || !rearForegroundApp.equals(monitoredTaskInfo)) {
-                        // 子屏桌面反复崩溃/切换时，先按健康检查和冷却窗口退避，避免频繁拉起/切换。
+                        // 上文已判定 monitoredTaskId>0 时任务仍在背屏段内：getForegroundAppOnDisplay 只取该段
+                        // 「最后一条」task 行，与真实栈顶/可见 Activity 常不一致（副屏中心、他包 taskId 等；
+                        // logcat 曾出现投抖音却报 org.telegram.plus），不能据此收窄口。
+                        if (monitoredTaskId > 0) {
+                            offMonitoredRearStreak = 0;
+                            onDependencyHealthy();
+                            proximityController.initSensorIfNeeded();
+                            handler.postDelayed(this, CHECK_TASK_INTERVAL_MS);
+                            return;
+                        }
+                        // 无有效 taskId 时退回旧策略
                         if (rearForegroundApp == null || rearForegroundApp.contains(SUBSCREENCENTER_PKG)) {
+                            // 手势返回等：背屏回到官方中心或短暂 null，不能永远只退避而不恢复 DPI/旋转。
+                            offMonitoredRearStreak++;
+                            if (offMonitoredRearStreak >= OFF_MONITORED_STREAK_FOR_EXIT) {
+                                if (BuildConfig.DEBUG) {
+                                    LogHelper.d(TAG, "rear at launcher/null streak=" + offMonitoredRearStreak + " -> unified exit");
+                                }
+                                offMonitoredRearStreak = 0;
+                                onDependencyHealthy();
+                                performUnifiedExit(false, false);
+                                return;
+                            }
                             onDependencyFailure("rear foreground unavailable: " + rearForegroundApp);
-                            handler.postDelayed(this, computeDependencyBackoffDelayMs());
+                            handler.postDelayed(this, CHECK_TASK_INTERVAL_MS);
                             return;
                         }
 
+                        offMonitoredRearStreak = 0;
                         consecutiveForegroundMismatchCount++;
                         if (consecutiveForegroundMismatchCount < MAX_TRANSIENT_FOREGROUND_MISMATCH) {
                             onDependencyFailure("transient foreground mismatch: " + rearForegroundApp);
@@ -349,6 +430,7 @@ public class RearSwitchKeeperService extends Service {
                         return;
                     }
 
+                    offMonitoredRearStreak = 0;
                     // 优化：确认应用在背屏后，才初始化接近传感器（仅在需要时启用）
                     proximityController.initSensorIfNeeded();
                     onDependencyHealthy();
@@ -370,7 +452,8 @@ public class RearSwitchKeeperService extends Service {
 
     private void startTaskMonitoring() {
         if (monitoredTaskInfo != null && handler != null) {
-            handler.postDelayed(checkTaskRunnable, CHECK_TASK_INTERVAL_MS);
+            // 首次尽快检测（下一帧），避免「投屏开始后 3s 内手势返回」要等到首轮 postDelayed 才收口。
+            handler.post(checkTaskRunnable);
         }
     }
 
@@ -397,23 +480,25 @@ public class RearSwitchKeeperService extends Service {
                 }
             }
 
-            // 持续发送，每0.8秒执行一次（优化：降低频率以减少耗电）
+            // 持续发送，最低 1.2 秒一次，减少唤醒与耗电。
             if (keepScreenOnEnabled) {
-                handler.postDelayed(this, wakeupIntervalMs);
+                handler.postDelayed(this, Math.max(wakeupIntervalMs, 1200));
             }
         }
     };
 
     private void startRearScreenWakeup() {
         if (handler != null && keepScreenOnEnabled) {
-            // 立即执行第一次唤醒，然后开始持续发送
-            handler.post(wakeupRearScreenRunnable);
-            LogHelper.d(TAG, "⏰ 背屏持续唤醒已启动 (0.8秒间隔，优化后降低耗电)");
+            // 稍后再发首个 WAKEUP，降低启动瞬时抖动。
+            handler.postDelayed(wakeupRearScreenRunnable, 180);
+            if (BuildConfig.DEBUG) LogHelper.d(TAG, "背屏持续唤醒已启动");
         }
     }
 
     /**
-     * V12.3: 初始杀进程 - 只杀1次，不持续监控
+     * V12.3: 初始杀进程 - 只杀1次，不持续监控。
+     * {@link #EXTRA_USE_APP_LIST_OFFICIAL_GESTURE_POLICY} 为 true 时走 {@link AppProjectionOfficialGesturePolicy}；
+     * 否则与 3.4 磁贴迁屏一致走 {@link com.wmqc.miroot.lyrics.ITaskService#killLauncherProcess()}。
      */
     private void performInitialKills() {
 
@@ -425,7 +510,18 @@ public class RearSwitchKeeperService extends Service {
                 public void run() {
                     if (taskService != null) {
                         try {
-                            taskService.killLauncherProcess();
+                            String pkgForPolicy = "";
+                            if (monitoredTaskInfo != null && monitoredTaskInfo.contains(":")) {
+                                int colon = monitoredTaskInfo.indexOf(':');
+                                if (colon > 0) {
+                                    pkgForPolicy = monitoredTaskInfo.substring(0, colon);
+                                }
+                            }
+                            if (useAppListOfficialGesturePolicyForInitialKill) {
+                                taskService.killLauncherProcessForAppProjection(pkgForPolicy);
+                            } else {
+                                taskService.killLauncherProcess();
+                            }
                         } catch (Exception e) {
                             LogHelper.w(TAG, "⚠ Kill #" + killNumber + " failed: " + e.getMessage());
                         }
@@ -444,6 +540,23 @@ public class RearSwitchKeeperService extends Service {
                 }
             }, i * KILL_INTERVAL_MS);
         }
+    }
+
+    /**
+     * MiRoot 自带背屏 Activity（歌词、车控等）的 Keeper 监控任务与
+     * {@link com.wmqc.miroot.rear.desktop.RearScreenDesktopActivity} 一致：不在启动时 force-stop 官方背屏中心，
+     * 避免副屏边缘返回长时间不可用。
+     */
+    private boolean shouldSkipInitialLauncherKillsForMonitoredMiRootTask() {
+        if (monitoredTaskInfo == null) {
+            return false;
+        }
+        int colon = monitoredTaskInfo.indexOf(':');
+        if (colon <= 0) {
+            return false;
+        }
+        String pkg = monitoredTaskInfo.substring(0, colon).trim();
+        return BuildConfig.APPLICATION_ID.equals(pkg);
     }
 
     /**
@@ -596,12 +709,12 @@ public class RearSwitchKeeperService extends Service {
     public void onDestroy() {
         super.onDestroy();
 
-        LogHelper.w(TAG, "═══════════════════════════════════════");
-        LogHelper.w(TAG, "⚠ Service onDestroy called");
+        if (BuildConfig.DEBUG) LogHelper.d(TAG, "Service onDestroy called");
 
         // 立即移除前台通知
         stopForeground(Service.STOP_FOREGROUND_REMOVE);
         ProjectionOngoingNotifications.cancelAll(getApplicationContext());
+        stopProjectionWakeServices();
 
         // 清理所有待执行的任务
         if (handler != null) {
@@ -614,11 +727,6 @@ public class RearSwitchKeeperService extends Service {
 
                 // 1. 恢复Launcher（unsuspend）
                 taskService.enableSubScreenLauncher();
-
-                // 2. 短暂延迟，确保unsuspend生效
-                Thread.sleep(300);
-
-                // 3. 主动启动Launcher的Activity来唤醒它
 
             } catch (Exception e) {
                 LogHelper.w(TAG, "Failed to restore launcher", e);
@@ -634,7 +742,7 @@ public class RearSwitchKeeperService extends Service {
         try {
             if (wakeLock != null && wakeLock.isHeld()) {
                 wakeLock.release();
-                LogHelper.d(TAG, "✓ WakeLock released");
+                if (BuildConfig.DEBUG) LogHelper.d(TAG, "WakeLock released");
             }
         } catch (Exception e) {
             LogHelper.w(TAG, "Failed to release WakeLock", e);
@@ -649,7 +757,6 @@ public class RearSwitchKeeperService extends Service {
         }
 
         instance = null;
-        LogHelper.w(TAG, "═══════════════════════════════════════");
     }
 
     @Override
@@ -698,8 +805,19 @@ public class RearSwitchKeeperService extends Service {
 
     /**
      * V2.4: 创建通用的Service前台通知（供多个Service共用）
+     * 点击打开应用；与「音乐投屏进行中」等其它通知的 PendingIntent 无关。
      */
     public static Notification createServiceNotification(Context context) {
+        return createServiceNotification(context, false);
+    }
+
+    /**
+     * @param appendMusicAutoProjectionHint 仅 {@link com.wmqc.miroot.ui.music.MusicAutoProjectionService}
+     *                                      为 true：在大标题 {@link R.string#miroot_main_service_notif_title} 后追加
+     *                                      {@link R.string#miroot_main_service_notif_title_suffix_auto_music_projection}，
+     *                                      摘要仍为「点击打开应用」，不影响充电动画等其它调用方。
+     */
+    public static Notification createServiceNotification(Context context, boolean appendMusicAutoProjectionHint) {
         // 创建通知渠道
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
@@ -721,9 +839,16 @@ public class RearSwitchKeeperService extends Service {
                 openAppIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
+        String contentText = context.getString(R.string.miroot_main_service_notif_text);
+        String contentTitle = context.getString(R.string.miroot_main_service_notif_title);
+        if (appendMusicAutoProjectionHint) {
+            contentTitle =
+                    contentTitle + context.getString(R.string.miroot_main_service_notif_title_suffix_auto_music_projection);
+        }
+
         return new NotificationCompat.Builder(context, CHANNEL_ID)
-                .setContentTitle(context.getString(R.string.miroot_main_service_notif_title))
-                .setContentText(context.getString(R.string.miroot_main_service_notif_text))
+                .setContentTitle(contentTitle)
+                .setContentText(contentText)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentIntent(openAppPi)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -811,12 +936,12 @@ public class RearSwitchKeeperService extends Service {
         if (svc == null) {
             return;
         }
-        svc.wakeupIntervalMs = RearAssistPrefs.INSTANCE.intervalMs(svc);
+        svc.wakeupIntervalMs = Math.max(1200, RearAssistPrefs.INSTANCE.intervalMs(svc));
     }
 
     private void loadProximitySensorSetting() {
         proximityController.updateFromPrefs();
-        wakeupIntervalMs = RearAssistPrefs.INSTANCE.intervalMs(this);
+        wakeupIntervalMs = Math.max(1200, RearAssistPrefs.INSTANCE.intervalMs(this));
     }
 
     private void applyProximitySensorRegistrationState() {
@@ -837,6 +962,22 @@ public class RearSwitchKeeperService extends Service {
         LogHelper.w(TAG, "═══════════════════════════════════════");
 
         performUnifiedExit(true, true);
+    }
+
+    /** @return taskId from {@link #monitoredTaskInfo} {@code pkg:taskId}，解析失败返回 -1 */
+    private int parseMonitoredTaskId() {
+        if (monitoredTaskInfo == null || !monitoredTaskInfo.contains(":")) {
+            return -1;
+        }
+        try {
+            int colon = monitoredTaskInfo.lastIndexOf(':');
+            if (colon <= 0 || colon >= monitoredTaskInfo.length() - 1) {
+                return -1;
+            }
+            return Integer.parseInt(monitoredTaskInfo.substring(colon + 1).trim());
+        } catch (Exception e) {
+            return -1;
+        }
     }
 
     private void performUnifiedExit(boolean moveTaskToMain, boolean showToastWhenMoved) {
@@ -860,6 +1001,13 @@ public class RearSwitchKeeperService extends Service {
         // 1) 先取消业务通知，避免退出中间态残留
         ProjectionOngoingNotifications.cancelAll(getApplicationContext());
         stopForeground(Service.STOP_FOREGROUND_REMOVE);
+        try {
+            NotificationManager nm = getSystemService(NotificationManager.class);
+            if (nm != null) {
+                nm.cancel(NOTIFICATION_ID);
+            }
+        } catch (Exception ignored) {
+        }
 
         // 2) 停常亮
         keepScreenOnEnabled = false;
@@ -876,6 +1024,7 @@ public class RearSwitchKeeperService extends Service {
         } finally {
             wakeLock = null;
         }
+        stopProjectionWakeServices();
 
         // 3) 统一恢复参数：优先快照，失败回默认
         restoreRearDisplayStateIfNeeded();
@@ -902,15 +1051,40 @@ public class RearSwitchKeeperService extends Service {
         if (showToastWhenMoved && moved && packageName != null) {
             String appName = getAppName(packageName);
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                Toast.makeText(
+                MainDisplayUi.showToast(
                         getApplicationContext(),
                         getString(R.string.toast_task_returned_main, appName),
                         Toast.LENGTH_SHORT
-                ).show();
+                );
             }, 100);
         }
 
+        // 与背屏桌面 [RearDesktopLaunchHelper] 的 Session.acquire 成对：此前在桌面 Activity.onDestroy 里 release
+        // 会在「桌面→应用投屏」交接时误恢复官方背屏；改在 Keeper 真正收口时统一 release（ref 已为 0 则无害跳过）。
+        try {
+            OfficialSubscreenMiRootProjectionSession.release(getApplicationContext(), taskService);
+        } catch (Exception e) {
+            LogHelper.w(TAG, "OfficialSubscreenMiRootProjectionSession.release failed: " + e.getMessage());
+        }
+
         stopSelf();
+    }
+
+    /**
+     * 背屏桌面投屏会注册 {@link RearScreenWakeService}；从桌面打开应用后桌面 Activity 可能仍在栈内，
+     * 结束应用投屏时须在此注销，避免常亮循环与「投屏中」通知残留。
+     */
+    private void stopProjectionWakeServices() {
+        try {
+            Context app = getApplicationContext();
+            RearScreenWakeManager mgr = RearScreenWakeManager.getInstance();
+            mgr.stopWakeService(app, RearScreenDesktopActivity.class);
+            // 无论注册表是否已清空，都强制停 Wake，避免「MiRoot・投屏中」通知与唤醒循环残留
+            stopService(new Intent(app, RearScreenWakeService.class));
+            mgr.clearStaleRegistrationsWhenNoProjection(app);
+        } catch (Exception e) {
+            LogHelper.w(TAG, "stopProjectionWakeServices failed", e);
+        }
     }
 
     private void restoreRearDisplayStateIfNeeded() {

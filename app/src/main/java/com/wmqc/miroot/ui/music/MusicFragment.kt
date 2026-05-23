@@ -1,4 +1,5 @@
 package com.wmqc.miroot.ui.music
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.BroadcastReceiver
 import android.content.ComponentName
@@ -30,6 +31,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.wmqc.miroot.R
 import com.wmqc.miroot.MainActivity
 import com.wmqc.miroot.capability.PermissionSnapshot
+import com.wmqc.miroot.lyrics.JiebaTokenizerEngine
 import com.wmqc.miroot.service.MiRootNotificationListenerService
 import com.wmqc.miroot.viewmodel.MainPermissionViewModel
 import com.wmqc.miroot.lyrics.LogHelper
@@ -63,19 +65,33 @@ class MusicFragment : Fragment() {
         if (path != null) {
             musicViewModel.applyProjectionCustomFont(path)
         } else {
-            Toast.makeText(requireContext(), R.string.music_font_import_failed, Toast.LENGTH_SHORT).show()
+            MainDisplayUi.showToast(requireContext(), R.string.music_font_import_failed, Toast.LENGTH_SHORT)
         }
     }
 
-    private val pickAbyssalFontLauncher = registerForActivityResult(
+    private val pickLyricsDictLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
         if (uri == null) return@registerForActivityResult
-        val path = LyricsFontImporter.copyImportedFont(requireContext(), uri, LyricsFontImporter.Slot.ABYSSAL)
-        if (path != null) {
-            musicViewModel.applyAbyssalCustomFont(path)
-        } else {
-            Toast.makeText(requireContext(), R.string.music_font_import_failed, Toast.LENGTH_SHORT).show()
+        val result = runCatching {
+            JiebaTokenizerEngine.importUserDictionary(requireContext(), uri)
+        }
+        result.onSuccess { data ->
+            MainDisplayUi.showToast(
+                requireContext(),
+                getString(
+                    R.string.music_lyrics_dict_import_success,
+                    data.mergedWords,
+                    data.totalWords,
+                ),
+                Toast.LENGTH_LONG,
+            )
+        }.onFailure {
+            MainDisplayUi.showToast(
+                requireContext(),
+                getString(R.string.music_lyrics_dict_import_failed, it.message ?: "unknown"),
+                Toast.LENGTH_LONG,
+            )
         }
     }
 
@@ -110,6 +126,7 @@ class MusicFragment : Fragment() {
 
                 MusicScreen(
                     privileged = privileged,
+                    rootAvailable = snap?.root == true,
                     listenerEnabled = listenerOk,
                     hasPlayer = hasPlayer,
                     projecting = projecting,
@@ -118,7 +135,7 @@ class MusicFragment : Fragment() {
                     onOpenListenerSettings = { MusicProjectionController.openNotificationListenerSettings(ctx) },
                     onStart = {
                         musicViewModel.refreshPrivilege()
-                        MusicProjectionController.start(ctx)
+                        MusicProjectionController.start(ctx, directRearOnly = true)
                         view?.postDelayed({ musicViewModel.refreshProjectionState() }, 900)
                     },
                     onStop = {
@@ -128,8 +145,8 @@ class MusicFragment : Fragment() {
                     onPickProjectionFont = {
                         pickProjectionFontLauncher.launch(FONT_PICKER_MIME_TYPES)
                     },
-                    onPickAbyssalFont = {
-                        pickAbyssalFontLauncher.launch(FONT_PICKER_MIME_TYPES)
+                    onImportLyricsDict = {
+                        pickLyricsDictLauncher.launch(DICT_PICKER_MIME_TYPES)
                     },
                 )
             }
@@ -230,6 +247,12 @@ class MusicFragment : Fragment() {
             "application/x-font-otf",
             "application/x-font-truetype",
             "application/x-font-opentype",
+            "application/octet-stream",
+            "*/*",
+        )
+        private val DICT_PICKER_MIME_TYPES = arrayOf(
+            "text/plain",
+            "text/*",
             "application/octet-stream",
             "*/*",
         )

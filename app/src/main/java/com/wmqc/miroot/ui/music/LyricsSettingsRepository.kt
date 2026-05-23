@@ -3,13 +3,16 @@ package com.wmqc.miroot.ui.music
 import android.content.Context
 import java.io.File
 import com.wmqc.miroot.lyrics.LyricsFontHelper
+import com.wmqc.miroot.lyrics.PrivilegeBackend
 import com.wmqc.miroot.lyrics.RearScreenLyricsActivity
-
 object LyricsSettingsRepository {
 
     private const val PREFS = "LyricsSettings"
     private const val KEY_SHUFFLE_SPLIT_SCALE_VARIANCE = "shuffleSplitScaleVariance"
-
+    private const val KEY_LYRICS_SOURCE_MODE = "lyricsSourceMode"
+    private const val COLOR_CHANGE_INTERVAL_MIN_MS = 1000
+    private const val COLOR_CHANGE_INTERVAL_MAX_MS = 10_000
+    private const val COLOR_CHANGE_INTERVAL_DEFAULT_MS = 5000
     fun load(context: Context): LyricsUiSettings {
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val rawBase = LyricsUiSettings(
@@ -17,8 +20,12 @@ object LyricsSettingsRepository {
             backgroundTextureSize = p.getFloat("backgroundTextureSize", 1.3f),
             normalLyricsAlpha = p.getInt("normalLyricsAlpha", 30),
             backgroundTextureAlpha = p.getInt("backgroundTextureAlpha", 20),
+            albumArtBackground = p.getBoolean("albumArtBackground", false),
+            albumArtAlphaPercent = p.getInt("albumArtAlphaPercent", 35).coerceIn(0, 100),
+            albumArtBlurRadius = p.getFloat("albumArtBlurRadius", 12f).coerceAtLeast(0f),
             wordByWord = p.getBoolean("wordByWord", false),
             shuffleSplitEffect = p.getBoolean("shuffleSplitEffect", false),
+            shuffleSplitMulticolor = p.getBoolean("shuffleSplitMulticolor", false),
             shuffleSplitMode = p.getString("shuffleSplitMode", "WORD") ?: "WORD",
             shuffleSplitOnlyCurrentLine = p.getBoolean("shuffleSplitOnlyCurrentLine", true),
             shuffleSplitTiltRatio = p.getFloat("shuffleSplitTiltRatio", 5f),
@@ -27,43 +34,71 @@ object LyricsSettingsRepository {
             } else {
                 adaptiveShuffleSplitScaleVariance(p.getFloat("textSize", 78f))
             },
-            shuffleSplitPerformanceGuard = p.getBoolean("shuffleSplitPerformanceGuard", false),
+            powerSavingMode = p.getBoolean("powerSavingMode", false),
+            borderPerformanceGuard = p.getBoolean("borderPerformanceGuard", false),
+            borderLightweightMode = p.getBoolean("borderLightweightMode", false),
             marqueeLight = p.getBoolean("marqueeLight", true),
             neonDisplayEnabled = p.getBoolean("neonDisplay", p.getBoolean("lyricsNeonGlow", true)),
             neonBorder = p.getBoolean("neonBorder", true),
             marqueeLightSize = p.getFloat("marqueeLightSize", 18f),
+            marqueeLightDurationMs = p.getInt("marqueeLightDurationMs", 5000),
             gestureControl = p.getBoolean("gestureControl", false),
             backgroundTexture = p.getBoolean("backgroundTexture", false),
             autoProjection = p.getBoolean("autoProjection", false),
-            breathingRhythmMs = p.getInt("breathingRhythmMs", 2000),
-            breathingScaleVariance = p.getFloat("breathingScaleVariance", 0.055f),
+            breathingEnabled = p.getBoolean("breathingEnabled", false),
+            breathingBpm = p.getInt("breathingBpm", 15),
+            breathingScaleVariance = p.getFloat("breathingScaleVariance", 0.10f),
             breathingDisplacementStrength = p.getFloat("breathingDisplacementStrength", 1f),
-            colorChangeIntervalMs = p.getInt("colorChangeIntervalMs", 1500),
-            shuffleLayoutRebuildIntervalMs = p.getInt("shuffleLayoutRebuildIntervalMs", 0),
+            colorChangeIntervalMs = p.getInt("colorChangeIntervalMs", COLOR_CHANGE_INTERVAL_DEFAULT_MS)
+                .coerceIn(COLOR_CHANGE_INTERVAL_MIN_MS, COLOR_CHANGE_INTERVAL_MAX_MS),
+            randomColorSwitchEnabled = p.getBoolean("randomColorSwitchEnabled", true),
             projectionSyncOffsetMs = p.getInt("projectionSyncOffsetMs", DEFAULT_PROJECTION_SYNC_OFFSET_MS),
+            lyricsSourceMode = LyricsSourceMode.fromPrefValue(
+                p.getString(KEY_LYRICS_SOURCE_MODE, LyricsSourceMode.NETWORK_ONLY.prefValue),
+            ),
             abyssalMirror = p.getBoolean("abyssalMirror", false),
             abyssalGyroSensitivity = p.getFloat("abyssalGyroSensitivity", 1f),
             abyssalMovableRange = p.getFloat("abyssalMovableRange", 2.5f),
         )
         val pFontRaw = LyricsFontHelper.normalizeFontId(p.getString("projectionLyricsFont", null))
         val pPathOk = readCustomFontPath(pFontRaw, p.getString("projectionLyricsCustomPath", null))
+        val projFont = if (pFontRaw == LyricsFontHelper.ID_CUSTOM && pPathOk == null) {
+            LyricsFontHelper.DEFAULT_ID
+        } else {
+            pFontRaw
+        }
+        val projPath = if (pFontRaw == LyricsFontHelper.ID_CUSTOM && pPathOk != null) pPathOk else null
+
         val aFontRaw = LyricsFontHelper.normalizeFontId(p.getString("abyssalLyricsFont", null))
         val aPathOk = readCustomFontPath(aFontRaw, p.getString("abyssalLyricsCustomPath", null))
+        val abyFont = if (aFontRaw == LyricsFontHelper.ID_CUSTOM && aPathOk == null) {
+            LyricsFontHelper.DEFAULT_ID
+        } else {
+            aFontRaw
+        }
+        val abyPath = if (aFontRaw == LyricsFontHelper.ID_CUSTOM && aPathOk != null) aPathOk else null
+
+        // 统一为单一字体：默认以投屏为准；若上次为深渊镜且两套偏好不一致，沿用深渊镜侧（旧版独立写入 abyssal 键）
+        val prefsAbyssalOn = p.getBoolean("abyssalMirror", false)
+        val pairsDiffer = projFont != abyFont || projPath != abyPath
+        val canonFont: String
+        val canonPath: String?
+        if (prefsAbyssalOn && pairsDiffer) {
+            canonFont = abyFont
+            canonPath = abyPath
+        } else {
+            canonFont = projFont
+            canonPath = projPath
+        }
+
         val raw = rawBase.copy(
-            projectionLyricsFont = if (pFontRaw == LyricsFontHelper.ID_CUSTOM && pPathOk == null) {
-                LyricsFontHelper.DEFAULT_ID
-            } else {
-                pFontRaw
-            },
-            projectionLyricsCustomPath = if (pFontRaw == LyricsFontHelper.ID_CUSTOM && pPathOk != null) pPathOk else null,
-            abyssalLyricsFont = if (aFontRaw == LyricsFontHelper.ID_CUSTOM && aPathOk == null) {
-                LyricsFontHelper.DEFAULT_ID
-            } else {
-                aFontRaw
-            },
-            abyssalLyricsCustomPath = if (aFontRaw == LyricsFontHelper.ID_CUSTOM && aPathOk != null) aPathOk else null,
+            projectionLyricsFont = canonFont,
+            projectionLyricsCustomPath = canonPath,
+            abyssalLyricsFont = canonFont,
+            abyssalLyricsCustomPath = canonPath,
         )
-        val normalized = raw.normalizeAbyssalMutex()
+        val normalized = enforceLyricsSourceMode(context, raw)
+            .normalizeAbyssalMutex()
         if (normalized != raw) {
             save(context, normalized)
         }
@@ -72,14 +107,8 @@ object LyricsSettingsRepository {
 
     fun save(context: Context, s: LyricsUiSettings) {
         val pNorm = LyricsFontHelper.normalizeFontId(s.projectionLyricsFont)
-        val aNorm = LyricsFontHelper.normalizeFontId(s.abyssalLyricsFont)
         val pPath = if (pNorm == LyricsFontHelper.ID_CUSTOM) {
             s.projectionLyricsCustomPath?.trim()?.takeIf { it.isNotEmpty() && File(it).isFile }
-        } else {
-            null
-        }
-        val aPath = if (aNorm == LyricsFontHelper.ID_CUSTOM) {
-            s.abyssalLyricsCustomPath?.trim()?.takeIf { it.isNotEmpty() && File(it).isFile }
         } else {
             null
         }
@@ -88,16 +117,12 @@ object LyricsSettingsRepository {
         } else {
             pNorm
         }
-        val aFontFinal = if (aNorm == LyricsFontHelper.ID_CUSTOM && aPath == null) {
-            LyricsFontHelper.DEFAULT_ID
-        } else {
-            aNorm
-        }
-        val fixed = s.normalizeAbyssalMutex().copy(
+        val projCustomPath = if (pFontFinal == LyricsFontHelper.ID_CUSTOM) pPath else null
+        val fixed = enforceLyricsSourceMode(context, s).normalizeAbyssalMutex().copy(
             projectionLyricsFont = pFontFinal,
-            projectionLyricsCustomPath = if (pFontFinal == LyricsFontHelper.ID_CUSTOM) pPath else null,
-            abyssalLyricsFont = aFontFinal,
-            abyssalLyricsCustomPath = if (aFontFinal == LyricsFontHelper.ID_CUSTOM) aPath else null,
+            projectionLyricsCustomPath = projCustomPath,
+            abyssalLyricsFont = pFontFinal,
+            abyssalLyricsCustomPath = projCustomPath,
         )
         val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         p.edit()
@@ -105,26 +130,43 @@ object LyricsSettingsRepository {
             .putFloat("backgroundTextureSize", fixed.backgroundTextureSize)
             .putInt("normalLyricsAlpha", fixed.normalLyricsAlpha)
             .putInt("backgroundTextureAlpha", fixed.backgroundTextureAlpha)
+            .putBoolean("albumArtBackground", fixed.albumArtBackground)
+            .putInt("albumArtAlphaPercent", fixed.albumArtAlphaPercent.coerceIn(0, 100))
+            .putFloat("albumArtBlurRadius", fixed.albumArtBlurRadius.coerceAtLeast(0f))
             .putBoolean("wordByWord", fixed.wordByWord)
             .putBoolean("shuffleSplitEffect", fixed.shuffleSplitEffect)
+            .putBoolean("shuffleSplitMulticolor", fixed.shuffleSplitMulticolor)
             .putString("shuffleSplitMode", fixed.shuffleSplitMode)
             .putBoolean("shuffleSplitOnlyCurrentLine", fixed.shuffleSplitOnlyCurrentLine)
             .putFloat("shuffleSplitTiltRatio", fixed.shuffleSplitTiltRatio)
             .putFloat(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE, fixed.shuffleSplitScaleVariance)
-            .putBoolean("shuffleSplitPerformanceGuard", fixed.shuffleSplitPerformanceGuard)
+            .putBoolean("shuffleSplitPerformanceGuard", false)
+            .putBoolean("powerSavingMode", fixed.powerSavingMode)
+            .putBoolean("borderPerformanceGuard", fixed.borderPerformanceGuard)
+            .putBoolean("borderLightweightMode", fixed.borderLightweightMode)
             .putBoolean("marqueeLight", fixed.marqueeLight)
             .putBoolean("neonDisplay", fixed.neonDisplayEnabled)
             .putBoolean("neonBorder", fixed.neonBorder)
             .putFloat("marqueeLightSize", fixed.marqueeLightSize)
+            .putInt("marqueeLightDurationMs", fixed.marqueeLightDurationMs)
             .putBoolean("gestureControl", fixed.gestureControl)
             .putBoolean("backgroundTexture", fixed.backgroundTexture)
             .putBoolean("autoProjection", fixed.autoProjection)
-            .putInt("breathingRhythmMs", fixed.breathingRhythmMs)
+            .putBoolean("breathingEnabled", fixed.breathingEnabled)
+            .putInt("breathingBpm", fixed.breathingBpm)
             .putFloat("breathingScaleVariance", fixed.breathingScaleVariance)
             .putFloat("breathingDisplacementStrength", fixed.breathingDisplacementStrength)
-            .putInt("colorChangeIntervalMs", fixed.colorChangeIntervalMs)
-            .putInt("shuffleLayoutRebuildIntervalMs", fixed.shuffleLayoutRebuildIntervalMs)
+            .putInt(
+                "colorChangeIntervalMs",
+                fixed.colorChangeIntervalMs.coerceIn(
+                    COLOR_CHANGE_INTERVAL_MIN_MS,
+                    COLOR_CHANGE_INTERVAL_MAX_MS,
+                ),
+            )
+            .putBoolean("randomColorSwitchEnabled", fixed.randomColorSwitchEnabled)
+            .remove("shuffleLayoutRebuildIntervalMs")
             .putInt("projectionSyncOffsetMs", fixed.projectionSyncOffsetMs)
+            .putString(KEY_LYRICS_SOURCE_MODE, fixed.lyricsSourceMode.prefValue)
             .putBoolean("abyssalMirror", fixed.abyssalMirror)
             .putFloat("abyssalGyroSensitivity", fixed.abyssalGyroSensitivity)
             .putFloat("abyssalMovableRange", fixed.abyssalMovableRange)
@@ -136,6 +178,18 @@ object LyricsSettingsRepository {
 
         MusicAutoProjectionSync.sync(context)
         RearScreenLyricsActivity.getCurrentInstance()?.applySettings()
+    }
+
+    /**
+     * 仅在「非 Root 通道」下锁定歌词来源为 NETWORK_ONLY（例如 Shizuku）。
+     * Root 通道允许用户切换并持久化 NETWORK_ONLY / SUPER_LYRIC_ONLY / MIXED。
+     */
+    private fun enforceLyricsSourceMode(context: Context, s: LyricsUiSettings): LyricsUiSettings {
+        PrivilegeBackend.refreshIfUnknown()
+        val rootMode = PrivilegeBackend.getMode() == PrivilegeBackend.Mode.ROOT
+        if (rootMode) return s
+        if (s.lyricsSourceMode == LyricsSourceMode.NETWORK_ONLY) return s
+        return s.copy(lyricsSourceMode = LyricsSourceMode.NETWORK_ONLY)
     }
 
     private fun readCustomFontPath(fontId: String, stored: String?): String? {

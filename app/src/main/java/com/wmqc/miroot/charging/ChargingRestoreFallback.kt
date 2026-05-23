@@ -1,6 +1,5 @@
 package com.wmqc.miroot.charging
 
-import com.wmqc.miroot.capability.EnvironmentProbe
 import com.wmqc.miroot.capability.PrivilegedShell
 
 /**
@@ -10,11 +9,8 @@ object ChargingRestoreFallback {
 
     @JvmStatic
     fun runPrivilegedShell(command: String): Boolean {
-        if (!EnvironmentProbe.hasPrivilegedShellChannelSync()) {
-            return false
-        }
         return try {
-            PrivilegedShell.runAndWait(command)
+            PrivilegedShell.execCmd(command)
         } catch (_: Exception) {
             false
         }

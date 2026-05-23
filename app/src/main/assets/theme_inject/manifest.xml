@@ -1,0 +1,366 @@
+<Widget frameRate="0" scaleByDensity="false" screenWidth="1080" version="2" useVariableUpdater="HyperMaterial,DateTime.Minute">
+  <Var name="is_debug" type="number" expression="0"/>
+  <Var name="isDisplayDefaultBg" type="number" expression="#isDisplayDefaultBg"/>
+  <Var name="bgmode" type="number" expression="#bgmode"/>
+  <Var name="aniX" type="number" expression="#aniVar_x"/>
+  <Var name="aniY" type="number" expression="#aniVar_y"/>
+  <Var name="aniScaleX" type="number" expression="#aniVar_scaleX"/>
+  <Var name="aniScaleY" type="number" expression="#aniVar_scaleY"/>
+  <Var name="resType" type="number" expression="#bgmode_resType"/>
+  <Var name="isImageResType" type="number" expression="((#resType == 0) || (#resType == 2))"/>
+  <Var name="vsy" type="number" expression="(#view_height / 572)"/>
+  <Rectangle w="#view_width" h="#view_height" visibility="(#bgmode == 3)" fillColor="#000000"/>
+  <Group>
+    <!-- Ai.vue -->
+    <Var name="aod_state_8i5TKF4T" type="number" expression="0" const="true"/>
+    <Var name="is_paused_8i5TKF4T" type="number" expression="0" const="true"/>
+    <Var name="is_edit_8i5TKF4T" type="number" expression="0" const="true"/>
+    <Var name="is_finished_8i5TKF4T" type="number" expression="0" const="true"/>
+    <Var name="bgmode_8i5TKF4T" type="number" expression="#bgmode"/>
+    <Var name="isDisplayDefaultBg_8i5TKF4T" type="number" expression="#isDisplayDefaultBg"/>
+    <Var name="imageUri_8i5TKF4T" type="string" expression="@imageUri"/>
+    <Var name="videoUri_8i5TKF4T" type="string" expression="@videoUri"/>
+    <Var name="selected_8i5TKF4T" type="number" expression="#selected"/>
+    <Var name="videoState_8i5TKF4T" type="string" expression="@aiVideo.playState"/>
+    <Var name="aniX_8i5TKF4T" type="number" expression="#aniVar_x"/>
+    <Var name="aniY_8i5TKF4T" type="number" expression="#aniVar_y"/>
+    <Var name="aniScaleX_8i5TKF4T" type="number" expression="#aniVar_scaleX"/>
+    <Var name="aniScaleY_8i5TKF4T" type="number" expression="#aniVar_scaleY"/>
+    <Var name="aniDisplayScale_8i5TKF4T" type="number" expression="#aniVar_displayScale"/>
+    <Var name="resType_8i5TKF4T" type="number" expression="#bgmode_resType"/>
+    <Var name="scaleFactor_8i5TKF4T" type="number" expression="#__scale_factor"/>
+    <Var name="isVideoResType_8i5TKF4T" type="number" expression="((#resType_8i5TKF4T == 1) || (#resType_8i5TKF4T == 3))"/>
+    <Var name="isImageResType_8i5TKF4T" type="number" expression="((#resType_8i5TKF4T == 0) || (#resType_8i5TKF4T == 2))"/>
+    <Var name="cVideoLoop_8i5TKF4T" type="number" expression="ifelse(eqs(@isPreviewMode,'true'),1,0)"/>
+    <Var name="isNewTheme_8i5TKF4T" type="number" expression="(#aniScaleX_8i5TKF4T != 0)"/>
+    <Function name="playVideo">
+      <VariableCommand name="is_finished_8i5TKF4T" expression="0" type="number"/>
+      <VariableCommand name="is_paused_8i5TKF4T" expression="0" type="number"/>
+      <VideoCommand target="aiVideo" command="play"/>
+      <VideoCommand target="customVideo" command="play"/>
+    </Function>
+    <Function name="pauseVideo">
+      <IfCommand ifCondition="(#bgmode_8i5TKF4T == 2)">
+        <Consequent>
+          <VideoCommand target="aiVideo" command="pause"/>
+        </Consequent>
+        <Alternate>
+          <VideoCommand target="customVideo" command="pause"/>
+        </Alternate>
+      </IfCommand>
+    </Function>
+    <Function name="releaseVideo">
+      <IfCommand ifCondition="(#bgmode_8i5TKF4T == 2)">
+        <Consequent>
+          <VideoCommand target="aiVideo" command="release"/>
+        </Consequent>
+        <Alternate>
+          <VideoCommand target="customVideo" command="release"/>
+        </Alternate>
+      </IfCommand>
+    </Function>
+    <Function name="setVideoFirstFrame">
+      <IfCommand ifCondition="(#bgmode_8i5TKF4T == 2)">
+        <Consequent>
+          <VideoCommand target="aiVideo" command="seekTo" time="0"/>
+        </Consequent>
+        <Alternate>
+          <VideoCommand target="customVideo" command="seekTo" time="0"/>
+        </Alternate>
+      </IfCommand>
+    </Function>
+    <Function name="replayVideo">
+      <FunctionCommand target="setVideoFirstFrame"/>
+      <FunctionCommand target="playVideo" delay="1"/>
+    </Function>
+    <Function name="onComplete">
+      <VariableCommand name="is_finished_8i5TKF4T" expression="1" type="number"/>
+    </Function>
+    <Function name="openMusicProjection">
+      <!-- 发送音乐投屏广播（MiRoot LyricsIntents，见 外部广播启动投屏.md） -->
+      <IntentCommand action="com.wmqc.miroot.lyrics.ACTION_OPEN_MUSIC_PROJECTION" broadcast="true" package="com.wmqc.miroot">
+        <Extra name="com.wmqc.miroot.lyrics.EXTRA_MUSIC_PROJECTION_OP" type="string" expression="'start'"/>
+      </IntentCommand>
+    </Function>
+    <Function name="openRearDesktop">
+      <!-- 发送背屏桌面广播（RearDesktopIntents，见 docs/外部广播启动投屏.md） -->
+      <IntentCommand action="com.wmqc.miroot.rear.desktop.ACTION_OPEN_REAR_DESKTOP" broadcast="true" package="com.wmqc.miroot"/>
+    </Function>
+    <Function name="openCarControlProjection">
+      <!-- 车控投屏（CarControlIntents.ACTION_OPEN_CAR_CONTROL_PROJECTION） -->
+      <IntentCommand action="com.wmqc.miroot.car.ACTION_OPEN_CAR_CONTROL_PROJECTION" broadcast="true" package="com.wmqc.miroot">
+        <Extra name="com.wmqc.miroot.car.EXTRA_CAR_PROJECTION_OP" type="string" expression="'start'"/>
+      </IntentCommand>
+    </Function>
+    <Image visibility="((((! eqs(@isPreviewMode,'true')) ** strIsEmpty(@imageUri_8i5TKF4T)) ** (#bgmode_8i5TKF4T == 2)) ** (! #isNewTheme_8i5TKF4T))" w="#view_width" h="#view_height" src="assets/ai/ai.png"/>
+    <Image visibility="((((! eqs(@isPreviewMode,'true')) ** strIsEmpty(@imageUri_8i5TKF4T)) ** (#bgmode_8i5TKF4T == 2)) ** #isNewTheme_8i5TKF4T)" x="((#aniX_8i5TKF4T * #aniDisplayScale_8i5TKF4T) / #scaleFactor_8i5TKF4T)" y="((#aniY_8i5TKF4T * #aniDisplayScale_8i5TKF4T) / #scaleFactor_8i5TKF4T)" scaleX="(#aniScaleX_8i5TKF4T * #aniDisplayScale_8i5TKF4T)" scaleY="(#aniScaleY_8i5TKF4T * #aniDisplayScale_8i5TKF4T)" src="assets/ai/ai.png"/>
+    <Video visibility="(#bgmode_8i5TKF4T == 2)" w="#view_width" h="#view_height" touchable="true" name="aiVideo" layerType="bottom">
+      <Triggers>
+        <Trigger action="complete">
+          <FunctionCommand target="onComplete"/>
+        </Trigger>
+      </Triggers>
+    </Video>
+    <Video visibility="((((! eqs(@isPreviewMode,'true')) ** (! strIsEmpty(@videoUri_8i5TKF4T))) ** (#bgmode_8i5TKF4T == 1)) ** #isVideoResType_8i5TKF4T)" path="@videoUri_8i5TKF4T" w="#view_width" h="#view_height" x="((#aniX_8i5TKF4T * #aniDisplayScale_8i5TKF4T) / #scaleFactor_8i5TKF4T)" y="((#aniY_8i5TKF4T * #aniDisplayScale_8i5TKF4T) / #scaleFactor_8i5TKF4T)" scaleX="#aniScaleX_8i5TKF4T" scaleY="#aniScaleY_8i5TKF4T" loop="#cVideoLoop_8i5TKF4T" touchable="true" name="customVideo" layerType="bottom" scaleMode="1">
+      <Triggers>
+        <Trigger action="complete">
+          <FunctionCommand target="onComplete"/>
+        </Trigger>
+      </Triggers>
+    </Video>
+    <Image src="@imageUri_8i5TKF4T" w="#view_width" h="#view_height" visibility="((((! eqs(@isPreviewMode,'true')) ** (! strIsEmpty(@imageUri_8i5TKF4T))) ** (#bgmode_8i5TKF4T != 3)) ** (! #isNewTheme_8i5TKF4T))" srcType="FileSystem"/>
+    <Image src="@imageUri_8i5TKF4T" x="((#aniX_8i5TKF4T * #aniDisplayScale_8i5TKF4T) / #scaleFactor_8i5TKF4T)" y="((#aniY_8i5TKF4T * #aniDisplayScale_8i5TKF4T) / #scaleFactor_8i5TKF4T)" scaleX="(#aniScaleX_8i5TKF4T * #aniDisplayScale_8i5TKF4T)" scaleY="(#aniScaleY_8i5TKF4T * #aniDisplayScale_8i5TKF4T)" visibility="((((! eqs(@isPreviewMode,'true')) ** (! strIsEmpty(@imageUri_8i5TKF4T))) ** ((#bgmode_8i5TKF4T == 0) || (#bgmode_8i5TKF4T == 2))) ** #isNewTheme_8i5TKF4T)" srcType="FileSystem"/>
+    <Image src="@imageUri_8i5TKF4T" x="((#aniX_8i5TKF4T * #aniDisplayScale_8i5TKF4T) / #scaleFactor_8i5TKF4T)" y="((#aniY_8i5TKF4T * #aniDisplayScale_8i5TKF4T) / #scaleFactor_8i5TKF4T)" scaleX="(#aniScaleX_8i5TKF4T * #aniDisplayScale_8i5TKF4T)" scaleY="(#aniScaleY_8i5TKF4T * #aniDisplayScale_8i5TKF4T)" visibility="(((((! eqs(@isPreviewMode,'true')) ** (! strIsEmpty(@imageUri_8i5TKF4T))) ** (#bgmode_8i5TKF4T == 1)) ** #isImageResType_8i5TKF4T) ** #isNewTheme_8i5TKF4T)" srcType="FileSystem"/>
+    <Group visibility="0">
+      <Text textExp="((('isDisplayDefaultBg ' + #isDisplayDefaultBg_8i5TKF4T) + ' bgmode') + #bgmode_8i5TKF4T)" x="300" y="10" size="30" color="#00ffff"/>
+      <Text textExp="('isPreviewMode ' + eqs(@isPreviewMode,'true'))" x="300" y="50" size="30" color="#00ffff"/>
+      <Text textExp="@imageUri_8i5TKF4T" x="300" y="140" size="30" color="#ff6a05"/>
+      <Text textExp="#aniScaleX_8i5TKF4T" x="300" y="200" size="30" color="#ff6a05"/>
+      <Text textExp="#aniX_8i5TKF4T" x="300" y="250" size="30" color="#ff6a05"/>
+      <Text textExp="#isImageResType_8i5TKF4T" x="300" y="300" size="30" color="#ff6a05"/>
+    </Group>
+  </Group>
+  <Group visibility="#is_debug">
+    <Text textExp="((('isDisplayDefaultBg ' + #isDisplayDefaultBg) + ' bgmode') + #bgmode)" x="300" y="10" size="30" color="#00ffff"/>
+    <Text textExp="('isPreviewMode ' + eqs(@isPreviewMode,'true'))" x="300" y="50" size="30" color="#00ffff"/>
+    <Text textExp="@imageUri" x="300" y="140" size="30" color="#ff6a05"/>
+    <Text textExp="undefined($customImage, 'bmp_height')" x="300" y="200" size="30" color="#ff6a05"/>
+    <Text textExp="#aniX" x="300" y="250" size="30" color="#ff6a05"/>
+    <Text textExp="#aniY" x="300" y="300" size="30" color="#ff6a05"/>
+    <Text textExp="undefined($customImage, 'bmp_width')" x="300" y="350" size="30" color="#ff6a05"/>
+    <Text textExp="(undefined($customImage, 'bmp_width') / #view_width)" x="300" y="400" size="30" color="#ff6a05"/>
+  </Group>
+  <Group>
+    <!-- Sig.vue -->
+    <Var name="debugMode_LDnWwt6B" type="number" expression="0" const="true"/>
+    <Var name="aod_state_LDnWwt6B" type="number" expression="0" const="true"/>
+    <Var name="timeFormat_LDnWwt6B" type="string" expression="ifelse((#time_format == 1),'HH:mm','hh:mm')"/>
+    <Var name="signatureText_LDnWwt6B" type="string" expression="@signatureText"/>
+    <Var name="textColor_LDnWwt6B" type="string" expression="@textColor"/>
+    <Var name="signatureAlign_LDnWwt6B" type="number" expression="#signatureAlign"/>
+    <Var name="signatureSize_LDnWwt6B" type="number" expression="#signatureSize"/>
+    <Var name="signatureBold_LDnWwt6B" type="number" expression="#signatureBold"/>
+    <Var name="showTime_LDnWwt6B" type="number" expression="#showTime"/>
+    <Var name="bgmode_LDnWwt6B" type="number" expression="#bgmode"/>
+    <Var name="isNoBg_LDnWwt6B" type="number" expression="(#bgmode_LDnWwt6B == 3)"/>
+    <Var name="isDeep_LDnWwt6B" type="number" expression="ifelse(#isNoBg_LDnWwt6B,1,#isDeep)"/>
+    <Var name="defaultBlurColor_LDnWwt6B" type="string" expression="ifelse(#isDeep_LDnWwt6B,'#E6ffffff','#E6ABABAB')"/>
+    <Var name="defaultColorMode_LDnWwt6B" type="string" expression="'15'"/>
+    <Var name="blurTextAlpha_LDnWwt6B" type="string" expression="ifelse(#isDeep_LDnWwt6B,'#7F','#B3')"/>
+    <Var name="blurTextColorMode_LDnWwt6B" type="string" expression="ifelse(#isDeep_LDnWwt6B,'20','120')"/>
+    <Var name="blurTextColor_LDnWwt6B" type="string" expression="ifelse((! strIsEmpty(@textColor_LDnWwt6B)),(@blurTextAlpha_LDnWwt6B + substr(@textColor_LDnWwt6B,1,6)),@defaultBlurColor_LDnWwt6B)"/>
+    <Var name="aodBlurTextAlpha_LDnWwt6B" type="string" expression="ifelse(#isDeep_LDnWwt6B,'#B3','#CC')"/>
+    <Var name="aodBlurTextColorMode_LDnWwt6B" type="string" expression="ifelse(#isDeep_LDnWwt6B,'20','121')"/>
+    <Var name="aodBlurTextColor_LDnWwt6B" type="string" expression="ifelse((! strIsEmpty(@textColor_LDnWwt6B)),(@aodBlurTextAlpha_LDnWwt6B + substr(@textColor_LDnWwt6B,1,6)),@defaultBlurColor_LDnWwt6B)"/>
+    <Var name="aodTextColor_LDnWwt6B" type="string" expression="ifelse(#isDeep_LDnWwt6B,@textColor_LDnWwt6B,'#ffffff')"/>
+    <Var name="designWidth_LDnWwt6B" type="number" expression="336"/>
+    <Var name="scale_LDnWwt6B" type="number" expression="(#view_width / #designWidth_LDnWwt6B)"/>
+    <Var name="fontSize_LDnWwt6B" type="number" expression="(#signatureSize_LDnWwt6B * #scale_LDnWwt6B)"/>
+    <Var name="q200Width_LDnWwt6B" type="number" expression="904"/>
+    <Var name="q200Height_LDnWwt6B" type="number" expression="572"/>
+    <Var name="q200AvailableWidth_LDnWwt6B" type="number" expression="625"/>
+    <Var name="q200MarginLeftRatio_LDnWwt6B" type="number" expression="((#q200Width_LDnWwt6B - #q200AvailableWidth_LDnWwt6B) / #q200Width_LDnWwt6B)"/>
+    <Var name="q200ScreenRatio_LDnWwt6B" type="number" expression="(#q200Width_LDnWwt6B / #q200Height_LDnWwt6B)"/>
+    <Var name="p2Width_LDnWwt6B" type="number" expression="976"/>
+    <Var name="p2Height_LDnWwt6B" type="number" expression="596"/>
+    <Var name="p2AvailableWidth_LDnWwt6B" type="number" expression="696"/>
+    <Var name="p2MarginLeftRatio_LDnWwt6B" type="number" expression="((#p2Width_LDnWwt6B - #p2AvailableWidth_LDnWwt6B) / #p2Width_LDnWwt6B)"/>
+    <Var name="p2ScreenRatio_LDnWwt6B" type="number" expression="(#p2Width_LDnWwt6B / #p2Height_LDnWwt6B)"/>
+    <Var name="realScreenRatio_LDnWwt6B" type="number" expression="(#view_width / #view_height)"/>
+    <Var name="diffWithQ200_LDnWwt6B" type="number" expression="abs((#realScreenRatio_LDnWwt6B - #q200ScreenRatio_LDnWwt6B))"/>
+    <Var name="diffWithP2_LDnWwt6B" type="number" expression="abs((#realScreenRatio_LDnWwt6B - #p2ScreenRatio_LDnWwt6B))"/>
+    <Var name="isQ200_LDnWwt6B" type="number" expression="(#diffWithQ200_LDnWwt6B { #diffWithP2_LDnWwt6B)"/>
+    <Var name="availableMarginLeftRatio_LDnWwt6B" type="number" expression="ifelse(#isQ200_LDnWwt6B,#q200MarginLeftRatio_LDnWwt6B,#p2MarginLeftRatio_LDnWwt6B)"/>
+    <Var name="safeAreaMarginLeft_LDnWwt6B" type="number" expression="(10 * #scale_LDnWwt6B)"/>
+    <Var name="viewMarginLeft_LDnWwt6B" type="number" expression="((#view_width * #availableMarginLeftRatio_LDnWwt6B) + #safeAreaMarginLeft_LDnWwt6B)"/>
+    <Var name="oneLineTextHeight_LDnWwt6B" type="number" expression="(#fontSize_LDnWwt6B * 1.2)"/>
+    <Var name="safeAreaMarginTop_LDnWwt6B" type="number" expression="ifelse(#showTime_LDnWwt6B,(38 * #scale_LDnWwt6B),(28 * #scale_LDnWwt6B))"/>
+    <Var name="timeAreaMarginTop_LDnWwt6B" type="number" expression="(8 * #scale_LDnWwt6B)"/>
+    <Var name="timeAreaHeight_LDnWwt6B" type="number" expression="(30 * #scale_LDnWwt6B)"/>
+    <Var name="safeAreaMarginBottom_LDnWwt6B" type="number" expression="(28 * #scale_LDnWwt6B)"/>
+    <Var name="safeAreaMarginRight_LDnWwt6B" type="number" expression="(15 * #scale_LDnWwt6B)"/>
+    <Var name="safeAreaWidth_LDnWwt6B" type="number" expression="((#view_width - #viewMarginLeft_LDnWwt6B) - #safeAreaMarginRight_LDnWwt6B)"/>
+    <Var name="safeAreaHeight_LDnWwt6B" type="number" expression="((#view_height - #safeAreaMarginTop_LDnWwt6B) - #safeAreaMarginBottom_LDnWwt6B)"/>
+    <Var name="layerLeftBuffer_LDnWwt6B" type="number" expression="#fontSize_LDnWwt6B"/>
+    <Var name="layerBottomBuffer_LDnWwt6B" type="number" expression="(20 * #scale_LDnWwt6B)"/>
+    <Var name="maxRows_LDnWwt6B" type="number" expression="ifelse((#safeAreaHeight_LDnWwt6B }= #oneLineTextHeight_LDnWwt6B),floor((#safeAreaHeight_LDnWwt6B / #oneLineTextHeight_LDnWwt6B)),1)"/>
+    <Var name="timeSize_LDnWwt6B" type="number" expression="(14 * #scale_LDnWwt6B)"/>
+    <Var name="fontPath1_LDnWwt6B" type="string" expression="'/system/fonts/MiSansVF.ttf'"/>
+    <Var name="lineHeight1_LDnWwt6B" type="number" expression="0.9"/>
+    <Var name="fontPath2_LDnWwt6B" type="string" expression="'/product/fonts/Qinghe.otf'"/>
+    <Var name="lineHeight2_LDnWwt6B" type="number" expression="1.2"/>
+    <Var name="fontPath3_LDnWwt6B" type="string" expression="'/product/fonts/Coca-ColaCareFontKaiTi.TTF'"/>
+    <Var name="lineHeight3_LDnWwt6B" type="number" expression="1.05"/>
+    <Var name="fontPath4_LDnWwt6B" type="string" expression="'/product/fonts/FZFWZhuZiAYuanJWB.TTF'"/>
+    <Var name="lineHeight4_LDnWwt6B" type="number" expression="0.985"/>
+    <Var name="fontPath_LDnWwt6B" type="string" expression="ifelse((#fontFamily[0] == 1),@fontPath1_LDnWwt6B,ifelse((#fontFamily[1] == 1),@fontPath2_LDnWwt6B,ifelse((#fontFamily[2] == 1),@fontPath3_LDnWwt6B,ifelse((#fontFamily[3] == 1),@fontPath4_LDnWwt6B,''))))"/>
+    <Var name="lineHeight_LDnWwt6B" type="number" expression="ifelse((#fontFamily[0] == 1),#lineHeight1_LDnWwt6B,ifelse((#fontFamily[1] == 1),#lineHeight2_LDnWwt6B,ifelse((#fontFamily[2] == 1),#lineHeight3_LDnWwt6B,ifelse((#fontFamily[3] == 1),#lineHeight4_LDnWwt6B,0))))"/>
+    <Var name="textAlign_LDnWwt6B" type="string" expression="ifelse((#signatureAlign_LDnWwt6B == 0),'left',ifelse((#signatureAlign_LDnWwt6B == 1),'center','right'))"/>
+    <Function name="switchStateAod">
+      <MultiCommand condition="(! #isNoBg_LDnWwt6B)">
+        <FrameRateCommand rate="120"/>
+        <FolmeCommand target="aod_bg" config="'folme_config_0'" states="'folme_state_0'" command="to"/>
+        <FolmeCommand target="sig_desk" config="'folme_config_1'" states="'folme_state_1'" command="to"/>
+        <FolmeCommand target="sig_aod" config="'folme_config_2'" states="'folme_state_2'" command="to"/>
+      </MultiCommand>
+    </Function>
+    <Function name="switchStateDesk">
+      <MultiCommand condition="(! #isNoBg_LDnWwt6B)">
+        <FrameRateCommand rate="120"/>
+        <FolmeCommand target="aod_bg" config="'folme_config_3'" states="'folme_state_3'" command="to"/>
+        <FolmeCommand target="sig_desk" config="'folme_config_4'" states="'folme_state_4'" command="to"/>
+        <FolmeCommand target="sig_aod" config="'folme_config_5'" states="'folme_state_5'" command="to"/>
+      </MultiCommand>
+    </Function>
+    <Text size="#fontSize_LDnWwt6B" fontPath="@fontPath_LDnWwt6B" fontPathWeight="#signatureBold_LDnWwt6B" name="sig_canary" text="米" alpha="0"/>
+    <Rectangle w="#view_width" h="#view_height" x="0" y="0" folmeMode="true" name="aod_bg" fillColor="#000000" alpha="0"/>
+    <Group x="0" visibility="(#maxRows_LDnWwt6B { 30)">
+      <Group folmeMode="true" name="sig_desk">
+        <Layer blurColors="@defaultBlurColor_LDnWwt6B,@blurTextColor_LDnWwt6B" colorModes="@defaultColorMode_LDnWwt6B,@blurTextColorMode_LDnWwt6B" x="(#viewMarginLeft_LDnWwt6B - #layerLeftBuffer_LDnWwt6B)" y="#timeAreaMarginTop_LDnWwt6B" w="((#view_width - #viewMarginLeft_LDnWwt6B) + #layerLeftBuffer_LDnWwt6B)" h="(((#view_height - #timeAreaMarginTop_LDnWwt6B) - #safeAreaMarginBottom_LDnWwt6B) + #layerBottomBuffer_LDnWwt6B)" frameRate="-1" blurRadius="40">
+          <Text x="#layerLeftBuffer_LDnWwt6B" y="((#safeAreaMarginTop_LDnWwt6B - #timeAreaMarginTop_LDnWwt6B) + ((#safeAreaHeight_LDnWwt6B - #sig_text.text_height) / 2))" size="#fontSize_LDnWwt6B" spacingMultExp="#lineHeight_LDnWwt6B" fontPath="@fontPath_LDnWwt6B" fontPathWeight="#signatureBold_LDnWwt6B" color="@textColor_LDnWwt6B" textExp="@signatureText_LDnWwt6B" w="#safeAreaWidth_LDnWwt6B" textAlign="@textAlign_LDnWwt6B" lineClamp="#maxRows_LDnWwt6B" name="sig_text" multiLine="true" ellipsis="true" enableClip="false"/>
+          <Text visibility="(#showTime_LDnWwt6B == 1)" x="#layerLeftBuffer_LDnWwt6B" y="(#timeAreaHeight_LDnWwt6B / 2)" w="#safeAreaWidth_LDnWwt6B" size="#timeSize_LDnWwt6B" spacingMultExp="#lineHeight_LDnWwt6B" fontPath="@fontPath_LDnWwt6B" color="@textColor_LDnWwt6B" textExp="formatDate(@timeFormat_LDnWwt6B,#time_sys)" textAlign="@textAlign_LDnWwt6B" name="time_text" alignV="center" enableClip="false"/>
+        </Layer>
+      </Group>
+      <Group folmeMode="true" name="sig_aod" alpha="0">
+        <Layer blurColors="@defaultBlurColor_LDnWwt6B,@aodBlurTextColor_LDnWwt6B" colorModes="@defaultColorMode_LDnWwt6B,@aodBlurTextColorMode_LDnWwt6B" x="(#viewMarginLeft_LDnWwt6B - #layerLeftBuffer_LDnWwt6B)" y="#timeAreaMarginTop_LDnWwt6B" w="((#view_width - #viewMarginLeft_LDnWwt6B) + #layerLeftBuffer_LDnWwt6B)" h="(((#view_height - #timeAreaMarginTop_LDnWwt6B) - #safeAreaMarginBottom_LDnWwt6B) + #layerBottomBuffer_LDnWwt6B)" frameRate="-1" blurRadius="40">
+          <Text x="#layerLeftBuffer_LDnWwt6B" y="((#safeAreaMarginTop_LDnWwt6B - #timeAreaMarginTop_LDnWwt6B) + ((#safeAreaHeight_LDnWwt6B - #sig_text.text_height) / 2))" size="#fontSize_LDnWwt6B" spacingMultExp="#lineHeight_LDnWwt6B" fontPath="@fontPath_LDnWwt6B" fontPathWeight="#signatureBold_LDnWwt6B" color="@aodTextColor_LDnWwt6B" textExp="@signatureText_LDnWwt6B" w="#safeAreaWidth_LDnWwt6B" textAlign="@textAlign_LDnWwt6B" lineClamp="#maxRows_LDnWwt6B" name="sig_text" multiLine="true" ellipsis="true" enableClip="false"/>
+          <Text visibility="(#showTime_LDnWwt6B == 1)" x="#layerLeftBuffer_LDnWwt6B" y="(#timeAreaHeight_LDnWwt6B / 2)" w="#safeAreaWidth_LDnWwt6B" size="#timeSize_LDnWwt6B" spacingMultExp="#lineHeight_LDnWwt6B" fontPath="@fontPath_LDnWwt6B" color="@aodTextColor_LDnWwt6B" textExp="formatDate(@timeFormat_LDnWwt6B,#time_sys)" textAlign="@textAlign_LDnWwt6B" name="time_text" alignV="center" enableClip="false"/>
+        </Layer>
+      </Group>
+    </Group>
+    <Group x="#viewMarginLeft_LDnWwt6B" y="#timeAreaMarginTop_LDnWwt6B" w="#safeAreaWidth_LDnWwt6B" h="#timeAreaHeight_LDnWwt6B" contentDescriptionExp="formatDate(@timeFormat_LDnWwt6B,#time_sys)" visibility="(eq(#aod_state_LDnWwt6B,0) ** (#showTime_LDnWwt6B == 1))"/>
+  </Group>
+  <Group>
+    <FolmeState name="folme_state_0" alpha="(255 * 0.4)"/>
+    <FolmeConfig name="folme_config_0" ease="-2, 1,0.72"/>
+    <FolmeState name="folme_state_1" alpha="0"/>
+    <FolmeConfig name="folme_config_1" ease="-2, 1,0.5"/>
+    <FolmeState name="folme_state_2" alpha="255"/>
+    <FolmeConfig name="folme_config_2" ease="-2, 1,0.72" onComplete="'folme_oncomplete_3'"/>
+    <Function name="folme_oncomplete_3">
+      <FrameRateCommand rate="0"/>
+    </Function>
+    <FolmeState name="folme_state_3" alpha="0"/>
+    <FolmeConfig name="folme_config_3" ease="-2, 1,0.5"/>
+    <FolmeState name="folme_state_4" alpha="255"/>
+    <FolmeConfig name="folme_config_4" ease="-2, 1,0.72" onComplete="'folme_oncomplete_5'"/>
+    <Function name="folme_oncomplete_5">
+      <FrameRateCommand rate="0"/>
+    </Function>
+    <FolmeState name="folme_state_5" alpha="0"/>
+    <FolmeConfig name="folme_config_5" ease="-2, 1,0.5"/>
+  </Group>
+  <!-- MiRoot 参考：三方向手势发通用槽位广播（与 AiRearscreenLyricsGestureInjector 注入结果一致）；主题开关见 var_config.xml -->
+  <Group name="miroot_gesture_inject" visibility="(((#miroot_bottom_swipe_up_on == 1) || (#miroot_bottom_swipe_left_on == 1)) || (#miroot_bottom_swipe_right_on == 1))">
+    <Function name="miroot_emit_s1">
+      <IntentCommand action="com.wmqc.miroot.rear.ACTION_REAR_BOTTOM_GESTURE" broadcast="true" package="com.wmqc.miroot">
+        <Extra name="com.wmqc.miroot.rear.EXTRA_GESTURE_SLOT" type="number" expression="1"/>
+      </IntentCommand>
+    </Function>
+    <Function name="miroot_emit_s2">
+      <IntentCommand action="com.wmqc.miroot.rear.ACTION_REAR_BOTTOM_GESTURE" broadcast="true" package="com.wmqc.miroot">
+        <Extra name="com.wmqc.miroot.rear.EXTRA_GESTURE_SLOT" type="number" expression="2"/>
+      </IntentCommand>
+    </Function>
+    <Function name="miroot_emit_s3">
+      <IntentCommand action="com.wmqc.miroot.rear.ACTION_REAR_BOTTOM_GESTURE" broadcast="true" package="com.wmqc.miroot">
+        <Extra name="com.wmqc.miroot.rear.EXTRA_GESTURE_SLOT" type="number" expression="3"/>
+      </IntentCommand>
+    </Function>
+    <Button name="miroot_bottom_gesture" x="0" y="(#view_height - (80 * #vsy))" w="#view_width" h="(80 * #vsy)" interceptTouch="true">
+      <Normal>
+      </Normal>
+      <Pressed>
+      </Pressed>
+      <Triggers>
+        <Trigger action="up,cancel">
+          <IfCommand ifCondition="((#miroot_bottom_swipe_up_on == 1) ** (#touch_begin_y }= (#view_height - (80 * #vsy))) ** ((#touch_begin_y - #touch_y) }= (50 * #vsy)) ** ((#touch_begin_y - #touch_y) }= (abs(#touch_x - #touch_begin_x) + (24 * #vsy))))">
+            <Consequent>
+              <FunctionCommand target="miroot_emit_s1"/>
+            </Consequent>
+          </IfCommand>
+          <IfCommand ifCondition="((#miroot_bottom_swipe_left_on == 1) ** (#touch_begin_y }= (#view_height - (80 * #vsy))) ** ((#touch_begin_x - #touch_x) }= (0.07 * #view_width)) ** ((#touch_begin_x - #touch_x) }= (abs(#touch_begin_y - #touch_y) + (24 * #vsy))))">
+            <Consequent>
+              <FunctionCommand target="miroot_emit_s2"/>
+            </Consequent>
+          </IfCommand>
+          <IfCommand ifCondition="((#miroot_bottom_swipe_right_on == 1) ** (#touch_begin_y }= (#view_height - (80 * #vsy))) ** ((#touch_x - #touch_begin_x) }= (0.07 * #view_width)) ** ((#touch_x - #touch_begin_x) }= (abs(#touch_begin_y - #touch_y) + (24 * #vsy))))">
+            <Consequent>
+              <FunctionCommand target="miroot_emit_s3"/>
+            </Consequent>
+          </IfCommand>
+        </Trigger>
+      </Triggers>
+    </Button>
+  </Group>
+  <ExternalCommands>
+    <Trigger action="init">
+      <IfCommand ifCondition="eqs(@isPreviewMode,'true')">
+        <Consequent>
+          <FrameRateCommand rate="120"/>
+        </Consequent>
+        <Alternate>
+          <FrameRateCommand rate="0"/>
+        </Alternate>
+      </IfCommand>
+    </Trigger>
+    <Trigger action="init">
+      <IfCommand ifCondition="eqs(@isPreviewMode,'true')">
+        <Consequent>
+          <VideoCommand target="aiVideo" command="config" path="'assets/ai/ai.mp4'" loop="0" scaleMode="2"/>
+          <VideoCommand target="aiVideo" command="setVolume" volume="0"/></Consequent>
+        <Alternate>
+          <VideoCommand target="aiVideo" command="config" path="'assets/ai/ai.mp4'" loop="0" scaleMode="2"/>
+          <VideoCommand target="aiVideo" command="setVolume" volume="0"/></Alternate>
+      </IfCommand>
+    </Trigger>
+    <Trigger action="resume">
+      <MultiCommand condition="((! #aod_state_8i5TKF4T) ** #is_paused_8i5TKF4T)">
+        <FunctionCommand target="replayVideo"/>
+      </MultiCommand>
+      <MultiCommand condition="(! #is_paused_8i5TKF4T)">
+        <FunctionCommand target="playVideo"/>
+      </MultiCommand>
+      <MultiCommand condition="(#isDisplayDefaultBg_8i5TKF4T == 1)">
+        <FunctionCommand target="releaseVideo"/>
+      </MultiCommand>
+    </Trigger>
+    <Trigger action="pause">
+      <FunctionCommand target="pauseVideo"/>
+      <VariableCommand name="is_paused_8i5TKF4T" expression="1" type="number"/>
+    </Trigger>
+    <Trigger action="enterAod">
+      <VariableCommand name="aod_state_8i5TKF4T" expression="1" type="number"/>
+    </Trigger>
+    <Trigger action="exitAod">
+      <VariableCommand name="aod_state_8i5TKF4T" expression="0" type="number"/>
+      <MultiCommand condition="((#is_finished_8i5TKF4T == 1) || (#is_paused_8i5TKF4T == 1))">
+        <FunctionCommand target="replayVideo"/>
+      </MultiCommand>
+    </Trigger>
+    <Trigger action="enterEdit">
+      <VariableCommand name="is_edit_8i5TKF4T" expression="1" type="number"/>
+      <MultiCommand condition="eq(#selected,0)">
+        <VariableCommand name="is_finished_8i5TKF4T" expression="1" type="number"/>
+        <FunctionCommand target="setVideoFirstFrame"/>
+        <FunctionCommand target="pauseVideo"/>
+      </MultiCommand>
+    </Trigger>
+    <Trigger action="exitEdit">
+      <VariableCommand name="is_edit_8i5TKF4T" expression="0" type="number"/>
+      <MultiCommand condition="(#is_finished_8i5TKF4T == 1)">
+        <FunctionCommand target="replayVideo"/>
+      </MultiCommand>
+    </Trigger>
+    <Trigger action="enterAod">
+      <FunctionCommand target="switchStateAod"/>
+      <VariableCommand name="aod_state_LDnWwt6B" expression="1" type="number"/>
+      <ExternCommand command="__clearTalkback"/>
+    </Trigger>
+    <Trigger action="exitAod">
+      <FunctionCommand target="switchStateDesk"/>
+      <VariableCommand name="aod_state_LDnWwt6B" expression="0" type="number"/>
+      <ExternCommand command="__clearTalkback"/>
+    </Trigger>
+  </ExternalCommands>
+</Widget>

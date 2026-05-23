@@ -58,12 +58,12 @@ object DeviceGeometry {
     /** Pro Max 半屏/全屏合成画布与叠放区参数（与 Flutter `_kPromax*` 一致）。 */
     const val PROMAX_HALF_CANVAS_W = 1214
     const val PROMAX_HALF_CANVAS_H = 1817
-    const val PROMAX_HALF_X = 125
-    const val PROMAX_HALF_Y = 110
+    const val PROMAX_HALF_X = 123
+    const val PROMAX_HALF_Y = 109
     const val PROMAX_HALF_TARGET_W = 976
     const val PROMAX_HALF_TARGET_H = 596
 
-    const val PROMAX_FULL_X = 126
+    const val PROMAX_FULL_X = 125
     const val PROMAX_FULL_Y = 113
     const val PROMAX_FULL_TARGET_W = 976
     const val PROMAX_FULL_TARGET_H = 596
@@ -71,20 +71,21 @@ object DeviceGeometry {
     const val PROMAX_FULL_CANVAS_H = 2530
 
     /**
-     * Pro 半屏底图 `prol.png` 等：画布与旧版 APK 内资源一致（1126×2416）。
-     * 默认叠放 (112,112) 与旧版 `DeviceModelHelper.getCompositeScreenshotCoordinates`（非 ProMax）一致。
+     * Pro 半屏底图 `prol.webp` 等：画布与旧版 APK 内资源一致（1126×2416）。
+     * 未保存偏好时背屏画面叠放默认（左上角）；与 [DeviceModelHelper.getCompositeScreenshotCoordinates]（非 ProMax）一致。
      */
     private const val PRO_CANVAS_W = 1126
     private const val PRO_CANVAS_H = 2416
 
-    private const val PRO_SCREEN_X = 112
-    private const val PRO_SCREEN_Y = 112
+private const val PRO_SCREEN_X = 117
+// Pro 半屏默认叠放坐标（用户未保存偏好时使用）
+private const val PRO_SCREEN_Y = 107
 
-    /** Pro 全壳 `prol2.png` 等：旧版资源画布 1122×2332；默认叠放与半屏相同，可在设置中微调。 */
+    /** Pro 全壳 `prol2.webp` 等：旧版资源画布 1122×2332；未保存偏好时默认 (112,112)，可在设置中微调（与半屏默认值独立）。 */
     private const val PRO_FULL_CANVAS_W = 1122
     private const val PRO_FULL_CANVAS_H = 2332
-    private const val PRO_FULL_X = 112
-    private const val PRO_FULL_Y = 112
+private const val PRO_FULL_X = 115
+private const val PRO_FULL_Y = 105
 
     @Volatile
     private var cachedIsProMax: Boolean? = null
@@ -121,7 +122,7 @@ object DeviceGeometry {
         return flutterPrefs(context).getBoolean("flutter.promax_shell_full", false)
     }
 
-    /** Pro 机型是否使用全壳底图（`pro*2.png`）。 */
+    /** Pro 机型是否使用全壳底图（`pro*2.webp`）。 */
     fun isProShellFull(context: Context): Boolean {
         if (isProMaxModel()) return false
         return flutterPrefs(context).getBoolean("flutter.pro_shell_full", false)
@@ -414,26 +415,26 @@ object DeviceGeometry {
         if (isProMaxModel()) {
             val type = prefs.getString("flutter.promax_back_image_type", "green") ?: "green"
             val base = when (type) {
-                "white" -> "promaxb.png"
-                "gray" -> "promaxh.png"
-                "purple" -> "promaxz.png"
-                else -> "promaxl.png"
+                "white" -> "promaxb.webp"
+                "gray" -> "promaxh.webp"
+                "purple" -> "promaxz.webp"
+                else -> "promaxl.webp"
             }
-            return if (isProMaxShellFull(context) && base.endsWith(".png")) {
-                base.substring(0, base.length - 4) + "2.png"
+            return if (isProMaxShellFull(context) && base.endsWith(".webp")) {
+                base.substring(0, base.length - 5) + "2.webp"
             } else {
                 base
             }
         }
         val type = prefs.getString("flutter.pro_back_image_type", "green") ?: "green"
         val base = when (type) {
-            "white" -> "prob.png"
-            "gray" -> "proh.png"
-            "purple" -> "proz.png"
-            else -> "prol.png"
+            "white" -> "prob.webp"
+            "gray" -> "proh.webp"
+            "purple" -> "proz.webp"
+            else -> "prol.webp"
         }
-        return if (isProShellFull(context) && base.endsWith(".png")) {
-            base.substring(0, base.length - 4) + "2.png"
+        return if (isProShellFull(context) && base.endsWith(".webp")) {
+            base.substring(0, base.length - 5) + "2.webp"
         } else {
             base
         }

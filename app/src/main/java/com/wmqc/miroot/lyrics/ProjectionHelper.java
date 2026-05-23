@@ -14,19 +14,41 @@
 package com.wmqc.miroot.lyrics;
 
 import android.content.Context;
-import com.wmqc.miroot.rear.OfficialSubscreenServiceGate;
+
+import com.wmqc.miroot.rear.OfficialSubscreenMiRootProjectionSession;
+import com.wmqc.miroot.rear.RearActivityLaunchSpec;
+import com.wmqc.miroot.rear.RearProjectionLaunchSequence;
 
 import java.lang.reflect.Method;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 
 /**
  * 投屏辅助工具类。
- * 音乐投屏：唤醒背屏 → {@code am start --display 1}（广播带 {@code --ez isBroadcast true}）；
- * 对 {@code com.xiaomi.subscreencenter} 的屏蔽仅当 {@link OfficialSubscreenServiceGate} 开启时执行。
+ * 音乐投屏：优先背屏直启，失败则主屏占位迁屏（3.4，经 Shizuku TaskService）。
  */
 public class ProjectionHelper {
     private static final String TAG = "ProjectionHelper";
+
+    private static final ExecutorService POST_LAUNCH_EXECUTOR = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "MiRoot-MusicProjPost");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /** 广播 / 手势经 IntentService 启动：Activity 落屏后即可返回，巩固步骤放后台。 */
+    private static boolean isDeferredPostLaunchContext(Context context) {
+        return context instanceof android.app.IntentService
+            || context instanceof android.app.Service;
+    }
+
+    /**
+     * 仅背屏（display 1）在广播启动或锁屏竞态等场景下使用的固定圆角半径（px）。
+     * 主屏打开时由 {@code RearScreenLyricsActivity} 传入 false，跑马灯/深渊镜走系统圆角检测。
+     */
+    public static final float REAR_PROJECTION_FIXED_CORNER_RADIUS_PX = 99f;
 
     /**
      * 启动音乐投屏的完整流程（可复用）
@@ -35,13 +57,26 @@ public class ProjectionHelper {
      * @return 是否启动成功
      */
     public static boolean startMusicProjection(ITaskService taskService, Context context) {
+        return startMusicProjection(taskService, context, false);
+    }
+
+    /**
+     * @param directRearOnly true：仅 {@code am start --display 1} 并验证落屏（音乐页「开始投屏」）；
+     *                       false：直启失败则主屏占位迁屏（广播/自动投屏等）
+     */
+    public static boolean startMusicProjection(
+            ITaskService taskService,
+            Context context,
+            boolean directRearOnly) {
         if (taskService == null) {
             LogHelper.e(TAG, "❌ TaskService为null，无法启动音乐投屏");
             return false;
         }
 
         try {
-            LogHelper.d(TAG, "🚀 开始启动音乐投屏（统一流程）");
+            LogHelper.d(TAG, directRearOnly
+                ? "🚀 开始启动音乐投屏（仅背屏直启）"
+                : "🚀 开始启动音乐投屏（直启优先，失败占位迁屏）");
 
             // 检查是否已有音乐投屏在运行
             RearScreenLyricsActivity existingActivity = RearScreenLyricsActivity.getCurrentInstance();
@@ -90,19 +125,6 @@ public class ProjectionHelper {
                 }
             }
 
-            if (OfficialSubscreenServiceGate.isDisableEnabled(context)) {
-                try {
-                    LogHelper.d(TAG, "步骤1: 禁用官方Launcher（开关已开启）");
-                    taskService.disableSubScreenLauncher();
-                } catch (Exception e) {
-                    LogHelper.w(TAG, "disableSubScreenLauncher 异常（继续投屏）: " + e.getMessage());
-                }
-                Thread.sleep(100);
-            } else {
-                LogHelper.d(TAG, "步骤1: 跳过禁用官方Launcher（开关未开启）");
-            }
-
-            // 供歌词页 cutout / 媒体条避让尽早可用（MiRoot 歌词界面差异，不改变启动时序）
             try {
                 if (!DisplayInfoCache.getInstance().isInitialized()) {
                     DisplayInfoCache.getInstance().initialize(taskService);
@@ -115,73 +137,69 @@ public class ProjectionHelper {
             boolean isBroadcast = (context instanceof android.app.IntentService) ||
                                   (context instanceof android.app.Service);
 
-            // 步骤2: 唤醒背屏（不区分锁屏/未锁屏，统一先发 KEYCODE_WAKEUP）
-            LogHelper.d(TAG, "步骤2: 唤醒背屏");
-            taskService.executeShellCommand("input -d 1 keyevent KEYCODE_WAKEUP");
-            Thread.sleep(50);
-
-            // 步骤3: 直接在背屏启动 Activity
-            LogHelper.d(TAG, "步骤3: 直接在背屏启动 Activity（am start --display 1）");
-            String rearCmd;
-            if (isBroadcast) {
-                rearCmd = String.format("am start --display 1 -n %s --ez isBroadcast true", componentName);
-                LogHelper.d(TAG, "🔵 背屏启动音乐 Activity（广播 isBroadcast）");
+            RearActivityLaunchSpec launchSpec = RearProjectionLaunchSequence.mirootProjectionLaunchSpec(
+                    "RearScreenLyricsActivity", componentName, isBroadcast);
+            boolean launched;
+            if (directRearOnly) {
+                LogHelper.d(TAG, "步骤1: 仅背屏直启（音乐页开始投屏）");
+                launched = RearProjectionLaunchSequence.runDirectRearLaunchOnly(
+                        context, taskService, launchSpec, null);
             } else {
-                rearCmd = String.format("am start --display 1 -n %s", componentName);
-                LogHelper.d(TAG, "🔵 背屏启动音乐 Activity");
+                LogHelper.d(TAG, "步骤1: 背屏直启优先，失败则主屏占位迁屏(3.4)");
+                launched = RearProjectionLaunchSequence.runPreferDirectRearLaunchWithPlaceholderFallback(
+                        context, taskService, launchSpec, null);
             }
-            taskService.executeShellCommand(rearCmd);
-            LogHelper.d(TAG, "✅ Activity 启动命令已执行: " + rearCmd);
+            if (!launched) {
+                LogHelper.e(TAG, directRearOnly
+                    ? "❌ 音乐投屏启动失败（仅背屏直启）"
+                    : "❌ 音乐投屏启动失败（直启与占位迁屏均失败）");
+                return false;
+            }
+            LogHelper.d(TAG, "✓ 音乐投屏已在背屏启动");
 
-            // 步骤4: 等待 Activity 创建（500ms）
-            LogHelper.d(TAG, "步骤4: 等待 Activity 在背屏创建并显示 UI");
-            Thread.sleep(500);
-            
-            // 检查UI是否已创建，如果未创建则继续等待（最多等待3秒）
+            if (isDeferredPostLaunchContext(context)) {
+                LogHelper.d(TAG, "快速路径：后台巩固 UI/手势（不阻塞广播/手势）");
+                scheduleDeferredPostLaunchSteps(
+                    RearScreenLyricsActivity.class,
+                    "lyricsView",
+                    directRearOnly ? 1200L : 700L);
+                return true;
+            }
+
+            LogHelper.d(TAG, "步骤2: 等待Activity在背屏创建并显示UI");
+            final long uiPollInitialMs = directRearOnly ? 800L : 200L;
+            final long uiPollStepMs = directRearOnly ? 200L : 60L;
+            final int maxUICheckAttempts = directRearOnly ? 11 : 18;
+            Thread.sleep(uiPollInitialMs);
+
             int uiCheckAttempts = 0;
-            int maxUICheckAttempts = 11; // 最多检查11次，每次200ms，总共最多2.2秒
             boolean uiCreated = false;
             while (!uiCreated && uiCheckAttempts < maxUICheckAttempts) {
                 RearScreenLyricsActivity activity = RearScreenLyricsActivity.getCurrentInstance();
-                if (activity != null) {
-                    try {
-                        // 通过反射检查lyricsView是否已创建
-                        java.lang.reflect.Field lyricsViewField = RearScreenLyricsActivity.class.getDeclaredField("lyricsView");
-                        lyricsViewField.setAccessible(true);
-                        Object lyricsView = lyricsViewField.get(activity);
-                        if (lyricsView != null) {
-                            uiCreated = true;
-                            LogHelper.d(TAG, "✅ UI已创建（检查" + (uiCheckAttempts + 1) + "次）");
-                            break;
-                        }
-                    } catch (Exception e) {
-                        // 忽略反射异常，继续检查
-                    }
+                if (uiCreatedForField(activity, "lyricsView")) {
+                    uiCreated = true;
+                    LogHelper.d(TAG, "✅ UI已创建（检查" + (uiCheckAttempts + 1) + "次）");
+                    break;
                 }
-                
-                if (!uiCreated) {
-                    uiCheckAttempts++;
-                    if (uiCheckAttempts < maxUICheckAttempts) {
-                        Thread.sleep(200); // 每次等待200ms
-                        LogHelper.d(TAG, "⏳ UI未创建，继续等待... (" + uiCheckAttempts + "/" + maxUICheckAttempts + ")");
-                    }
+                uiCheckAttempts++;
+                if (uiCheckAttempts < maxUICheckAttempts) {
+                    Thread.sleep(uiPollStepMs);
+                    LogHelper.d(TAG, "⏳ UI未创建，继续等待... (" + uiCheckAttempts + "/" + maxUICheckAttempts + ")");
                 }
             }
-            
             if (!uiCreated) {
                 LogHelper.w(TAG, "⚠️ UI创建超时，但继续执行后续步骤");
             }
 
-            if (OfficialSubscreenServiceGate.isDisableEnabled(context)) {
-                LogHelper.d(TAG, "步骤5: 等待Activity的TaskService连接，然后触发屏蔽手势服务");
-                waitAndTriggerDisableGesture(RearScreenLyricsActivity.class, 3000);
-            }
+            LogHelper.d(TAG, "步骤3: 等待 TaskService 后触发屏蔽官方手势（对齐 3.4）");
+            waitAndTriggerDisableGesture(RearScreenLyricsActivity.class, 3000);
 
             LogHelper.d(TAG, "✅ 音乐投屏启动流程完成");
             return true;
 
         } catch (Exception e) {
             LogHelper.e(TAG, "❌ 启动音乐投屏失败", e);
+            OfficialSubscreenMiRootProjectionSession.release(context.getApplicationContext(), taskService);
             return false;
         }
     }
@@ -357,6 +375,79 @@ public class ProjectionHelper {
     }
 
     /**
+     * 获取充电动画 Activity 的 stackId（与 {@link #getMusicProjectionStackId} 同结构，用于
+     * {@code am display move-stack} 兜底）。
+     */
+    public static int getChargingAnimationStackId(ITaskService taskService) {
+        if (taskService == null) {
+            LogHelper.e(TAG, "❌ TaskService为null，无法获取充电动画 stackId");
+            return -1;
+        }
+        try {
+            String result = taskService.executeShellCommandWithResult("am stack list");
+            if (result == null || result.trim().isEmpty()) {
+                return -1;
+            }
+            String[] lines = result.split("\n");
+            String currentStackId = null;
+            boolean found = false;
+            for (String line0 : lines) {
+                String line = line0.trim();
+                if (line.startsWith("stackId=")) {
+                    int start = line.indexOf("stackId=") + 8;
+                    int end = line.indexOf(':', start);
+                    if (end > start) {
+                        currentStackId = line.substring(start, end).trim();
+                    }
+                    continue;
+                }
+                if (line.contains("taskId=") && line.contains("RearScreenChargingActivity")) {
+                    found = true;
+                    break;
+                }
+            }
+            if (found && currentStackId != null) {
+                try {
+                    return Integer.parseInt(currentStackId);
+                } catch (NumberFormatException e) {
+                    LogHelper.e(TAG, "❌ 充电动画 stackId 格式错误: " + currentStackId, e);
+                    return -1;
+                }
+            }
+            for (int i = lines.length - 1; i >= 0; i--) {
+                String line = lines[i].trim();
+                if (line.contains("taskId=") && line.contains("RearScreenChargingActivity")) {
+                    for (int j = i - 1; j >= 0; j--) {
+                        String prevLine = lines[j].trim();
+                        if (prevLine.startsWith("stackId=")) {
+                            int start = prevLine.indexOf("stackId=") + 8;
+                            int end = prevLine.indexOf(':', start);
+                            if (end > start) {
+                                String stackIdStr = prevLine.substring(start, end).trim();
+                                try {
+                                    return Integer.parseInt(stackIdStr);
+                                } catch (NumberFormatException e) {
+                                    LogHelper.e(TAG, "❌ 充电动画 stackId 格式错误: " + stackIdStr, e);
+                                }
+                            }
+                            break;
+                        }
+                        if (prevLine.startsWith("RootTask")) {
+                            break;
+                        }
+                    }
+                    break;
+                }
+            }
+            LogHelper.w(TAG, "⚠️ 未找到充电动画的 stackId");
+            return -1;
+        } catch (Exception e) {
+            LogHelper.e(TAG, "❌ 获取充电动画 stackId 失败", e);
+            return -1;
+        }
+    }
+
+    /**
      * 获取车控投屏界面的stackId
      * @param taskService TaskService实例
      * @return stackId，失败返回-1
@@ -465,6 +556,127 @@ public class ProjectionHelper {
         }
     }
 
+    private static void scheduleDeferredPostLaunchSteps(
+            Class<?> activityClass,
+            String uiFieldName,
+            long maxGestureWaitMs) {
+        POST_LAUNCH_EXECUTOR.execute(() -> {
+            try {
+                final long uiDeadline = System.currentTimeMillis() + 600L;
+                while (System.currentTimeMillis() < uiDeadline) {
+                    Object act = getCurrentActivityInstance(activityClass);
+                    if (act != null && uiCreatedForField(act, uiFieldName)) {
+                        break;
+                    }
+                    Thread.sleep(40L);
+                }
+                waitAndTriggerDisableGesture(activityClass, maxGestureWaitMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (Exception e) {
+                LogHelper.w(TAG, "deferred post-launch: " + e.getMessage());
+            }
+        });
+    }
+
+    private static Object getCurrentActivityInstance(Class<?> activityClass) {
+        try {
+            java.lang.reflect.Field f = activityClass.getDeclaredField("currentInstance");
+            f.setAccessible(true);
+            return f.get(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean uiCreatedForField(Object activity, String fieldName) {
+        if (activity == null) {
+            return false;
+        }
+        try {
+            java.lang.reflect.Field f = activity.getClass().getDeclaredField(fieldName);
+            f.setAccessible(true);
+            return f.get(activity) != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 与 3.4 一致：等待 Activity 绑定 TaskService 后反射调用 {@code checkAndDisableOfficialGesture}。 */
+    private static void waitAndTriggerDisableGesture(Class<?> activityClass, long maxWaitMs) {
+        try {
+            long startTime = System.currentTimeMillis();
+            Object activity = null;
+            long activityWaitMs = Math.min(500, maxWaitMs);
+            while (System.currentTimeMillis() - startTime < activityWaitMs) {
+                try {
+                    java.lang.reflect.Field currentInstanceField = activityClass.getDeclaredField("currentInstance");
+                    currentInstanceField.setAccessible(true);
+                    activity = currentInstanceField.get(null);
+                    if (activity != null) {
+                        LogHelper.d(TAG, "✅ Activity已创建，开始等待TaskService连接");
+                        break;
+                    }
+                } catch (Exception e) {
+                    // ignore
+                }
+                Thread.sleep(100);
+            }
+            if (activity == null) {
+                LogHelper.w(TAG, "⚠️ 等待超时，Activity未创建，跳过反射触发屏蔽手势");
+                return;
+            }
+            long elapsed = System.currentTimeMillis() - startTime;
+            long remainingTime = maxWaitMs - elapsed;
+            long taskServiceWaitMs = Math.max(2000, Math.min(maxWaitMs - 500, remainingTime));
+            LogHelper.d(TAG, "⏳ 等待TaskService连接（最多" + taskServiceWaitMs + "ms）");
+            long taskServiceStartTime = System.currentTimeMillis();
+            int checkCount = 0;
+            while (System.currentTimeMillis() - taskServiceStartTime < taskServiceWaitMs) {
+                try {
+                    java.lang.reflect.Field taskServiceField = activityClass.getDeclaredField("taskService");
+                    taskServiceField.setAccessible(true);
+                    Object ts = taskServiceField.get(activity);
+                    checkCount++;
+                    if (checkCount % 5 == 0) {
+                        LogHelper.d(TAG, "⏳ 等待TaskService连接中... (已检查 " + checkCount + " 次)");
+                    }
+                    if (ts != null) {
+                        LogHelper.d(TAG, "✅ TaskService已连接，触发屏蔽手势服务");
+                        Method checkMethod = activityClass.getDeclaredMethod("checkAndDisableOfficialGesture");
+                        checkMethod.setAccessible(true);
+                        checkMethod.invoke(activity);
+                        return;
+                    }
+                } catch (NoSuchFieldException e) {
+                    try {
+                        Method checkMethod = activityClass.getDeclaredMethod("checkAndDisableOfficialGesture");
+                        checkMethod.setAccessible(true);
+                        checkMethod.invoke(activity);
+                        return;
+                    } catch (Exception e2) {
+                        LogHelper.w(TAG, "直接调用 checkAndDisableOfficialGesture 失败: " + e2.getMessage());
+                    }
+                } catch (Exception e) {
+                    if (checkCount % 10 == 0) {
+                        LogHelper.d(TAG, "⏳ 等待TaskService: " + e.getClass().getSimpleName());
+                    }
+                }
+                Thread.sleep(100);
+            }
+            try {
+                LogHelper.w(TAG, "⚠️ TaskService等待超时，尝试直接调用 checkAndDisableOfficialGesture");
+                Method checkMethod = activityClass.getDeclaredMethod("checkAndDisableOfficialGesture");
+                checkMethod.setAccessible(true);
+                checkMethod.invoke(activity);
+            } catch (Exception e) {
+                LogHelper.w(TAG, "超时后调用 checkAndDisableOfficialGesture 失败: " + e.getMessage());
+            }
+        } catch (Exception e) {
+            LogHelper.w(TAG, "waitAndTriggerDisableGesture: " + e.getMessage());
+        }
+    }
+
     /**
      * 清除Activity的静态实例
      */
@@ -481,119 +693,7 @@ public class ProjectionHelper {
         }
     }
 
-    /**
-     * 主屏占位经 {@code am display move-stack} 移到背屏后的收尾（原：再次触发屏蔽官方背屏中心）。
-     * 音乐投屏：已关闭，方法体为空。
-     */
+    /** 历史入口：迁屏后曾反射触发屏蔽官方背屏中心；MiRoot 自带歌词页已不再在此路径执行 force-stop。 */
     public static void triggerLyricsGestureDisableAfterMove(long maxWaitMs) {
-        // 音乐投屏：已注释屏蔽官方手势服务
-        // waitAndTriggerDisableGesture(RearScreenLyricsActivity.class, maxWaitMs);
-    }
-
-    /**
-     * 等待Activity的TaskService连接，然后主动触发屏蔽手势服务
-     * @param activityClass Activity类
-     * @param maxWaitMs 最大等待时间（毫秒）
-     */
-    private static void waitAndTriggerDisableGesture(Class<?> activityClass, long maxWaitMs) {
-        try {
-            long startTime = System.currentTimeMillis();
-            Object activity = null;
-            
-            // 等待Activity创建（最多等待500ms）
-            long activityWaitMs = Math.min(500, maxWaitMs);
-            while (System.currentTimeMillis() - startTime < activityWaitMs) {
-                try {
-                    java.lang.reflect.Field currentInstanceField = activityClass.getDeclaredField("currentInstance");
-                    currentInstanceField.setAccessible(true);
-                    activity = currentInstanceField.get(null);
-                    
-                    if (activity != null) {
-                        LogHelper.d(TAG, "✅ Activity已创建，开始等待TaskService连接");
-                        break;
-                    }
-                } catch (Exception e) {
-                    // 忽略反射异常，继续等待
-                }
-                
-                Thread.sleep(100);
-            }
-            
-            if (activity == null) {
-                LogHelper.w(TAG, "⚠️ 等待超时，Activity未创建，但会继续尝试触发屏蔽手势服务");
-                // 即使Activity未创建，也尝试通过静态方法触发（如果Activity稍后创建，会在onCreate中自动触发）
-                return;
-            }
-            
-            // 等待TaskService连接（最多等待剩余时间，但至少2秒）
-            long elapsed = System.currentTimeMillis() - startTime;
-            long remainingTime = maxWaitMs - elapsed;
-            long taskServiceWaitMs = Math.max(2000, Math.min(maxWaitMs - 500, remainingTime)); // 至少等待2秒
-            
-            LogHelper.d(TAG, "⏳ 等待TaskService连接（最多" + taskServiceWaitMs + "ms）");
-            long taskServiceStartTime = System.currentTimeMillis();
-            int checkCount = 0;
-            
-            while (System.currentTimeMillis() - taskServiceStartTime < taskServiceWaitMs) {
-                try {
-                    // 通过反射获取taskService字段
-                    java.lang.reflect.Field taskServiceField = activityClass.getDeclaredField("taskService");
-                    taskServiceField.setAccessible(true);
-                    Object taskService = taskServiceField.get(activity);
-                    
-                    checkCount++;
-                    if (checkCount % 5 == 0) {
-                        LogHelper.d(TAG, "⏳ 等待TaskService连接中... (已检查 " + checkCount + " 次)");
-                    }
-                    
-                    if (taskService != null) {
-                        LogHelper.d(TAG, "✅ TaskService已连接，触发屏蔽手势服务 (检查 " + checkCount + " 次后成功)");
-                        
-                        // 通过反射调用checkAndDisableOfficialGesture方法
-                        Method checkMethod = activityClass.getDeclaredMethod("checkAndDisableOfficialGesture");
-                        checkMethod.setAccessible(true);
-                        checkMethod.invoke(activity);
-                        
-                        LogHelper.d(TAG, "✅ 已触发屏蔽手势服务（通过ProjectionHelper）");
-                        return;
-                    }
-                } catch (NoSuchFieldException e) {
-                    // 字段不存在，尝试直接调用方法（不检查TaskService）
-                    LogHelper.w(TAG, "⚠️ taskService字段不存在，尝试直接调用方法");
-                    try {
-                        Method checkMethod = activityClass.getDeclaredMethod("checkAndDisableOfficialGesture");
-                        checkMethod.setAccessible(true);
-                        checkMethod.invoke(activity);
-                        LogHelper.d(TAG, "✅ 已触发屏蔽手势服务（直接调用，不检查TaskService）");
-                        return;
-                    } catch (Exception e2) {
-                        LogHelper.w(TAG, "⚠️ 直接调用方法失败: " + e2.getMessage());
-                    }
-                } catch (Exception e) {
-                    // 忽略其他异常，继续等待（但记录日志以便调试）
-                    if (checkCount % 10 == 0) {
-                        LogHelper.d(TAG, "⏳ 等待TaskService连接中（反射检查异常，继续等待）: " + e.getClass().getSimpleName());
-                    }
-                }
-                
-                Thread.sleep(100);
-            }
-            
-            // 即使TaskService未连接，也尝试直接调用方法（Activity内部会处理TaskService未连接的情况）
-            // 这样可以确保即使等待超时，也能触发屏蔽手势服务
-            try {
-                LogHelper.w(TAG, "⚠️ TaskService等待超时（" + taskServiceWaitMs + "ms），尝试直接调用方法（Activity内部会处理）");
-                Method checkMethod = activityClass.getDeclaredMethod("checkAndDisableOfficialGesture");
-                checkMethod.setAccessible(true);
-                checkMethod.invoke(activity);
-                LogHelper.d(TAG, "✅ 已触发屏蔽手势服务（超时后直接调用）");
-            } catch (Exception e) {
-                LogHelper.w(TAG, "⚠️ 超时后直接调用方法失败: " + e.getMessage() + "，Activity会在TaskService连接后自动触发");
-                // 即使反射调用失败，Activity的onServiceConnected中也会自动触发，所以这里只是警告
-            }
-            
-        } catch (Exception e) {
-            LogHelper.e(TAG, "❌ 等待并触发屏蔽手势服务失败", e);
-        }
     }
 }

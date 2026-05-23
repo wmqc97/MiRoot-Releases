@@ -13,7 +13,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.MatrixTransformation
 import androidx.media3.effect.OverlayEffect
+import androidx.media3.transformer.AudioEncoderSettings
 import androidx.media3.transformer.Composition
+import androidx.media3.transformer.DefaultEncoderFactory
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
 import androidx.media3.transformer.Effects
@@ -315,9 +317,15 @@ object ShellMedia3Export {
 
         Handler(main).post {
             RecordSynthDebugLog.d("Transformer.start path=${outputFile.absolutePath}")
+            val audioEncoderSettings = AudioEncoderSettings.Builder().setBitrate(96000).build()
+            val encoderFactory = DefaultEncoderFactory.Builder(app)
+                .setRequestedAudioEncoderSettings(audioEncoderSettings)
+                .setCodecPriority(1)
+                .build()
             val transformer = Transformer.Builder(app)
                 .setAudioMimeType(MimeTypes.AUDIO_AAC)
                 .setVideoMimeType(MimeTypes.VIDEO_H264)
+                .setEncoderFactory(encoderFactory)
                 .build()
 
             transformer.addListener(

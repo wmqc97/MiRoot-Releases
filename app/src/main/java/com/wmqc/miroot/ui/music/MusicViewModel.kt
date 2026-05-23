@@ -18,9 +18,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _projecting = MutableStateFlow(false)
     val projecting: StateFlow<Boolean> = _projecting.asStateFlow()
 
-    /** 与投屏控制区「是否检测到正在播放」同步；勿在 Compose 里直接读 [MusicProjectionController]，否则无状态驱动、界面不刷新 */
+    /** 与投屏控制区「是否检测到正在播放」同步（PlaybackState.STATE_PLAYING，与 [MusicProjectionController.hasAnyPlayingSession] 一致）；勿在 Compose 里直接读 [MusicProjectionController]，否则无状态驱动、界面不刷新 */
     private val _hasActiveMediaSession = MutableStateFlow(
-        MusicProjectionController.hasActiveMediaSession(application.applicationContext),
+        MusicProjectionController.hasAnyPlayingSession(application.applicationContext) == true,
     )
     val hasActiveMediaSession: StateFlow<Boolean> = _hasActiveMediaSession.asStateFlow()
 
@@ -36,10 +36,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         refreshProjectionState()
     }
 
-    /** 刷新投屏控制条依赖的系统信号（媒体会话 + 通知监听开关） */
+    /** 刷新投屏控制条依赖的系统信号（播放状态 + 通知监听开关） */
     fun refreshMusicControlProbe(context: Context) {
         val app = context.applicationContext
-        _hasActiveMediaSession.value = MusicProjectionController.hasActiveMediaSession(app)
+        _hasActiveMediaSession.value = MusicProjectionController.hasAnyPlayingSession(app) == true
         _notificationListenerEnabled.value = MusicProjectionController.isNotificationListenerEnabled(app)
     }
 
@@ -80,13 +80,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    /** 深渊镜与普通背屏共用投屏字体；保留入口供旧调用方。 */
     fun applyAbyssalCustomFont(path: String) {
-        setSettings(
-            _settings.value.copy(
-                abyssalLyricsFont = LyricsFontHelper.ID_CUSTOM,
-                abyssalLyricsCustomPath = path,
-            ),
-        )
+        applyProjectionCustomFont(path)
     }
 
     fun refreshPrivilege() {

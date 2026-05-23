@@ -16,11 +16,13 @@
 package com.wmqc.miroot.lyrics;
 
 import com.wmqc.miroot.MainActivity;
+import com.wmqc.miroot.capability.PrivilegedShell;
 
 import android.content.Context;
 import android.content.Intent;
 import android.os.RemoteException;
 import androidx.annotation.Keep;
+import com.wmqc.miroot.rear.AppProjectionOfficialGesturePolicy;
 import com.wmqc.miroot.rear.OfficialSubscreenServiceGate;
 import com.wmqc.miroot.rear.RearAssistPrefs;
 import java.io.BufferedReader;
@@ -40,7 +42,7 @@ import android.graphics.Paint;
 import android.graphics.Rect;
 
 /**
- * TaskService：具体 shell 命令由 {@link ShellCompat} 在 Root（su）或已授权的 Shizuku 下执行。
+ * TaskService：具体 shell 命令统一由 {@link PrivilegedShell} 执行（Root 优先，失败回退 Shizuku）。
  */
 public class TaskService extends ITaskService.Stub {
     // 统一使用带前缀的日志 TAG，便于在 logcat 中过滤
@@ -379,6 +381,52 @@ public class TaskService extends ITaskService.Stub {
     }
 
     /**
+     * 第三方应用投屏：功能页总开关 + {@link AppProjectionOfficialGesturePolicy}（全部 / 仅选定包）。
+     */
+    @Override
+    public boolean disableSubScreenLauncherForAppProjection(String packageName) throws RemoteException {
+        try {
+            LogHelper.d("MiRoot-TaskTimeline", "disableSubScreenLauncherForAppProjection() pkg=" + packageName);
+            Context appCtx = resolveAppContextForPrefs();
+            if (!AppProjectionOfficialGesturePolicy.shouldForceStopForThirdPartyProjection(appCtx, packageName)) {
+                LogHelper.d(TAG, "⏭️ 总开关或应用页策略未命中，跳过 disableSubScreenLauncherForAppProjection");
+                return true;
+            }
+            String cmd = "am force-stop com.xiaomi.subscreencenter";
+            Process process = ShellCompat.startShell(cmd);
+            int exitCode = process.waitFor();
+            boolean success = (exitCode == 0);
+            if (!success) {
+                LogHelper.e(TAG, "❌ disableSubScreenLauncherForAppProjection 失败 exitCode=" + exitCode);
+            } else {
+                LogHelper.d(TAG, "✅ disableSubScreenLauncherForAppProjection: " + cmd);
+            }
+            return success;
+        } catch (Exception e) {
+            LogHelper.e(TAG, "❌ EXCEPTION in disableSubScreenLauncherForAppProjection", e);
+            return false;
+        }
+    }
+
+    @Override
+    public boolean killLauncherProcessForAppProjection(String packageName) throws RemoteException {
+        try {
+            Context appCtx = resolveAppContextForPrefs();
+            if (!AppProjectionOfficialGesturePolicy.shouldForceStopForThirdPartyProjection(appCtx, packageName)) {
+                LogHelper.d(TAG, "⏭️ 总开关或应用页策略未命中，跳过 killLauncherProcessForAppProjection");
+                return true;
+            }
+            String cmd = "am force-stop com.xiaomi.subscreencenter";
+            Process process = ShellCompat.startShell(cmd);
+            int exitCode = process.waitFor();
+            return (exitCode == 0);
+        } catch (Exception e) {
+            LogHelper.e(TAG, "❌ EXCEPTION in killLauncherProcessForAppProjection", e);
+            return false;
+        }
+    }
+
+    /**
      * 充电动画流程专用：对 {@code com.xiaomi.subscreencenter} 执行 force-stop，
      * 不检查 {@link com.wmqc.miroot.rear.OfficialSubscreenServiceGate}。
      */
@@ -471,6 +519,22 @@ public class TaskService extends ITaskService.Stub {
      * 与「副屏上谁处理手势」对应恢复：{@code pm enable} 包与 SubScreenLauncher 组件后，
      * {@code am start --display 1} 拉起官方背屏 Launcher，把副屏交还给小米背屏中心。
      */
+    @Override
+    public boolean enableOfficialSubscreenPackageOnly() throws RemoteException {
+        try {
+            LogHelper.d(TAG, "enableOfficialSubscreenPackageOnly()（仅 pm enable，不拉起 Launcher）");
+            String cmd =
+                    "pm enable com.xiaomi.subscreencenter 2>/dev/null; "
+                            + "pm enable com.xiaomi.subscreencenter/.SubScreenLauncher 2>/dev/null";
+            Process process = ShellCompat.startShell(cmd);
+            int exitCode = process.waitFor();
+            return exitCode == 0;
+        } catch (Exception e) {
+            LogHelper.e(TAG, "❌ EXCEPTION in enableOfficialSubscreenPackageOnly", e);
+            return false;
+        }
+    }
+
     @Override
     public boolean enableSubScreenLauncher() throws RemoteException {
         try {
@@ -1297,9 +1361,13 @@ public class TaskService extends ITaskService.Stub {
             Process process = ShellCompat.startShell("am stack list", true);
 
             BufferedReader reader = new BufferedReader(
-                new InputStreamReader(process.getInputStream()), 8192
+                    new InputStreamReader(process.getInputStream()), 8192
             );
 
+            // 同一 RootTask 下往往有多行 taskId；旧实现取「第一条」会把已退到后台的栈仍当成前台，
+            // 手势返回把应用迁回主屏后，背屏列表里仍可能先出现旧 task 行，导致投屏 Keeper 永不收口。
+            // 改为在同一 display 段内取最后一次出现的 task 行（通常最接近栈顶）。
+            String lastCandidate = null;
             boolean inTargetDisplay = false;
             String line;
             while ((line = reader.readLine()) != null) {
@@ -1312,25 +1380,86 @@ public class TaskService extends ITaskService.Stub {
                 if (inTargetDisplay && line.contains("taskId=") && line.contains("/")) {
                     int tidStart = line.indexOf("taskId=") + 7;
                     int tidEnd = line.indexOf(':', tidStart);
+                    if (tidEnd <= tidStart) {
+                        continue;
+                    }
                     String taskId = line.substring(tidStart, tidEnd).trim();
 
                     int pkgStart = tidEnd + 2;
                     int pkgEnd = line.indexOf('/', pkgStart);
+                    if (pkgEnd <= pkgStart) {
+                        continue;
+                    }
                     String packageName = line.substring(pkgStart, pkgEnd).trim();
 
-                    reader.close();
-                    process.destroy();
-
-                    return packageName + ":" + taskId;
+                    lastCandidate = packageName + ":" + taskId;
                 }
             }
 
             reader.close();
             process.waitFor();
-            return null;
+            return lastCandidate;
 
         } catch (Exception e) {
             LogHelper.e(TAG, "Error getting foreground app on display", e);
+            return null;
+        }
+    }
+
+    @Override
+    public String getForegroundComponentOnDisplay(int displayId) throws RemoteException {
+        try {
+            Process process = ShellCompat.startShell("am stack list", true);
+
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream()), 8192
+            );
+
+            String lastCandidate = null;
+            boolean inTargetDisplay = false;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith("RootTask")) {
+                    int did = parseRootTaskDisplayId(line);
+                    inTargetDisplay = (did == displayId);
+                    continue;
+                }
+
+                if (inTargetDisplay && line.contains("taskId=") && line.contains("/")) {
+                    int tidStart = line.indexOf("taskId=") + 7;
+                    int tidEnd = line.indexOf(':', tidStart);
+                    if (tidEnd <= tidStart) {
+                        continue;
+                    }
+                    String taskId = line.substring(tidStart, tidEnd).trim();
+
+                    int compStart = tidEnd + 2;
+                    if (compStart >= line.length()) {
+                        continue;
+                    }
+                    int compEnd = compStart;
+                    while (compEnd < line.length()) {
+                        char c = line.charAt(compEnd);
+                        if (c == ' ' || c == '\t' || c == '}') {
+                            break;
+                        }
+                        compEnd++;
+                    }
+                    String component = line.substring(compStart, compEnd).trim();
+                    if (component.isEmpty() || !component.contains("/")) {
+                        continue;
+                    }
+
+                    lastCandidate = component + ":" + taskId;
+                }
+            }
+
+            reader.close();
+            process.waitFor();
+            return lastCandidate;
+
+        } catch (Exception e) {
+            LogHelper.e(TAG, "Error getting foreground component on display", e);
             return null;
         }
     }
@@ -1423,18 +1552,23 @@ public class TaskService extends ITaskService.Stub {
             if (line != null && !line.isEmpty()) {
                 // 解析 "lock 2" 或 "free" 格式
                 String[] parts = line.trim().split("\\s+");
-                if (parts.length >= 2) {
+                if (parts.length >= 2 && "lock".equals(parts[0])) {
                     try {
-                        return Integer.parseInt(parts[1]);
-                    } catch (Exception ignored) {}
+                        int r = Integer.parseInt(parts[1]);
+                        return (r >= 0 && r <= 3) ? r : -1;
+                    } catch (Exception ignored) {
+                        // fall through
+                    }
                 }
+                // free 或其他未知输出：视为“未锁定/未知”，避免误判为 0°
+                return -1;
             }
-            
-            return 0;
+
+            return -1;
             
         } catch (Exception e) {
             LogHelper.e(TAG, "获取旋转异常", e);
-            return 0;
+            return -1;
         }
     }
     
@@ -1511,7 +1645,7 @@ public class TaskService extends ITaskService.Stub {
     @Override
     public boolean executeShellCommandAsRoot(String cmd) throws RemoteException {
         try {
-            Process process = ShellCompat.startShellSuOnly(cmd);
+            Process process = PrivilegedShell.startRootShellOnly(cmd, false);
             try (BufferedReader reader =
                             new BufferedReader(
                                     new InputStreamReader(process.getInputStream()), 8192);
@@ -1535,7 +1669,7 @@ public class TaskService extends ITaskService.Stub {
     @Override
     public String executeShellCommandWithResultAsRoot(String cmd) throws RemoteException {
         try {
-            Process process = ShellCompat.startShellSuOnly(cmd);
+            Process process = PrivilegedShell.startRootShellOnly(cmd, false);
             BufferedReader reader =
                     new BufferedReader(
                             new InputStreamReader(process.getInputStream()), 8192);

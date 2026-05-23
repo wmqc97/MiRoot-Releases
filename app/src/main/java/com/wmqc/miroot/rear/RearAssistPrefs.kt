@@ -9,6 +9,7 @@ object RearAssistPrefs {
 
     const val KEY_PROXIMITY = "proximity_sensor_enabled"
     const val KEY_KEEP_SCREEN_ON = "keep_screen_on_enabled"
+    const val KEY_RECORD_SCREENSHOT_KEEP_SCREEN_ON = "record_screenshot_keep_screen_on_enabled"
     const val KEY_ALWAYS_WAKEUP = "always_wakeup_enabled"
     const val KEY_INTERVAL_MS = "rear_wakeup_interval_ms"
 
@@ -32,6 +33,18 @@ object RearAssistPrefs {
                 .getBoolean(FLUTTER_KEEP_SCREEN_ON_KEY, true)
         }
         return p.getBoolean(KEY_KEEP_SCREEN_ON, true)
+    }
+
+    /**
+     * 录屏/截图专属常亮开关：仅影响录屏与截图链路，不影响投屏 Keeper。
+     * 首次升级未写入时回落到历史「投屏常亮」值，避免行为突变。
+     */
+    fun isRecordScreenshotKeepScreenOnEnabled(ctx: Context): Boolean {
+        val p = prefs(ctx)
+        if (!p.contains(KEY_RECORD_SCREENSHOT_KEEP_SCREEN_ON)) {
+            return isKeepScreenOnEnabled(ctx)
+        }
+        return p.getBoolean(KEY_RECORD_SCREENSHOT_KEEP_SCREEN_ON, true)
     }
 
     fun isAlwaysWakeupEnabled(ctx: Context): Boolean =

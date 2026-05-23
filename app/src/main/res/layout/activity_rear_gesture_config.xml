@@ -1,0 +1,286 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/mi_page_bg"
+    android:orientation="vertical">
+
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/nested_scroll_rear_gesture_config"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:fillViewport="true"
+        android:scrollbars="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="24dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/rear_gesture_config_title"
+                android:textAppearance="@style/TextAppearance.MiRoot.PageTitle" />
+
+            <TextView
+                android:id="@+id/text_rear_gesture_intro"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/rear_gesture_config_intro"
+                android:textAppearance="?attr/textAppearanceBodyMedium"
+                android:textColor="@color/mi_text_secondary" />
+
+            <com.google.android.material.card.MaterialCardView
+                style="@style/Widget.MiRoot.Card"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="@dimen/mi_page_scroll_padding">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/rear_gesture_config_card_title"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_gesture_up"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/mi_card_section_title_to_hint"
+                        android:hint="@string/rear_gesture_slot_up">
+
+                        <AutoCompleteTextView
+                            android:id="@+id/dropdown_gesture_up"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="none" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <LinearLayout
+                        android:id="@+id/row_pick_app_up"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="top"
+                        android:orientation="horizontal"
+                        android:visibility="gone"
+                        tools:visibility="visible">
+
+                        <ImageView
+                            android:id="@+id/image_app_pick_up"
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:background="@drawable/bg_pick_app_icon_rounded"
+                            android:contentDescription="@null"
+                            android:padding="8dp"
+                            android:scaleType="fitCenter"
+                            android:visibility="gone"
+                            tools:src="@mipmap/ic_launcher_v2"
+                            tools:visibility="visible" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/text_app_label_up"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:breakStrategy="balanced"
+                                android:hyphenationFrequency="none"
+                                android:textAppearance="?attr/textAppearanceBodyLarge"
+                                android:textColor="@color/mi_text_primary"
+                                tools:text="应用显示名称" />
+
+                            <TextView
+                                android:id="@+id/text_app_package_up"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:breakStrategy="simple"
+                                android:hyphenationFrequency="none"
+                                android:textAppearance="?attr/textAppearanceBodySmall"
+                                android:textColor="@color/mi_text_secondary"
+                                tools:text="com.example.application.full.id" />
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/button_pick_app_up"
+                            style="@style/Widget.MiRoot.Button.Text"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="top"
+                            android:text="@string/rear_gesture_pick_app" />
+                    </LinearLayout>
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_gesture_left"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:hint="@string/rear_gesture_slot_left">
+
+                        <AutoCompleteTextView
+                            android:id="@+id/dropdown_gesture_left"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="none" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <LinearLayout
+                        android:id="@+id/row_pick_app_left"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="top"
+                        android:orientation="horizontal"
+                        android:visibility="gone"
+                        tools:visibility="visible">
+
+                        <ImageView
+                            android:id="@+id/image_app_pick_left"
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:background="@drawable/bg_pick_app_icon_rounded"
+                            android:contentDescription="@null"
+                            android:padding="8dp"
+                            android:scaleType="fitCenter"
+                            android:visibility="gone"
+                            tools:visibility="visible" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/text_app_label_left"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:breakStrategy="balanced"
+                                android:hyphenationFrequency="none"
+                                android:textAppearance="?attr/textAppearanceBodyLarge"
+                                android:textColor="@color/mi_text_primary" />
+
+                            <TextView
+                                android:id="@+id/text_app_package_left"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:breakStrategy="simple"
+                                android:hyphenationFrequency="none"
+                                android:textAppearance="?attr/textAppearanceBodySmall"
+                                android:textColor="@color/mi_text_secondary" />
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/button_pick_app_left"
+                            style="@style/Widget.MiRoot.Button.Text"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="top"
+                            android:text="@string/rear_gesture_pick_app" />
+                    </LinearLayout>
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_gesture_right"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:hint="@string/rear_gesture_slot_right">
+
+                        <AutoCompleteTextView
+                            android:id="@+id/dropdown_gesture_right"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="none" />
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                    <LinearLayout
+                        android:id="@+id/row_pick_app_right"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:gravity="top"
+                        android:orientation="horizontal"
+                        android:visibility="gone"
+                        tools:visibility="visible">
+
+                        <ImageView
+                            android:id="@+id/image_app_pick_right"
+                            android:layout_width="48dp"
+                            android:layout_height="48dp"
+                            android:background="@drawable/bg_pick_app_icon_rounded"
+                            android:contentDescription="@null"
+                            android:padding="8dp"
+                            android:scaleType="fitCenter"
+                            android:visibility="gone"
+                            tools:visibility="visible" />
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="12dp"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
+                            <TextView
+                                android:id="@+id/text_app_label_right"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:breakStrategy="balanced"
+                                android:hyphenationFrequency="none"
+                                android:textAppearance="?attr/textAppearanceBodyLarge"
+                                android:textColor="@color/mi_text_primary" />
+
+                            <TextView
+                                android:id="@+id/text_app_package_right"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:breakStrategy="simple"
+                                android:hyphenationFrequency="none"
+                                android:textAppearance="?attr/textAppearanceBodySmall"
+                                android:textColor="@color/mi_text_secondary" />
+                        </LinearLayout>
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/button_pick_app_right"
+                            style="@style/Widget.MiRoot.Button.Text"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="top"
+                            android:text="@string/rear_gesture_pick_app" />
+                    </LinearLayout>
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_save_rear_gesture"
+                        style="@style/Widget.MiRoot.Button.Tonal"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="20dp"
+                        android:text="@string/rear_gesture_save" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+</LinearLayout>

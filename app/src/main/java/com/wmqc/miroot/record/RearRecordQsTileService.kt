@@ -1,4 +1,5 @@
 package com.wmqc.miroot.record
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.Intent
 import android.os.Build
@@ -8,7 +9,9 @@ import android.service.quicksettings.TileService
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.wmqc.miroot.R
+import com.wmqc.miroot.MainActivity
 import com.wmqc.miroot.capability.RuntimePermissionGate
+import com.wmqc.miroot.license.OfflineActivationRepository
 
 /**
  * 快捷设置磁贴：开关录屏悬浮窗（与旧版 RearScreenRecordTileService 一致）。
@@ -27,13 +30,30 @@ class RearRecordQsTileService : TileService() {
     }
 
     override fun onClick() {
+        // 仅在“下一步是启动录屏服务”时拦截；若当前已在录制中，则允许点击磁贴停止（不依赖激活状态）。
+        if (!RearScreenRecordService.isRunning() && !OfflineActivationRepository.isActivated(applicationContext)) {
+            MainDisplayUi.showToast(
+                applicationContext,
+                R.string.activation_required_to_use,
+                Toast.LENGTH_SHORT,
+            )
+            val intent = Intent(this, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                )
+            }
+            startActivity(intent)
+            return
+        }
         unlockAndRun {
             if (!Settings.canDrawOverlays(this)) {
-                Toast.makeText(
+                MainDisplayUi.showToast(
                     applicationContext,
                     R.string.record_need_overlay,
                     Toast.LENGTH_LONG,
-                ).show()
+                )
                 val intent = Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     android.net.Uri.parse("package:$packageName"),
@@ -42,11 +62,11 @@ class RearRecordQsTileService : TileService() {
                 return@unlockAndRun
             }
             if (!RuntimePermissionGate.canPostNotifications(this)) {
-                Toast.makeText(
+                MainDisplayUi.showToast(
                     applicationContext,
                     R.string.record_need_post_notifications,
                     Toast.LENGTH_LONG,
-                ).show()
+                )
                 startActivity(
                     RuntimePermissionGate.intentAppNotificationSettings(this).addFlags(
                         Intent.FLAG_ACTIVITY_NEW_TASK,

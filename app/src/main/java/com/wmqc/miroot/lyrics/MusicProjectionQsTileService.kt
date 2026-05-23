@@ -1,6 +1,8 @@
 package com.wmqc.miroot.lyrics
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.ComponentName
+import android.content.Intent
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -8,8 +10,10 @@ import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.widget.Toast
 import com.wmqc.miroot.R
+import com.wmqc.miroot.MainActivity
 import com.wmqc.miroot.capability.EnvironmentProbe
 import com.wmqc.miroot.capability.PrivilegedShell
+import com.wmqc.miroot.license.OfflineActivationRepository
 import com.wmqc.miroot.ui.music.MusicProjectionController
 import kotlin.concurrent.thread
 
@@ -26,6 +30,23 @@ class MusicProjectionQsTileService : TileService() {
     }
 
     override fun onClick() {
+        // 仅在“下一步是启动投屏”时拦截；若当前已在主屏歌词展示中，则允许点击磁贴停止投屏。
+        if (!isMainScreenMusicActive() && !OfflineActivationRepository.isActivated(applicationContext)) {
+            MainDisplayUi.showToast(
+                this@MusicProjectionQsTileService,
+                R.string.activation_required_to_use,
+                Toast.LENGTH_SHORT,
+            )
+            val intent = Intent(this@MusicProjectionQsTileService, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                )
+            }
+            startActivity(intent)
+            return
+        }
         unlockAndRun {
             if (isMainScreenMusicActive()) {
                 MusicProjectionController.stop(this)
@@ -35,11 +56,11 @@ class MusicProjectionQsTileService : TileService() {
             thread(name = "MiRoot-QS-MainMusic") {
                 if (!privilegedShellAvailable()) {
                     mainHandler.post {
-                        Toast.makeText(
+                        MainDisplayUi.showToast(
                             this@MusicProjectionQsTileService,
                             R.string.privilege_shell_required,
                             Toast.LENGTH_LONG,
-                        ).show()
+                        )
                     }
                     return@thread
                 }
@@ -53,7 +74,7 @@ class MusicProjectionQsTileService : TileService() {
                 ).flattenToString()
                 val cmd =
                     "am start -n $cmp --ez isMainScreenLandscape true --ez isBroadcast true"
-                PrivilegedShell.runAndWait(cmd)
+                PrivilegedShell.execCmd(cmd)
                 mainHandler.post { scheduleRefreshTile() }
             }
         }

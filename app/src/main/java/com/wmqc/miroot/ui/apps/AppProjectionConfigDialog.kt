@@ -1,4 +1,5 @@
 package com.wmqc.miroot.ui.apps
+import com.wmqc.miroot.display.MainDisplayUi
 
 import android.view.LayoutInflater
 import android.view.View
@@ -52,12 +53,12 @@ object AppProjectionConfigDialog {
                         dpiText.toIntOrNull()
                     }
                 if (dpi != null && (dpi <= 0 || dpi > 9999)) {
-                    Toast.makeText(activity, R.string.apps_projection_invalid_dpi, Toast.LENGTH_SHORT).show()
+                    MainDisplayUi.showToast(activity, R.string.apps_projection_invalid_dpi, Toast.LENGTH_SHORT)
                     return@setOnClickListener
                 }
                 val rotation = rotationFromButtonId(binding.toggleProjectionRotation.checkedButtonId)
                 if (rotation !in 0..3) {
-                    Toast.makeText(activity, R.string.apps_projection_invalid_rotation, Toast.LENGTH_SHORT).show()
+                    MainDisplayUi.showToast(activity, R.string.apps_projection_invalid_rotation, Toast.LENGTH_SHORT)
                     return@setOnClickListener
                 }
 

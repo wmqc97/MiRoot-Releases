@@ -231,7 +231,7 @@ public class DeviceModelHelper {
      */
     public static int[] getCompositeScreenshotCoordinates(Context context) {
         if (!isProMaxModel()) {
-            return new int[]{112, 112};
+            return new int[]{116, 933};
         }
         if (context == null) {
             return new int[]{PROMAX_HALF_SCREEN_X, PROMAX_HALF_SCREEN_Y};
@@ -287,11 +287,11 @@ public class DeviceModelHelper {
     }
 
     /**
-     * 获取手机背面图片文件名（根据机型型号，带.png后缀）
-     * @return 文件名（promaxl.png 或 prol.png）
+     * 获取手机背面图片文件名（根据机型型号，带.webp后缀）
+     * @return 文件名（promaxl.webp 或 prol.webp）
      */
     public static String getPhoneBackImageFileName() {
-        return isProMaxModel() ? "promaxl.png" : "prol.png";
+        return isProMaxModel() ? "promaxl.webp" : "prol.webp";
     }
     
     /**
@@ -325,31 +325,31 @@ public class DeviceModelHelper {
         // 如果仍然无法获取Context，使用默认文件名
         if (context == null) {
             LogHelper.w(TAG, "⚠️ 无法获取Context，使用默认底图文件名");
-            return isProMaxModel() ? "promaxl.png" : "prol.png";
+            return isProMaxModel() ? "promaxl.webp" : "prol.webp";
         }
         try {
             SharedPreferences prefs = context.getSharedPreferences(
                 "FlutterSharedPreferences", Context.MODE_PRIVATE);
             
             if (isProMaxModel()) {
-                // ProMax：颜色 + 半屏(promaxl.png) / 全壳(promaxl2.png)
+                // ProMax：颜色 + 半屏(promaxl.webp) / 全壳(promaxl2.webp)
                 String backImageType = prefs.getString("flutter.promax_back_image_type", "green");
                 String name;
                 if ("white".equals(backImageType)) {
-                    name = "promaxb.png";
+                    name = "promaxb.webp";
                     LogHelper.d(TAG, "✅ ProMax 使用白色底图: " + name);
                 } else if ("gray".equals(backImageType)) {
-                    name = "promaxh.png";
+                    name = "promaxh.webp";
                     LogHelper.d(TAG, "✅ ProMax 使用灰色底图: " + name);
                 } else if ("purple".equals(backImageType)) {
-                    name = "promaxz.png";
+                    name = "promaxz.webp";
                     LogHelper.d(TAG, "✅ ProMax 使用紫色底图: " + name);
                 } else {
-                    name = "promaxl.png";
+                    name = "promaxl.webp";
                     LogHelper.d(TAG, "✅ ProMax 使用绿色底图: " + name);
                 }
-                if (isProMaxShellFull(context) && name.endsWith(".png")) {
-                    name = name.substring(0, name.length() - 4) + "2.png";
+                if (isProMaxShellFull(context) && name.endsWith(".webp")) {
+                    name = name.substring(0, name.length() - 5) + "2.webp";
                     LogHelper.d(TAG, "✅ ProMax 全壳底图文件名: " + name);
                 }
                 return name;
@@ -357,23 +357,23 @@ public class DeviceModelHelper {
                 String backImageType = prefs.getString("flutter.pro_back_image_type", "green");
                 String name;
                 if ("white".equals(backImageType)) {
-                    name = "prob.png";
+                    name = "prob.webp";
                 } else if ("gray".equals(backImageType)) {
-                    name = "proh.png";
+                    name = "proh.webp";
                 } else if ("purple".equals(backImageType)) {
-                    name = "proz.png";
+                    name = "proz.webp";
                 } else {
-                    name = "prol.png";
+                    name = "prol.webp";
                 }
-                if (isProShellFull(context) && name.endsWith(".png")) {
-                    name = name.substring(0, name.length() - 4) + "2.png";
+                if (isProShellFull(context) && name.endsWith(".webp")) {
+                    name = name.substring(0, name.length() - 5) + "2.webp";
                 }
                 LogHelper.d(TAG, "✅ Pro 底图文件名: " + name);
                 return name;
             }
         } catch (Exception e) {
             LogHelper.w(TAG, "⚠️ 读取底图选择失败，使用默认: " + e.getMessage());
-            return isProMaxModel() ? "promaxl.png" : "prol.png";
+            return isProMaxModel() ? "promaxl.webp" : "prol.webp";
         }
     }
     
@@ -411,16 +411,16 @@ public class DeviceModelHelper {
                 String backImageType = prefs.getString("flutter.promax_back_image_type", "green");
                 String name;
                 if ("white".equals(backImageType)) {
-                    name = "promaxb.png";
+                    name = "promaxb.webp";
                 } else if ("gray".equals(backImageType)) {
-                    name = "promaxh.png";
+                    name = "promaxh.webp";
                 } else if ("purple".equals(backImageType)) {
-                    name = "promaxz.png";
+                    name = "promaxz.webp";
                 } else {
-                    name = "promaxl.png";
+                    name = "promaxl.webp";
                 }
-                if (isProMaxShellFull(context) && name.endsWith(".png")) {
-                    name = name.substring(0, name.length() - 4) + "2.png";
+                if (isProMaxShellFull(context) && name.endsWith(".webp")) {
+                    name = name.substring(0, name.length() - 5) + "2.webp";
                 }
                 LogHelper.d(TAG, "✅ ProMax 源文件: " + name);
                 return name;
@@ -428,23 +428,23 @@ public class DeviceModelHelper {
                 String backImageType = prefs.getString("flutter.pro_back_image_type", "green");
                 String name;
                 if ("white".equals(backImageType)) {
-                    name = "prob.png";
+                    name = "prob.webp";
                 } else if ("gray".equals(backImageType)) {
-                    name = "proh.png";
+                    name = "proh.webp";
                 } else if ("purple".equals(backImageType)) {
-                    name = "proz.png";
+                    name = "proz.webp";
                 } else {
-                    name = "prol.png";
+                    name = "prol.webp";
                 }
-                if (isProShellFull(context) && name.endsWith(".png")) {
-                    name = name.substring(0, name.length() - 4) + "2.png";
+                if (isProShellFull(context) && name.endsWith(".webp")) {
+                    name = name.substring(0, name.length() - 5) + "2.webp";
                 }
                 LogHelper.d(TAG, "✅ Pro 源文件: " + name);
                 return name;
             }
         } catch (Exception e) {
             LogHelper.w(TAG, "⚠️ 读取底图选择失败，使用默认: " + e.getMessage());
-            return isProMaxModel() ? "promaxl.png" : "prol.png";
+            return isProMaxModel() ? "promaxl.webp" : "prol.webp";
         }
     }
     

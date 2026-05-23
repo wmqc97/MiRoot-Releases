@@ -52,6 +52,40 @@ public final class AiWallpaperThemeHelper {
 
     private static final String TAG = "AiWallpaperTheme";
 
+    /**
+     * 略缩图磁盘缓存：同一路径用 {@link #previewStripe} 串行化，不同路径可并行拉取；{@link
+     * #clearAiWallpaperPreviewThumbnailCaches} 通过 {@link #runWithAllPreviewStripesLocked} 独占全部条，
+     * 避免清理与读写竞态。单一路径上仍避免并发写入同一 {@code preview_*.png} 缓存文件。
+     */
+    private static final int PREVIEW_CACHE_STRIPE_COUNT = 32;
+
+    private static final Object[] PREVIEW_CACHE_STRIPES = new Object[PREVIEW_CACHE_STRIPE_COUNT];
+
+    static {
+        for (int i = 0; i < PREVIEW_CACHE_STRIPE_COUNT; i++) {
+            PREVIEW_CACHE_STRIPES[i] = new Object();
+        }
+    }
+
+    private static Object previewStripe(String imagePath) {
+        int h = imagePath != null ? imagePath.hashCode() : 0;
+        return PREVIEW_CACHE_STRIPES[(h & Integer.MAX_VALUE) % PREVIEW_CACHE_STRIPE_COUNT];
+    }
+
+    private static void runWithAllPreviewStripesLocked(Runnable r) {
+        runWithAllPreviewStripesLockedImpl(0, r);
+    }
+
+    private static void runWithAllPreviewStripesLockedImpl(int idx, Runnable r) {
+        if (idx >= PREVIEW_CACHE_STRIPE_COUNT) {
+            r.run();
+            return;
+        }
+        synchronized (PREVIEW_CACHE_STRIPES[idx]) {
+            runWithAllPreviewStripesLockedImpl(idx + 1, r);
+        }
+    }
+
     public static final String AI_MAML_BASE =
             "/sdcard/Android/data/com.android.thememanager/files/MIUI/.ai_wallpaper/maml/";
 
@@ -62,6 +96,21 @@ public final class AiWallpaperThemeHelper {
                 "/storage/emulated/0/Android/data/com.android.thememanager/files/MIUI/.ai_wallpaper/maml/",
                 "/data/media/0/Android/data/com.android.thememanager/files/MIUI/.ai_wallpaper/maml/",
             };
+
+    /**
+     * 路径是否落在任意已知挂载名下的 {@code …/maml/{directory}/} 之下（含子目录中的文件）。
+     */
+    public static boolean isPathUnderAiMamlSubDirectory(String absolutePath, String directory) {
+        if (absolutePath == null || directory == null || directory.isEmpty()) {
+            return false;
+        }
+        for (String base : AI_MAML_BASES) {
+            if (absolutePath.startsWith(base + directory + "/")) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     /**
      * MiRoot 写入的背屏预览 {@code preview_rearscreen_0.png}。换视频后用它作为源，覆盖拷贝到
@@ -77,9 +126,18 @@ public final class AiWallpaperThemeHelper {
         for (String base : AI_MAML_BASES) {
             String path = base + tail;
             if (rootFileExists(taskService, path)) {
+                LogHelper.dDebug(
+                        "DirCoverBind",
+                        "preview0 exists: " + LogHelper.truncateForLog(path, 220));
                 return path;
             }
         }
+        LogHelper.dDebug(
+                "DirCoverBind",
+                "preview0 missing for mamlDir="
+                        + directory
+                        + " triedTail="
+                        + LogHelper.truncateForLog(tail, 160));
         return null;
     }
 
@@ -406,45 +464,101 @@ public final class AiWallpaperThemeHelper {
         if (context == null || taskService == null || imagePath == null || imagePath.isEmpty()) {
             return null;
         }
+        synchronized (previewStripe(imagePath)) {
+            return loadPreviewImageBytesLocked(context, taskService, imagePath);
+        }
+    }
+
+    /** @return 长度为 2：{@code [0]} 字节大小、{@code [1]} 秒级 mtime；失败为 {@code null} */
+    @Nullable
+    private static long[] remoteFileSizeAndMtimeSeconds(ITaskService taskService, String imagePath) {
+        String[] cmds =
+                new String[] {
+                    "stat -c '%s %Y' \"" + imagePath + "\" 2>/dev/null",
+                    "stat -c \"%s %Y\" \"" + imagePath + "\" 2>/dev/null",
+                    "busybox stat -c '%s %Y' \"" + imagePath + "\" 2>/dev/null",
+                };
+        for (String cmd : cmds) {
+            String out = shellResultRootFirst(taskService, cmd);
+            if (out == null) {
+                continue;
+            }
+            String t = out.trim();
+            if (t.isEmpty()) {
+                continue;
+            }
+            String[] parts = t.split("\\s+");
+            if (parts.length < 2) {
+                continue;
+            }
+            try {
+                long size = Long.parseLong(parts[0].trim());
+                long mtime = Long.parseLong(parts[1].trim());
+                if (size > 0 && mtime > 0) {
+                    return new long[] {size, mtime};
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        return null;
+    }
+
+    @Nullable
+    private static byte[] loadPreviewImageBytesLocked(Context context, ITaskService taskService, String imagePath) {
         try {
             String checkFileCmd = "test -f \"" + imagePath + "\" && echo 'exists' || echo 'not found'";
-            String checkResult = shellResultRootFirst(taskService,checkFileCmd);
+            String checkResult = shellResultRootFirst(taskService, checkFileCmd);
             if (checkResult == null || !checkResult.contains("exists")) {
                 return null;
             }
+            long[] sm = remoteFileSizeAndMtimeSeconds(taskService, imagePath);
             long fileSize = 0;
-            String[] sizeCmds = new String[] {
-                "stat -c %s \"" + imagePath + "\" 2>/dev/null",
-                "stat -c%s \"" + imagePath + "\" 2>/dev/null",
-                "busybox stat -c %s \"" + imagePath + "\" 2>/dev/null",
-            };
-            for (String sizeCmd : sizeCmds) {
-                String sizeResult = shellResultRootFirst(taskService,sizeCmd);
-                if (sizeResult == null || sizeResult.trim().isEmpty()) {
-                    continue;
-                }
-                String token = sizeResult.trim().split("\\s+")[0];
-                try {
-                    fileSize = Long.parseLong(token);
-                } catch (NumberFormatException ignored) {
-                    fileSize = 0;
-                }
-                if (fileSize > 0) {
-                    break;
+            long mtimeSec = -1L;
+            if (sm != null) {
+                fileSize = sm[0];
+                mtimeSec = sm[1];
+            } else {
+                String[] sizeCmds =
+                        new String[] {
+                            "stat -c %s \"" + imagePath + "\" 2>/dev/null",
+                            "stat -c%s \"" + imagePath + "\" 2>/dev/null",
+                            "busybox stat -c %s \"" + imagePath + "\" 2>/dev/null",
+                        };
+                for (String sizeCmd : sizeCmds) {
+                    String sizeResult = shellResultRootFirst(taskService, sizeCmd);
+                    if (sizeResult == null || sizeResult.trim().isEmpty()) {
+                        continue;
+                    }
+                    String token = sizeResult.trim().split("\\s+")[0];
+                    try {
+                        fileSize = Long.parseLong(token);
+                    } catch (NumberFormatException ignored) {
+                        fileSize = 0;
+                    }
+                    if (fileSize > 0) {
+                        break;
+                    }
                 }
             }
             boolean sizeKnown = fileSize > 0;
             String fileName = "preview_" + Math.abs(imagePath.hashCode()) + ".png";
             File cacheDir = context.getCacheDir();
             File cachedFile = new File(cacheDir, fileName);
+            boolean mtimeKnown = mtimeSec > 0;
+            boolean cacheMtimeMatches =
+                    !mtimeKnown
+                            || (cachedFile.exists()
+                                    && Math.abs(cachedFile.lastModified() / 1000L - mtimeSec) <= 1L);
             boolean useCache =
                     sizeKnown
                             && cachedFile.exists()
                             && cachedFile.length() == fileSize
-                            && cachedFile.length() > 0;
+                            && cachedFile.length() > 0
+                            && cacheMtimeMatches;
             if (!useCache) {
-                String tempDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                        .getAbsolutePath();
+                String tempDir =
+                        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                                .getAbsolutePath();
                 String tempFileName =
                         "temp_preview_"
                                 + System.currentTimeMillis()
@@ -452,9 +566,11 @@ public final class AiWallpaperThemeHelper {
                                 + Math.abs(imagePath.hashCode())
                                 + ".png";
                 String tempFilePath = tempDir + "/" + tempFileName;
-                boolean copyOk = shellCommandRootFirst(taskService,"cp \"" + imagePath + "\" \"" + tempFilePath + "\"");
+                boolean copyOk =
+                        shellCommandRootFirst(taskService, "cp \"" + imagePath + "\" \"" + tempFilePath + "\"");
                 if (!copyOk) {
-                    copyOk = shellCommandRootFirst(taskService,"cat \"" + imagePath + "\" > \"" + tempFilePath + "\"");
+                    copyOk =
+                            shellCommandRootFirst(taskService, "cat \"" + imagePath + "\" > \"" + tempFilePath + "\"");
                 }
                 if (!copyOk) {
                     return null;
@@ -490,6 +606,10 @@ public final class AiWallpaperThemeHelper {
                     cachedFile.delete();
                     return null;
                 }
+                if (mtimeKnown) {
+                    //noinspection ResultOfMethodCallIgnored
+                    cachedFile.setLastModified(mtimeSec * 1000L);
+                }
             }
             try (FileInputStream fis = new FileInputStream(cachedFile)) {
                 int readSize = (int) cachedFile.length();
@@ -517,15 +637,32 @@ public final class AiWallpaperThemeHelper {
         if (context == null || imagePath == null || imagePath.isEmpty()) {
             return;
         }
-        try {
-            String fileName = "preview_" + Math.abs(imagePath.hashCode()) + ".png";
-            File cachedFile = new File(context.getCacheDir(), fileName);
-            if (cachedFile.isFile()) {
-                //noinspection ResultOfMethodCallIgnored
-                cachedFile.delete();
+        synchronized (previewStripe(imagePath)) {
+            try {
+                String fileName = "preview_" + Math.abs(imagePath.hashCode()) + ".png";
+                File cachedFile = new File(context.getCacheDir(), fileName);
+                if (cachedFile.isFile()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    cachedFile.delete();
+                }
+            } catch (Exception e) {
+                LogHelper.w(TAG, "invalidatePreviewImageCache", e);
             }
-        } catch (Exception e) {
-            LogHelper.w(TAG, "invalidatePreviewImageCache", e);
+        }
+    }
+
+    /**
+     * 使某 AI maml 目录下 {@code preview/preview_rearscreen_0.png} 在所有已知挂载前缀上的略缩图磁盘缓存失效
+     * （与 {@link #resolveExistingMamlPreviewRearscreen0Path} 可能返回的任一路径一致）。
+     */
+    public static void invalidateAiDirectoryRearscreenPreviewCaches(
+            @Nullable Context context, @Nullable String directory) {
+        if (context == null || directory == null || directory.isEmpty()) {
+            return;
+        }
+        String tail = directory + "/preview/preview_rearscreen_0.png";
+        for (String base : AI_MAML_BASES) {
+            invalidatePreviewImageCache(context, base + tail);
         }
     }
 
@@ -537,6 +674,10 @@ public final class AiWallpaperThemeHelper {
         if (context == null) {
             return;
         }
+        runWithAllPreviewStripesLocked(() -> clearAiWallpaperPreviewThumbnailCachesLocked(context));
+    }
+
+    private static void clearAiWallpaperPreviewThumbnailCachesLocked(@Nullable Context context) {
         try {
             File cacheDir = context.getCacheDir();
             if (cacheDir != null && cacheDir.isDirectory()) {
@@ -755,7 +896,7 @@ public final class AiWallpaperThemeHelper {
         }
     }
 
-    static void deleteThemeMetadataTempSourceZipQuietly(File f) {
+    public static void deleteThemeMetadataTempSourceZipQuietly(File f) {
         if (f == null || !f.exists() || !f.isFile()) {
             return;
         }
@@ -767,12 +908,21 @@ public final class AiWallpaperThemeHelper {
             String n = f.getName();
             if (n.startsWith("theme_preview_read_")
                     || n.startsWith("theme_effect_raw_")
-                    || n.startsWith("theme_input_")) {
+                    || n.startsWith("theme_input_")
+                    || n.startsWith("gesture_zip_in_")
+                    || n.startsWith("gesture_zip_out_")) {
                 //noinspection ResultOfMethodCallIgnored
                 f.delete();
             }
         } catch (Exception ignored) {
         }
+    }
+
+    /** 将主题 zip（路径或 content Uri）拷到 {@link #THEME_TEMP_DIR} 供本地处理；用毕可 {@link #deleteThemeMetadataTempSourceZipQuietly}。 */
+    public static File resolveThemeZipForGestureRead(Context context, String themeFileRef)
+            throws Exception {
+        return resolveZipFileForRead(
+                context, themeFileRef, "gesture_zip_in_" + System.currentTimeMillis());
     }
 
     @Nullable
@@ -824,16 +974,40 @@ public final class AiWallpaperThemeHelper {
         if (in == null) {
             return null;
         }
-        Bitmap bmp = BitmapFactory.decodeStream(in);
+        // 先完整读入内存做两段 decode（bounds + sampled），避免 decode 原始超大图造成峰值内存与纹理上传压力
+        ByteArrayOutputStream raw = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) != -1) {
+            raw.write(buf, 0, n);
+        }
+        byte[] data = raw.toByteArray();
+        if (data.length == 0) {
+            return null;
+        }
+
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(data, 0, data.length, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return null;
+        }
+
+        int maxDim = 480;
+        BitmapFactory.Options opts = new BitmapFactory.Options();
+        opts.inPreferredConfig = Bitmap.Config.RGB_565; // 预览图：更省内存即可
+        opts.inSampleSize = computeInSampleSize(bounds.outWidth, bounds.outHeight, maxDim, maxDim);
+        Bitmap bmp = BitmapFactory.decodeByteArray(data, 0, data.length, opts);
         if (bmp == null) {
             return null;
         }
+
         int width = bmp.getWidth();
         int height = bmp.getHeight();
         if (width <= 0 || height <= 0) {
             return null;
         }
-        int maxDim = 480;
+
         Bitmap scaled = bmp;
         if (width > maxDim || height > maxDim) {
             float scale = (float) maxDim / (float) Math.max(width, height);
@@ -841,10 +1015,24 @@ public final class AiWallpaperThemeHelper {
             int targetH = Math.max(1, Math.round(height * scale));
             scaled = Bitmap.createScaledBitmap(bmp, targetW, targetH, true);
         }
+
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         scaled.compress(Bitmap.CompressFormat.JPEG, 85, baos);
         byte[] bytes = baos.toByteArray();
         return (bytes != null && bytes.length > 0) ? bytes : null;
+    }
+
+    private static int computeInSampleSize(
+            int srcWidth, int srcHeight, int reqWidth, int reqHeight) {
+        int inSampleSize = 1;
+        if (srcHeight > reqHeight || srcWidth > reqWidth) {
+            int halfHeight = srcHeight / 2;
+            int halfWidth = srcWidth / 2;
+            while ((halfHeight / inSampleSize) >= reqHeight && (halfWidth / inSampleSize) >= reqWidth) {
+                inSampleSize *= 2;
+            }
+        }
+        return Math.max(1, inSampleSize);
     }
 
     private static void applyThemeZipEffectToAiPreviews(
@@ -865,8 +1053,15 @@ public final class AiWallpaperThemeHelper {
             }
             if (VideoReplacer.copySourcePngToRearscreenPreviews(taskService, directory, tmp)) {
                 try {
-                    DirectoryCoverBindingHelper.syncBoundCoverFromRearscreenPreview(
-                            context, taskService, directory);
+                    boolean coverSyncOk =
+                            DirectoryCoverBindingHelper.syncBoundCoverFromRearscreenPreview(
+                                    context, taskService, directory);
+                    LogHelper.dDebug(
+                            "DirCoverBind",
+                            "after theme effect preview write: dir="
+                                    + directory
+                                    + " boundCoverSyncOk="
+                                    + coverSyncOk);
                 } catch (Exception e) {
                     LogHelper.w(TAG, "syncBoundCover", e);
                 }

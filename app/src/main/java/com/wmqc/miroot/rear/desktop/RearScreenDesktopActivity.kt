@@ -1,6 +1,7 @@
 package com.wmqc.miroot.rear.desktop
 
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.PixelFormat
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
@@ -38,16 +39,42 @@ import androidx.activity.ComponentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import com.wmqc.miroot.rear.AppProjectionDisplayPrefs
 import com.wmqc.miroot.rear.RearAppLaunchService
-import com.wmqc.miroot.rear.OfficialSubscreenMiRootProjectionSession
+import com.wmqc.miroot.lyrics.RearScreenWakeManager
+import com.wmqc.miroot.lyrics.RearScreenWakeService
 import com.wmqc.miroot.rear.RearAssistPrefs
+import com.wmqc.miroot.rear.RearMirootProjectionLifecycle
 import com.wmqc.miroot.rear.RearSwitchKeeperService
+import android.os.Handler
+import android.os.Looper
 import com.wmqc.miroot.BuildConfig
 import com.wmqc.miroot.RearDisplayInputHelper
 import com.wmqc.miroot.R
 import com.wmqc.miroot.lyrics.LogHelper
+import com.wmqc.miroot.lyrics.RootTaskServiceConnector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
+
+/**
+ * 背屏桌面 → [RearAppLaunchService] 交接：桌面 [onDestroy] 勿立刻向 [RearSwitchKeeperService] 发
+ * [RearSwitchKeeperService.ACTION_RELEASE_MONITOR_IF_MATCH]，否则 Keeper 仍监控桌面 task 时会误走
+ * [RearSwitchKeeperService.performUnifiedExit]，投屏被立刻收口。由启动服务在条末 [end] 清除标志。
+ */
+internal object RearDesktopToAppLaunchHandoff {
+    private val active = AtomicBoolean(false)
+
+    fun begin() {
+        active.set(true)
+    }
+
+    fun end() {
+        active.set(false)
+    }
+
+    fun shouldSkipKeeperRelease(): Boolean = active.get()
+}
 
 /**
  * 背屏应用桌面。设计基准约 **976×596**；左侧至少预留 [REAR_DESKTOP_SAFE_LEFT_PX]（277px）避让摄像头，
@@ -80,9 +107,75 @@ class RearScreenDesktopActivity : ComponentActivity() {
     /** 本 Activity 对应 Keeper 监控 key（pkg:taskId）；用于退出时仅释放本会话。 */
     private var rearDesktopKeeperMonitorKey: String? = null
 
+    private var keepScreenOnPrefsListener: SharedPreferences.OnSharedPreferenceChangeListener? = null
+
+    private var desktopContentInflated = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var rearUiInitPollRunnable: Runnable? = null
+    private var rearUiInitPollAttempts = 0
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        @Suppress("DEPRECATION")
+        overridePendingTransition(0, 0)
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            RearMirootProjectionLifecycle.getDisplayIdSafe(this) == Display.DEFAULT_DISPLAY
+        ) {
+            LogHelper.d(TAG, "在主屏启动，透明占位等待迁往背屏")
+            RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(
+                this,
+                RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_TRANSPARENT_PLACEHOLDER,
+            )
+            schedulePollRearDesktopUiInit()
+            return
+        }
+
+        inflateDesktopContentOnRear()
+    }
+
+    private fun schedulePollRearDesktopUiInit() {
+        cancelRearDesktopUiInitPoll()
+        rearUiInitPollAttempts = 0
+        rearUiInitPollRunnable = Runnable { pollRearDesktopUiInitStep() }
+        mainHandler.post(rearUiInitPollRunnable!!)
+    }
+
+    private fun cancelRearDesktopUiInitPoll() {
+        rearUiInitPollRunnable?.let { mainHandler.removeCallbacks(it) }
+        rearUiInitPollRunnable = null
+        rearUiInitPollAttempts = 0
+    }
+
+    private fun pollRearDesktopUiInitStep() {
+        rearUiInitPollRunnable = null
+        if (isFinishing || isDestroyed) return
+        if (desktopContentInflated) return
+        if (RearMirootProjectionLifecycle.getDisplayIdSafe(this) == REAR_DISPLAY_ID) {
+            inflateDesktopContentOnRear()
+            return
+        }
+        rearUiInitPollAttempts++
+        if (rearUiInitPollAttempts < RearMirootProjectionLifecycle.REAR_UI_INIT_POLL_MAX_ATTEMPTS) {
+            rearUiInitPollRunnable = Runnable { pollRearDesktopUiInitStep() }
+            mainHandler.postDelayed(
+                rearUiInitPollRunnable!!,
+                RearMirootProjectionLifecycle.REAR_UI_INIT_POLL_INTERVAL_MS,
+            )
+        } else {
+            LogHelper.w(TAG, "迁屏轮询超时仍未到背屏")
+        }
+    }
+
+    private fun inflateDesktopContentOnRear() {
+        if (desktopContentInflated) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            RearMirootProjectionLifecycle.getDisplayIdSafe(this) != REAR_DISPLAY_ID
+        ) {
+            return
+        }
+        desktopContentInflated = true
+        cancelRearDesktopUiInitPoll()
         applyRearWindowFlags()
         window.setFormat(PixelFormat.OPAQUE)
         window.setBackgroundDrawableResource(android.R.color.black)
@@ -124,8 +217,57 @@ class RearScreenDesktopActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // am start --display 1 / 迁屏过程中系统可能短暂打上 NOT_TOUCHABLE 等；resume 再清一次，列表拖动手势才能稳定进来。
+        val displayId =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                RearMirootProjectionLifecycle.getDisplayIdSafe(this)
+            } else {
+                REAR_DISPLAY_ID
+            }
+        val mainMode =
+            RearMirootProjectionLifecycle.resolveMainDisplayProjectionMode(
+                displayId,
+                false,
+                desktopContentInflated,
+            )
+        if (RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode)) {
+            if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
+                LogHelper.w(TAG, "主屏禁止展示背屏桌面 UI，结束")
+                finish()
+            } else if (!desktopContentInflated) {
+                schedulePollRearDesktopUiInit()
+            }
+            return
+        }
         RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this)
+        updateRearKeepScreenOnWindowFlag()
+        if (!desktopContentInflated && displayId == REAR_DISPLAY_ID) {
+            inflateDesktopContentOnRear()
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val displayId = RearMirootProjectionLifecycle.getDisplayIdSafe(this)
+            val mainMode =
+                RearMirootProjectionLifecycle.resolveMainDisplayProjectionMode(
+                    displayId,
+                    false,
+                    desktopContentInflated,
+                )
+            if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
+                RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode)
+                finish()
+                return
+            }
+            if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_TRANSPARENT_PLACEHOLDER) {
+                RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode)
+                return
+            }
+            if (displayId == REAR_DISPLAY_ID && !desktopContentInflated) {
+                inflateDesktopContentOnRear()
+            }
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -136,6 +278,9 @@ class RearScreenDesktopActivity : ComponentActivity() {
     }
 
     override fun finish() {
+        RearMirootProjectionLifecycle.sendMainDisplayHomeBeforeProjectionEnd(
+            RootTaskServiceConnector.getIfConnected(),
+        )
         super.finish()
         @Suppress("DEPRECATION")
         overridePendingTransition(0, 0)
@@ -143,12 +288,21 @@ class RearScreenDesktopActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        registerKeepScreenOnPrefsListener()
+        applyDesktopKeepScreenWakeFromPrefs()
         startRearDesktopKeeperSessionIfNeeded()
     }
 
     override fun onDestroy() {
-        releaseRearDesktopKeeperSessionIfNeeded()
-        OfficialSubscreenMiRootProjectionSession.release(applicationContext, null)
+        cancelRearDesktopUiInitPoll()
+        unregisterKeepScreenOnPrefsListener()
+        stopDesktopWakeService()
+        if (!RearDesktopToAppLaunchHandoff.shouldSkipKeeperRelease()) {
+            releaseRearDesktopKeeperSessionIfNeeded()
+        }
+        // 勿在此处 OfficialSubscreenMiRootProjectionSession.release：
+        // 从桌面 am start 其它应用到背屏时本 Activity 会销毁，若此时减引用并恢复官方背屏，
+        // 会立刻抢占刚启动的应用，表现为「投屏马上结束」。收口改由 RearSwitchKeeperService.performUnifiedExit 统一 release。
         super.onDestroy()
     }
 
@@ -234,6 +388,9 @@ class RearScreenDesktopActivity : ComponentActivity() {
         RearDesktopRepository.invalidateCache()
         try {
             val app = applicationContext
+            // 目标应用将占据背屏：桌面侧先释放 Wake 注册，避免 Keeper 收口后仍残留常亮/投屏通知
+            stopDesktopWakeService()
+            RearDesktopToAppLaunchHandoff.begin()
             val svc =
                 Intent(app, RearAppLaunchService::class.java).apply {
                     action = RearAppLaunchService.ACTION_LAUNCH_APP_ON_REAR
@@ -241,18 +398,90 @@ class RearScreenDesktopActivity : ComponentActivity() {
                     putExtra(RearAppLaunchService.EXTRA_LAUNCH_FROM_REAR_DESKTOP, true)
                 }
             app.startService(svc)
+            if (AppProjectionDisplayPrefs.getConfig(app, packageName) != null) {
+                finish()
+            }
         } catch (e: Exception) {
             LogHelper.w(TAG, "rear launch service failed: $packageName — ${e.message}")
         }
     }
 
+    private fun registerKeepScreenOnPrefsListener() {
+        if (keepScreenOnPrefsListener != null) return
+        try {
+            val prefs = RearAssistPrefs.prefs(this)
+            val listener =
+                SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                    if (RearAssistPrefs.KEY_KEEP_SCREEN_ON == key) {
+                        window.decorView.post {
+                            applyDesktopKeepScreenWakeFromPrefs()
+                            updateRearKeepScreenOnWindowFlag()
+                        }
+                    }
+                }
+            keepScreenOnPrefsListener = listener
+            prefs.registerOnSharedPreferenceChangeListener(listener)
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "register keep-screen prefs: ${e.message}")
+            keepScreenOnPrefsListener = null
+        }
+    }
+
+    private fun unregisterKeepScreenOnPrefsListener() {
+        val l = keepScreenOnPrefsListener ?: return
+        keepScreenOnPrefsListener = null
+        try {
+            RearAssistPrefs.prefs(this).unregisterOnSharedPreferenceChangeListener(l)
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * 与功能页「投屏常亮」一致：开启时注册 [RearScreenWakeService]；关闭时注销（不弹音乐/车控专用仅通知）。
+     */
+    private fun applyDesktopKeepScreenWakeFromPrefs() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        if (getCurrentDisplayIdSafe() != REAR_DISPLAY_ID || isFinishing) return
+        val keepOn = RearAssistPrefs.isKeepScreenOnEnabled(this)
+        try {
+            if (keepOn) {
+                RearScreenWakeManager.getInstance()
+                    .startWakeService(applicationContext, RearScreenDesktopActivity::class.java)
+                RearScreenWakeService.requestNotificationRefresh(this)
+            } else {
+                RearScreenWakeManager.getInstance()
+                    .stopWakeService(applicationContext, RearScreenDesktopActivity::class.java)
+                if (!RearScreenWakeManager.getInstance().hasRegisteredActivities()) {
+                    applicationContext.stopService(
+                        Intent(applicationContext, RearScreenWakeService::class.java),
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "desktop wake prefs: ${e.message}")
+        }
+        updateRearKeepScreenOnWindowFlag()
+    }
+
+    private fun stopDesktopWakeService() {
+        try {
+            RearScreenWakeManager.getInstance()
+                .stopWakeService(this, RearScreenDesktopActivity::class.java)
+            if (!RearScreenWakeManager.getInstance().hasRegisteredActivities()) {
+                applicationContext.stopService(
+                    Intent(applicationContext, RearScreenWakeService::class.java),
+                )
+            }
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "stop desktop wake: ${e.message}")
+        }
+    }
+
     private fun applyRearWindowFlags() {
         RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this)
+        updateRearKeepScreenOnWindowFlag()
         @Suppress("DEPRECATION")
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED,
-        )
+        window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
         }
@@ -261,6 +490,15 @@ class RearScreenDesktopActivity : ComponentActivity() {
             lp.layoutInDisplayCutoutMode =
                 WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
             window.attributes = lp
+        }
+    }
+
+    private fun updateRearKeepScreenOnWindowFlag() {
+        @Suppress("DEPRECATION")
+        if (RearAssistPrefs.isKeepScreenOnEnabled(this)) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
 

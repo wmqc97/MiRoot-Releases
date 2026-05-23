@@ -13,18 +13,21 @@
 
 package com.wmqc.miroot.lyrics;
 
+import com.wmqc.miroot.display.MainDisplayUi;
+
 import android.app.IntentService;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.ServiceConnection;
-import android.os.IBinder;
 import android.os.PowerManager;
 import android.widget.Toast;
 import android.os.Handler;
 import android.os.Looper;
 
 import com.wmqc.miroot.MainActivity;
+import com.wmqc.miroot.R;
+import com.wmqc.miroot.license.OfflineActivationRepository;
+import com.wmqc.miroot.rear.RearActivityLaunchSpec;
+import com.wmqc.miroot.rear.RearProjectionLaunchSequence;
 
 /**
  * 音乐投屏服务
@@ -36,19 +39,6 @@ public class MusicProjectionService extends IntentService {
     private ITaskService taskService;
     private PowerManager.WakeLock wakeLock;
 
-    private final ServiceConnection taskServiceConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName name, IBinder binder) {
-            taskService = ITaskService.Stub.asInterface(binder);
-            LogHelper.d(TAG, "✓ TaskService已连接");
-        }
-
-        @Override
-        public void onServiceDisconnected(ComponentName name) {
-            taskService = null;
-        }
-    };
-
     public MusicProjectionService() {
         super("MusicProjectionService");
     }
@@ -57,9 +47,7 @@ public class MusicProjectionService extends IntentService {
     public void onCreate() {
         super.onCreate();
         LogHelper.d(TAG, "🔵 MusicProjectionService onCreate");
-        // 立即绑定TaskService，给onHandleIntent更多时间等待连接
-        // 注意：IntentService是单线程的，不能在这里sleep，否则会阻塞后续操作
-        bindTaskService();
+        RootTaskServiceConnector.prewarm(this);
     }
 
     @Override
@@ -93,7 +81,12 @@ public class MusicProjectionService extends IntentService {
                 }
 
                 if (LyricsIntents.VALUE_MUSIC_PROJECTION_OP_START.equalsIgnoreCase(actionParam)) {
-                    startMusicProjection();
+                    if (!OfflineActivationRepository.INSTANCE.isActivated(getApplicationContext())) {
+                        showToast(getString(R.string.activation_required_to_use));
+                        LogHelper.w(TAG, "🎵 未激活：拒绝启动音乐投屏");
+                        return;
+                    }
+                    startMusicProjection(intent);
                 } else if (LyricsIntents.VALUE_MUSIC_PROJECTION_OP_STOP.equalsIgnoreCase(actionParam)) {
                     stopMusicProjection();
                 } else {
@@ -112,66 +105,27 @@ public class MusicProjectionService extends IntentService {
     }
 
     private boolean ensureTaskServiceConnected() {
+        taskService = RootTaskServiceConnector.ensureConnected(this, 2500L);
         if (taskService != null) {
             LogHelper.d(TAG, "✅ TaskService已连接");
             return true;
         }
-
-        try {
-            LogHelper.d(TAG, "🔄 TaskService未连接，开始绑定 RootTaskService...");
-            // onCreate中已经绑定了，如果还没连接，再绑定一次（可能onCreate中的绑定还没完成）
-            bindTaskService();
-
-            // 等待连接（广播时应用可能在后台，Root 提权可能稍慢，延长等待）
-            int attempts = 0;
-            int maxAttempts = 20; // 20 x 250ms = 5s，兼容锁屏/后台广播启动
-            while (taskService == null && attempts < maxAttempts) {
-                Thread.sleep(250);
-                attempts++;
-                if (taskService == null && attempts % 4 == 0) {
-                    LogHelper.d(TAG, "⏳ 等待TaskService连接中... (尝试 " + attempts + "/" + maxAttempts + ")");
-                }
-            }
-
-            if (taskService != null) {
-                LogHelper.d(TAG, "✅ TaskService连接成功 (尝试 " + attempts + "/" + maxAttempts + ")");
-                return true;
-            } else {
-                LogHelper.e(TAG, "❌ TaskService连接超时 (尝试 " + attempts + "/" + maxAttempts + ")");
-                return false;
-            }
-        } catch (Exception e) {
-            LogHelper.e(TAG, "❌ TaskService重连失败", e);
-            return false;
-        }
-    }
-
-    private void bindTaskService() {
-        if (taskService != null) {
-            LogHelper.d(TAG, "ℹ️ TaskService已绑定，跳过");
-            return;
-        }
-
-        try {
-            LogHelper.d(TAG, "🔄 开始绑定 RootTaskService...");
-            Intent intent = new Intent(this, RootTaskService.class);
-            bindService(intent, taskServiceConnection, Context.BIND_AUTO_CREATE);
-            LogHelper.d(TAG, "✅ 已调用 bindService 绑定 RootTaskService，等待连接回调...");
-        } catch (Exception e) {
-            LogHelper.e(TAG, "❌ 绑定 RootTaskService 失败", e);
-        }
+        LogHelper.e(TAG, "❌ TaskService连接超时");
+        return false;
     }
 
     /**
-     * 启动音乐投屏：
-     * {@link ProjectionHelper#startMusicProjection} 使用 {@code am start --display 1}；
-     * 若已有实例卡在主屏，则 {@code am display move-stack} 迁到背屏。
+     * 启动音乐投屏。
+     * 音乐页「开始投屏」带 {@link LyricsIntents#EXTRA_MUSIC_PROJECTION_DIRECT_REAR_ONLY}，仅背屏直启；
+     * 广播/自动投屏不带该 Extra，走直启 + 主屏占位回退。
      */
-    private void startMusicProjection() {
+    private void startMusicProjection(Intent intent) {
+        boolean directRearOnly = intent != null
+            && intent.getBooleanExtra(LyricsIntents.EXTRA_MUSIC_PROJECTION_DIRECT_REAR_ONLY, false);
         try {
             RearScreenLyricsActivity existingActivity = RearScreenLyricsActivity.getCurrentInstance();
-            int displayId = 0;
-            if (existingActivity != null) {
+            if (existingActivity != null && !existingActivity.isFinishing()) {
+                int displayId = 0;
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                     try {
                         displayId = existingActivity.getDisplay().getDisplayId();
@@ -180,84 +134,26 @@ public class MusicProjectionService extends IntentService {
                     }
                 }
                 if (displayId == 1) {
-                    LogHelper.d(TAG, "⚠ 音乐投屏已在背屏运行");
-                    return;
-                }
-            }
-
-            if (existingActivity != null && displayId == 0) {
-                try {
-                    // 音乐投屏：已注释 disableSubScreenLauncher；仅保留背屏唤醒（与 ProjectionHelper 步骤 2 一致）
-                    LogHelper.d(TAG, "move-stack 路径: 已跳过屏蔽官方手势，仅唤醒背屏");
-                    // try {
-                    //     taskService.disableSubScreenLauncher();
-                    // } catch (Exception e) {
-                    //     LogHelper.w(TAG, "disableSubScreenLauncher 异常（继续 move-stack）: " + e.getMessage());
-                    // }
-                    // try {
-                    //     Thread.sleep(100);
-                    // } catch (InterruptedException e) {
-                    //     Thread.currentThread().interrupt();
-                    // }
                     try {
-                        taskService.executeShellCommand("input -d 1 keyevent KEYCODE_WAKEUP");
-                    } catch (Exception e) {
-                        LogHelper.w(TAG, "背屏唤醒命令失败（可忽略）: " + e.getMessage());
-                    }
-
-                    LogHelper.d(TAG, "🔍 音乐投屏在主屏运行，尝试获取 stackId 并用 am display move-stack 移到背屏");
-                    int stackId = ProjectionHelper.getMusicProjectionStackId(taskService);
-                    if (stackId != -1) {
-                        String moveCmd = "am display move-stack " + stackId + " 1";
-                        boolean moveSuccess = taskService.executeShellCommand(moveCmd);
-                        if (moveSuccess) {
-                            LogHelper.d(TAG, "✅ 音乐投屏已移动到背屏（am display move-stack）");
-
-                            try {
-                                Thread.sleep(800);
-
-                                RearScreenLyricsActivity activity = RearScreenLyricsActivity.getCurrentInstance();
-                                if (activity != null) {
-                                    try {
-                                        java.lang.reflect.Field lyricsViewField = RearScreenLyricsActivity.class.getDeclaredField("lyricsView");
-                                        lyricsViewField.setAccessible(true);
-                                        Object lyricsView = lyricsViewField.get(activity);
-                                        if (lyricsView == null) {
-                                            LogHelper.w(TAG, "⚠️ UI仍未初始化，可能需要更长时间");
-                                        } else {
-                                            LogHelper.d(TAG, "✅ UI已初始化");
-                                        }
-                                    } catch (Exception e) {
-                                        LogHelper.w(TAG, "⚠️ 检查UI状态失败: " + e.getMessage());
-                                    }
-                                }
-                            } catch (InterruptedException e) {
-                                LogHelper.w(TAG, "等待被中断", e);
-                            }
-
-                            // 音乐投屏：已注释 — 原步骤 5 triggerLyricsGestureDisableAfterMove
-                            // ProjectionHelper.triggerLyricsGestureDisableAfterMove(3000);
+                        if (existingActivity.hasActiveLyricsUI()) {
+                            LogHelper.d(TAG, "⚠ 音乐投屏已在背屏运行");
                             return;
-                        } else {
-                            LogHelper.w(TAG, "⚠️ am display move-stack 执行失败，尝试完整启动流程");
                         }
-                    } else {
-                        LogHelper.w(TAG, "⚠️ 未能解析 stackId，尝试完整启动流程");
+                    } catch (Exception ignored) {
+                        LogHelper.d(TAG, "⚠ 音乐投屏已在背屏运行");
+                        return;
                     }
-                } catch (Exception e) {
-                    LogHelper.e(TAG, "❌ 检查或移动音乐投屏时发生异常", e);
                 }
             }
 
-            boolean success = ProjectionHelper.startMusicProjection(taskService, this);
-            if (success) {
-                // 已移除弹窗提示
-            } else {
-                // 已移除弹窗提示
+            boolean success = ProjectionHelper.startMusicProjection(taskService, this, directRearOnly);
+            if (!success) {
+                if (directRearOnly) {
+                    showToast(getString(R.string.music_projection_direct_rear_failed));
+                }
             }
         } catch (Exception e) {
             LogHelper.e(TAG, "❌ 启动音乐投屏失败", e);
-            // 已移除弹窗提示
         }
     }
 
@@ -389,7 +285,7 @@ public class MusicProjectionService extends IntentService {
      */
     private void showToast(String message) {
         new Handler(Looper.getMainLooper()).post(() -> {
-            Toast.makeText(getApplicationContext(), message, Toast.LENGTH_SHORT).show();
+            MainDisplayUi.showToast(getApplicationContext(), message, Toast.LENGTH_SHORT);
         });
     }
 
@@ -400,15 +296,7 @@ public class MusicProjectionService extends IntentService {
         releaseWakeLock();
         super.onDestroy();
 
-        if (taskService != null) {
-            try {
-                unbindService(taskServiceConnection);
-                LogHelper.d(TAG, "✓ TaskService已解绑（RootTaskService）");
-            } catch (Exception e) {
-                LogHelper.e(TAG, "解绑TaskService失败", e);
-            }
-            taskService = null;
-        }
+        taskService = null;
         LogHelper.d(TAG, "🔵 MusicProjectionService 已销毁");
     }
 }

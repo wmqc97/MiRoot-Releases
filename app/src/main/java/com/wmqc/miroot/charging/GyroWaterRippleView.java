@@ -32,10 +32,20 @@ import java.util.Random;
 public class GyroWaterRippleView extends View implements SensorEventListener {
 
     private static final long RIPPLE_SPAWN_NS = 1_800_000_000L;
-    private static final long RIPPLE_SPAWN_NS_ACTIVE = 650_000_000L;
+    /** 激烈晃动时略拉长间隔，配合平滑后的运动幅度，减轻波纹刷屏感 */
+    private static final long RIPPLE_SPAWN_NS_ACTIVE = 720_000_000L;
+    /** 帧率节流：背屏充电动画无需满 60fps，降低主线程压力与掉帧风险 */
+    private static final long FRAME_INTERVAL_NS = 33_333_333L; // ~30fps
+    /** 涟漪用陀螺仪合幅度低通（与液面 wave 解耦，避免传感器毛刺导致波纹抖动） */
+    private static final float GYRO_MAG_RIPPLE_LPF = 0.82f;
+    /** 滞回：进入「高频生漪」略高、退出略低，避免在阈值附近来回切换 */
+    private static final float RIPPLE_HIGH_MOTION_ENTER = 1.95f;
+    private static final float RIPPLE_HIGH_MOTION_EXIT = 1.35f;
     private static final float GYRO_LPF = 0.72f;
     private static final float ACCEL_LPF = 0.88f;
     private static final float LIQUID_DECAY = 0.988f;
+    /** 物理步长基准：以 60fps（16.667ms）为一帧做时间归一化，避免帧率波动引起观感抖动 */
+    private static final float BASE_DT_SEC = 1f / 60f;
     /** 重力估计对液面目标偏移的跟随强度 */
     private static final float GRAVITY_SETTLE = 0.06f;
     private static final int MAX_RIPPLES = 96;
@@ -68,6 +78,10 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
     private long lastRippleNs;
     private long lastTickNs;
     private long lastTouchRippleMs;
+    /** 用于涟漪生成与衰减的平滑陀螺仪合幅度 */
+    private float smoothGyroMagForRipples;
+    /** 是否处于高频自动生漪模式（滞回，与 {@link #smoothGyroMagForRipples} 配合） */
+    private boolean rippleHighMotionMode;
 
     private SensorManager sensorManager;
     private Sensor gyroscope;
@@ -75,14 +89,32 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
     private boolean choreographerRunning;
     private boolean sensorsRegistered;
 
+    private int dpStrokeThin;
+    private int dpStrokeThick;
+
+    private long lastFrameRenderNs;
+
+    // 渐变 shader 缓存：仅在关键参数变化（尺寸/配色/渐变起点量化后）时重建，避免每帧分配对象导致 GC 抖动
+    private LinearGradient cachedShader;
+    private int cachedShaderHeight;
+    private int cachedShaderTopQ;
+    private int cachedShaderTopArgb;
+    private int cachedShaderBotArgb;
+
     private final Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
         @Override
         public void doFrame(long frameTimeNanos) {
             if (!choreographerRunning) {
                 return;
             }
-            tick(frameTimeNanos);
-            invalidate();
+            // 节流：减少无谓的 draw 调度；tick 仍用真实帧时间推进，保持动画一致性
+            if (lastFrameRenderNs == 0L || frameTimeNanos - lastFrameRenderNs >= FRAME_INTERVAL_NS) {
+                lastFrameRenderNs = frameTimeNanos;
+                tick(frameTimeNanos);
+                invalidate();
+            } else {
+                tick(frameTimeNanos);
+            }
             Choreographer.getInstance().postFrameCallback(this);
         }
     };
@@ -115,7 +147,9 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         // 无背景时系统可能标记为不绘制，onDraw 不执行 → 整屏黑
         setWillNotDraw(false);
         ripplePaint.setStyle(Paint.Style.STROKE);
-        ripplePaint.setStrokeWidth(dp(2.5f));
+        dpStrokeThin = dp(2.5f);
+        dpStrokeThick = dp(3f);
+        ripplePaint.setStrokeWidth(dpStrokeThin);
         ripplePaint.setStrokeCap(Paint.Cap.ROUND);
         // 背屏/部分机型上 HARDWARE + Path/Shader 可能整块不合成；软件层更稳
         setLayerType(LAYER_TYPE_SOFTWARE, null);
@@ -171,6 +205,11 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         unregisterSensors();
         sensorManager = null;
         lastTickNs = 0L;
+        lastFrameRenderNs = 0L;
+        smoothGyroMagForRipples = 0f;
+        rippleHighMotionMode = false;
+        cachedShader = null;
+        cachedShaderHeight = 0;
         super.onDetachedFromWindow();
     }
 
@@ -219,6 +258,7 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         }
         choreographerRunning = true;
         lastRippleNs = System.nanoTime();
+        lastFrameRenderNs = 0L;
         Choreographer.getInstance().postFrameCallback(frameCallback);
     }
 
@@ -248,11 +288,19 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
             : 0.016f;
         lastTickNs = frameTimeNanos;
         dt = Math.min(Math.max(dt, 0.005f), 0.048f);
+        float frameScale = dt / BASE_DT_SEC;
 
         float gyroMag = Math.abs(smoothGx) + Math.abs(smoothGy) + Math.abs(smoothGz);
-        wavePhase += 0.055f + gyroSpinImpulse * 0.06f + gyroMag * 0.14f;
-        gyroSpinImpulse *= 0.9f;
-        gyroSpinImpulse += smoothGz * 0.22f;
+        smoothGyroMagForRipples =
+            smoothGyroMagForRipples * GYRO_MAG_RIPPLE_LPF + gyroMag * (1f - GYRO_MAG_RIPPLE_LPF);
+        if (smoothGyroMagForRipples > RIPPLE_HIGH_MOTION_ENTER) {
+            rippleHighMotionMode = true;
+        } else if (smoothGyroMagForRipples < RIPPLE_HIGH_MOTION_EXIT) {
+            rippleHighMotionMode = false;
+        }
+        wavePhase += (0.055f + gyroSpinImpulse * 0.06f + gyroMag * 0.14f) * frameScale;
+        gyroSpinImpulse *= (float) Math.pow(0.9f, frameScale);
+        gyroSpinImpulse += smoothGz * 0.22f * frameScale;
         if (gyroSpinImpulse > 3.5f) {
             gyroSpinImpulse = 3.5f;
         } else if (gyroSpinImpulse < -3.5f) {
@@ -270,15 +318,17 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
 
         if (w > 0f && h > 0f) {
             liquidShiftX += smoothGy * dt * 420f;
-            liquidShiftX += (gravityTargetShiftX - liquidShiftX) * GRAVITY_SETTLE;
-            liquidShiftY += (0f - liquidShiftY) * GRAVITY_SETTLE;
-            liquidShiftX *= LIQUID_DECAY;
-            liquidShiftY *= LIQUID_DECAY;
+            float settle = 1f - (float) Math.pow(1f - GRAVITY_SETTLE, frameScale);
+            liquidShiftX += (gravityTargetShiftX - liquidShiftX) * settle;
+            liquidShiftY += (0f - liquidShiftY) * settle;
+            float liquidDecay = (float) Math.pow(LIQUID_DECAY, frameScale);
+            liquidShiftX *= liquidDecay;
+            liquidShiftY *= liquidDecay;
             float maxX = w * 0.22f;
             liquidShiftX = clamp(liquidShiftX, -maxX, maxX);
         }
 
-        long spawnInterval = gyroMag > 1.8f ? RIPPLE_SPAWN_NS_ACTIVE : RIPPLE_SPAWN_NS;
+        long spawnInterval = rippleHighMotionMode ? RIPPLE_SPAWN_NS_ACTIVE : RIPPLE_SPAWN_NS;
         if (frameTimeNanos - lastRippleNs >= spawnInterval) {
             lastRippleNs = frameTimeNanos;
             spawnAmbientRipple();
@@ -299,8 +349,8 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
             Ripple r = it.next();
             r.cx += driftX;
             r.cy += driftY;
-            r.radius += Math.max(w, h) * (0.0042f + gyroMag * 0.00035f);
-            r.alpha -= 0.016f + gyroMag * 0.0025f;
+            r.radius += Math.max(w, h) * (0.0042f + smoothGyroMagForRipples * 0.00035f) * frameScale;
+            r.alpha -= (0.016f + smoothGyroMagForRipples * 0.0025f) * frameScale;
             if (r.alpha <= 0.02f) {
                 it.remove();
             }
@@ -345,7 +395,12 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         float cy = marginY + random.nextFloat() * (h - 2f * marginY) + biasY;
         cx = clamp(cx, marginX * 0.5f, w - marginX * 0.5f);
         cy = clamp(cy, marginY * 0.5f, h - marginY * 0.5f);
-        spawnRippleAt(cx, cy, 0.52f + Math.min(0.2f, (Math.abs(smoothGx) + Math.abs(smoothGy)) * 0.04f), dp(8f));
+        spawnRippleAt(
+            cx,
+            cy,
+            0.52f + Math.min(0.2f, smoothGyroMagForRipples * 0.07f),
+            dp(8f)
+        );
     }
 
     private void spawnRippleAt(float cx, float cy, float alpha, float startRadius) {
@@ -426,20 +481,32 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         boolean greenLiquid = batteryPercentForTint > TINT_GREEN_ABOVE_PERCENT;
         int gradTopArgb = greenLiquid ? 0xF030FF8A : 0xF0FFCC80;
         int gradBotArgb = greenLiquid ? 0xFF008F52 : 0xFF9E4A0E;
-        Shader shader = new LinearGradient(
-            0, gradTop, 0, h,
-            gradTopArgb,
-            gradBotArgb,
-            Shader.TileMode.CLAMP
-        );
-        waterPaint.setShader(shader);
+        // 量化渐变起点，避免 fillLevel 微抖导致每帧重建 shader
+        int gradTopQ = Math.round(gradTop / 4f) * 4; // 4px 阶梯
+        if (cachedShader == null
+            || cachedShaderHeight != h
+            || cachedShaderTopQ != gradTopQ
+            || cachedShaderTopArgb != gradTopArgb
+            || cachedShaderBotArgb != gradBotArgb) {
+            cachedShaderHeight = h;
+            cachedShaderTopQ = gradTopQ;
+            cachedShaderTopArgb = gradTopArgb;
+            cachedShaderBotArgb = gradBotArgb;
+            cachedShader = new LinearGradient(
+                0, gradTopQ, 0, h,
+                gradTopArgb,
+                gradBotArgb,
+                Shader.TileMode.CLAMP
+            );
+        }
+        waterPaint.setShader(cachedShader);
         canvas.drawPath(waterPath, waterPaint);
         waterPaint.setShader(null);
 
         int rr = greenLiquid ? 55 : 255;
         int rg = greenLiquid ? 255 : 195;
         int rb = greenLiquid ? 140 : 115;
-        ripplePaint.setStrokeWidth(dp(3f));
+        ripplePaint.setStrokeWidth(dpStrokeThick);
         for (Ripple r : ripples) {
             int a = clamp255((int) (r.alpha * 255f));
             ripplePaint.setColor(Color.argb(a, rr, rg, rb));
@@ -450,6 +517,8 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+        cachedShader = null;
+        cachedShaderHeight = 0;
         if (w <= 0 || h <= 0 || (oldw > 0 && oldh > 0)) {
             return;
         }
