@@ -5,8 +5,8 @@
 <h1 align="center">MiRoot Releases</h1>
 
 <p align="center">
-  <strong>小米汽车副屏增强工具 — 正式版 APK 发布仓库</strong><br>
-  Xposed 模块 · Android 车载 · 副屏投屏 · 歌词投影 · 车控增强
+  <strong>小米 17 Pro 系列手机背屏增强工具 — 正式版 APK 发布仓库</strong><br>
+  Xposed 模块 · 背屏投屏 · 歌词投影 · 车控增强
 </p>
 
 <p align="center">
@@ -22,7 +22,7 @@
 
 ## 关于
 
-本仓库托管 [MiRoot](https://github.com/wmqc97/MiRoot) 的正式版 APK 安装包。源代码及开发文档位于主仓库。
+本仓库托管 [MiRoot](https://github.com/wmqc97/MiRoot) 的正式版 APK 安装包。MiRoot 是一个基于 Xposed 框架的背屏增强模块，专为小米 17 Pro 等配备背屏的手机设计。源代码及开发文档位于主仓库。
 
 ## 下载
 
