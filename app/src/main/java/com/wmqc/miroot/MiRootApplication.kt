@@ -12,7 +12,6 @@ import com.wmqc.miroot.BuildConfig
 import com.wmqc.miroot.lyrics.LyricsWordTokenizer
 import com.wmqc.miroot.lyrics.RootTaskServiceConnector
 import com.wmqc.miroot.lyrics.SuperLyricApi
-import com.wmqc.miroot.update.GitHubUpdateChecker
 import java.io.ByteArrayInputStream
 import java.security.MessageDigest
 import java.security.cert.CertificateFactory
@@ -22,12 +21,15 @@ class MiRootApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // 修复：限制 Dispatchers.IO 最大线程数，防止 CoroutineScheduler 创建过多工作线程，
+        // 导致 pthread_create (1040KB stack) failed（虚拟内存地址空间耗尽）。
+        // 必须在首次访问 Dispatchers.IO 前设置：本项目 onCreate 内所有初始化均不依赖 Dispatchers.IO，
+        // 故此处安全。默认值 max(64, cores) 在高核数与多 raw thread 并发场景下易触发 native OOM。
+        System.setProperty("kotlinx.coroutines.io.parallelism", "16")
         LyricsWordTokenizer.initialize(this)
         RootTaskServiceConnector.prewarm(this)
         // 与 HChenX/SuperLyricApi 接收端一致：进程启动即注册 Binder，减少首句逐字等待。
         SuperLyricApi.ensureReceiverRegistered()
-        // GitHub 私仓 Release 访问令牌注入（local.properties → BuildConfig → UpdateChecker）。
-        GitHubUpdateChecker.init(BuildConfig.GITHUB_TOKEN.takeIf { it.isNotBlank() })
         verifyReleaseSignatureOrExit()
         enforceNoProxyOrVpnOrExit()
     }

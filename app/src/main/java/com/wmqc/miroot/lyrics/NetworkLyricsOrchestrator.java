@@ -11,6 +11,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 智能网络歌词编排：按 App 优先级串行尝试主源（qsgc / 酷狗），全部失败后再走开放兜底。
@@ -112,7 +114,7 @@ final class NetworkLyricsOrchestrator {
             return payload;
         }
 
-        Payload open = fetchOpenFallbackParallel(context, t, a, payload);
+        Payload open = fetchOpenFallbackParallel(context, t, a, payload, strictTitleArtistMatch);
         open.sourcePackage = resolvedPkg;
         open.strategy = strategy;
         if (open.success) {
@@ -150,11 +152,19 @@ final class NetworkLyricsOrchestrator {
                 LyricsAPIClient.LyricsResult qsgc =
                     LyricsAPIClient.searchLyricsFromQsgc(appContext, title, artist);
                 if (isUsable(qsgc)) {
-                    LogHelper.d(TAG, "✅ qsgc 主源命中, 耗时=" + qsgc.costMs + "ms");
-                    return toPayload(qsgc, PROVIDER_QSGC);
+                    if (strictTitleArtistMatch
+                        && !isQsgcLyricsStrictMatch(title, artist, qsgc.lyrics)) {
+                        LogHelper.d(TAG, "🚫 qsgc 严格匹配失败 → 尝试酷狗次源");
+                        qsgcFail = failedPayload(PROVIDER_QSGC,
+                            "严格匹配失败（歌名/歌手元数据不一致）");
+                    } else {
+                        LogHelper.d(TAG, "✅ qsgc 主源命中, 耗时=" + qsgc.costMs + "ms");
+                        return toPayload(qsgc, PROVIDER_QSGC);
+                    }
+                } else {
+                    qsgcFail = failedPayload(PROVIDER_QSGC,
+                        qsgc != null && qsgc.error != null ? qsgc.error : "无结果");
                 }
-                qsgcFail = failedPayload(PROVIDER_QSGC,
-                    qsgc != null && qsgc.error != null ? qsgc.error : "无结果");
             } else {
                 qsgcFail = failedPayload(PROVIDER_QSGC, "歌手为空");
             }
@@ -180,6 +190,13 @@ final class NetworkLyricsOrchestrator {
             LyricsAPIClient.LyricsResult qsgc =
                 LyricsAPIClient.searchLyricsFromQsgc(appContext, title, artist);
             if (isUsable(qsgc)) {
+                if (strictTitleArtistMatch
+                    && !isQsgcLyricsStrictMatch(title, artist, qsgc.lyrics)) {
+                    LogHelper.d(TAG, "🚫 qsgc 次源严格匹配失败");
+                    Payload qsgcFail = failedPayload(PROVIDER_QSGC,
+                        "严格匹配失败（歌名/歌手元数据不一致）");
+                    return joinPrimaryFailures(kugou, qsgcFail);
+                }
                 LogHelper.d(TAG, "✅ qsgc 次源命中（酷狗优先策略）, 耗时=" + qsgc.costMs + "ms");
                 return toPayload(qsgc, PROVIDER_QSGC);
             }
@@ -241,13 +258,15 @@ final class NetworkLyricsOrchestrator {
     private static Payload fetchOpenFallbackParallel(Context context,
                                                      String title,
                                                      String artist,
-                                                     Payload failureSink) {
+                                                     Payload failureSink,
+                                                     boolean strictTitleArtistMatch) {
         List<LyricsAPIClient.LyricsResult> results = new ArrayList<>(2);
         Future<LyricsAPIClient.LyricsResult> lrclibFuture = SECONDARY_EXECUTOR.submit(
             new Callable<LyricsAPIClient.LyricsResult>() {
                 @Override
                 public LyricsAPIClient.LyricsResult call() {
-                    return LyricsAPIClient.searchLyricsFromLrclib(context, title, artist);
+                    return LyricsAPIClient.searchLyricsFromLrclib(
+                        context, title, artist, strictTitleArtistMatch);
                 }
             }
         );
@@ -266,7 +285,12 @@ final class NetworkLyricsOrchestrator {
             results.add(lrclib);
         }
         if (isUsable(lyricsOvh)) {
-            results.add(lyricsOvh);
+            if (strictTitleArtistMatch
+                && !isLyricsOvhStrictMatch(title, artist, lyricsOvh.lyrics)) {
+                LogHelper.d(TAG, "🚫 lyrics.ovh 严格匹配失败，丢弃");
+            } else {
+                results.add(lyricsOvh);
+            }
         }
 
         if (results.isEmpty()) {
@@ -355,6 +379,117 @@ final class NetworkLyricsOrchestrator {
         payload.provider = provider;
         payload.success = true;
         return payload;
+    }
+
+    /** LRC metadata tag pattern: [ti:Title], [ar:Artist] */
+    private static final Pattern LRC_TAG_PATTERN =
+        Pattern.compile("\\[(ti|ar):([^\\]]*)\\]", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * 对 qsgc 返回的 LRC 文本做歌名+歌手严格校验。
+     * qsgc API 不返回结构化元数据，但多数 LRC 内含 [ti:...] / [ar:...] 标签。
+     * 若能解析出元数据且与请求不匹配则拒绝，解析不到则放行（不做假阴性拦截）。
+     */
+    private static boolean isQsgcLyricsStrictMatch(String reqTitle,
+                                                   String reqArtist,
+                                                   String lrcContent) {
+        if (lrcContent == null || lrcContent.isEmpty()) {
+            return false;
+        }
+        String rt = LyricsMatcher.normalize(reqTitle);
+        String ra = LyricsMatcher.normalize(reqArtist);
+        String lrcTitleRaw = "";
+        String lrcArtistRaw = "";
+        String lrcTitle = "";
+        String lrcArtist = "";
+        Matcher m = LRC_TAG_PATTERN.matcher(lrcContent);
+        while (m.find()) {
+            String tag = m.group(1).toLowerCase();
+            String value = m.group(2).trim();
+            if ("ti".equals(tag) && lrcTitle.isEmpty()) {
+                lrcTitleRaw = value;
+                lrcTitle = LyricsMatcher.normalize(value);
+            } else if ("ar".equals(tag) && lrcArtist.isEmpty()) {
+                lrcArtistRaw = value;
+                lrcArtist = LyricsMatcher.normalize(value);
+            }
+        }
+        boolean hasLrcTitle = !lrcTitle.isEmpty();
+        boolean hasLrcArtist = !lrcArtist.isEmpty();
+        if (!hasLrcTitle && !hasLrcArtist) {
+            // 无法校验，放行
+            return true;
+        }
+        if (hasLrcTitle && !rt.isEmpty()) {
+            boolean titleOk = rt.equals(lrcTitle) || rt.contains(lrcTitle) || lrcTitle.contains(rt);
+            if (!titleOk) {
+                LogHelper.w(TAG, "❌ qsgc 歌名不匹配: req=\""
+                    + reqTitle + "\" vs lrc[ti]=\"" + lrcTitleRaw + "\"");
+                return false;
+            }
+        }
+        if (hasLrcArtist && !ra.isEmpty()) {
+            boolean artistOk = ra.equals(lrcArtist) || ra.contains(lrcArtist) || lrcArtist.contains(ra);
+            if (!artistOk) {
+                LogHelper.w(TAG, "❌ qsgc 歌手不匹配: req=\""
+                    + reqArtist + "\" vs lrc[ar]=\"" + lrcArtistRaw + "\"");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * lyrics.ovh 严格校验：先尝试 LRC 元数据标签，无标签时退化为标题文本出现检查。
+     */
+    private static boolean isLyricsOvhStrictMatch(String reqTitle,
+                                                  String reqArtist,
+                                                  String lyrics) {
+        if (lyrics == null || lyrics.isEmpty()) {
+            return false;
+        }
+        // 先尝试 LRC 元数据标签
+        String lrcTitle = "";
+        String lrcArtist = "";
+        Matcher m = LRC_TAG_PATTERN.matcher(lyrics);
+        while (m.find()) {
+            String tag = m.group(1).toLowerCase();
+            String value = m.group(2).trim();
+            if ("ti".equals(tag) && lrcTitle.isEmpty()) {
+                lrcTitle = LyricsMatcher.normalize(value);
+            } else if ("ar".equals(tag) && lrcArtist.isEmpty()) {
+                lrcArtist = LyricsMatcher.normalize(value);
+            }
+        }
+        if (!lrcTitle.isEmpty() || !lrcArtist.isEmpty()) {
+            // 有 LRC 标签，走标签比对
+            if (!lrcTitle.isEmpty()) {
+                String rt = LyricsMatcher.normalize(reqTitle);
+                if (!rt.isEmpty() && !rt.equals(lrcTitle)
+                    && !rt.contains(lrcTitle) && !lrcTitle.contains(rt)) {
+                    return false;
+                }
+            }
+            if (!lrcArtist.isEmpty()) {
+                String ra = LyricsMatcher.normalize(reqArtist);
+                if (!ra.isEmpty() && !ra.equals(lrcArtist)
+                    && !ra.contains(lrcArtist) && !lrcArtist.contains(ra)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        // 无 LRC 标签：退化为标题文本出现检查
+        String rt = LyricsMatcher.normalize(reqTitle);
+        if (rt.isEmpty()) {
+            return true;
+        }
+        if (LyricsMatcher.normalize(lyrics).contains(rt)) {
+            return true;
+        }
+        LogHelper.w(TAG, "❌ lyrics.ovh 严格匹配失败: req=\""
+            + reqTitle + "\" 未出现在歌词中");
+        return false;
     }
 
     private static boolean isStrictTitleArtistMatch(String reqTitle,

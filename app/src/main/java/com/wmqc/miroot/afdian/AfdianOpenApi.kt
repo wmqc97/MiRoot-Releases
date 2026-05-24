@@ -1,15 +1,14 @@
 package com.wmqc.miroot.afdian
 
+import com.wmqc.miroot.AppExecutors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
-import java.util.concurrent.TimeUnit
 
 /**
  * 爱发电开放接口（与 [ifdian.net 文档](https://ifdian.net/dashboard/dev) 及 niuhuan/afdian-go 一致）。
@@ -20,11 +19,7 @@ object AfdianOpenApi {
     private const val BASE = "https://ifdian.net/api/open"
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(20, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .writeTimeout(20, TimeUnit.SECONDS)
-        .build()
+    private val client get() = AppExecutors.okHttpClient
 
     private fun md5Hex(s: String): String {
         val md = MessageDigest.getInstance("MD5")

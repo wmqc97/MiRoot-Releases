@@ -7,6 +7,8 @@ import android.os.Bundle;
 import android.os.RemoteException;
 import android.text.TextUtils;
 
+import com.wmqc.miroot.AppExecutors;
+import com.wmqc.miroot.BuildConfig;
 import com.hchen.superlyricapi.ISuperLyricReceiver;
 import com.hchen.superlyricapi.SuperLyricData;
 import com.hchen.superlyricapi.SuperLyricHelper;
@@ -60,6 +62,21 @@ public final class SuperLyricApi {
     private static final AtomicReference<CachedLyric> LAST_SUPER_LYRIC = new AtomicReference<>(null);
     private static volatile boolean superLyricReceiverRegistered = false;
     private static volatile long superLyricLastEventAt = 0L;
+
+    // ── 预初始化：更早注册 Binder，缩短首次逐字回调延迟 ──
+    private static volatile boolean initStarted = false;
+
+    /**
+     * 在 Application.onCreate 或投影服务启动时尽早调用，预热 Binder 连接。
+     * 幂等、自动 fallback。
+     */
+    public static void init() {
+        if (initStarted) return;
+        initStarted = true;
+        if (SuperLyricHelper.isAvailable()) {
+            ensureReceiverRegistered();
+        }
+    }
 
     /**
      * 应用内实时回调：让宿主可以用「SuperLyric 推送」驱动 UI，而不是轮询 fetchFallbackPayload。
@@ -381,14 +398,18 @@ public final class SuperLyricApi {
             }
 
             long waitUntil = System.currentTimeMillis() + Math.max(0L, waitMs);
+            // 自适应轮询：初始间隔短（30ms），逐次翻倍至上限 180ms，在响应速度与 CPU 之间平衡。
+            long pollIntervalMs = 30L;
+            final long maxPollIntervalMs = Math.min(180L, Math.max(80L, waitMs / 6));
             while (System.currentTimeMillis() < waitUntil) {
                 synchronized (SUPER_LYRIC_LOCK) {
-                    SUPER_LYRIC_LOCK.wait(Math.min(220L, Math.max(80L, waitMs / 8)));
+                    SUPER_LYRIC_LOCK.wait(pollIntervalMs);
                 }
                 fromCache = getMatchedCachedFallbackPayload(title, artist, sourcePackageName);
                 if (fromCache != null) {
                     return fromCache;
                 }
+                pollIntervalMs = Math.min(maxPollIntervalMs, pollIntervalMs * 2L);
             }
             if (waitMs >= SUPER_LYRIC_MODULE_ONLY_WAIT_MS) {
                 return peekLatestFallbackPayload();
@@ -418,14 +439,17 @@ public final class SuperLyricApi {
             }
 
             long waitUntil = System.currentTimeMillis() + SUPER_LYRIC_WAIT_MS;
+            long pollIntervalMs = 30L;
+            final long maxPollIntervalMs = 160L;
             while (System.currentTimeMillis() < waitUntil) {
                 synchronized (SUPER_LYRIC_LOCK) {
-                    SUPER_LYRIC_LOCK.wait(180L);
+                    SUPER_LYRIC_LOCK.wait(pollIntervalMs);
                 }
                 fromCache = getMatchedCachedLyrics(title, artist, sourcePackageName);
                 if (!TextUtils.isEmpty(fromCache)) {
                     return fromCache;
                 }
+                pollIntervalMs = Math.min(maxPollIntervalMs, pollIntervalMs * 2L);
             }
             LogHelper.d(TAG, "SuperLyric 等待超时，最近事件距今(ms)="
                 + Math.max(0L, System.currentTimeMillis() - superLyricLastEventAt));

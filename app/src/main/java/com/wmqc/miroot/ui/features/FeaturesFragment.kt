@@ -39,6 +39,7 @@ import androidx.fragment.app.activityViewModels
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.wmqc.miroot.AppExecutors
 import com.wmqc.miroot.R
 import com.wmqc.miroot.ui.common.showSectionHelp
 import com.wmqc.miroot.capability.PermissionSnapshot
@@ -76,7 +77,6 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.concurrent.thread
 
 /** 与歌词/车控/磁贴共用的投屏常亮偏好键（Flutter SharedPreferences）。 */
 private const val FLUTTER_KEEP_SCREEN_ON_KEY = "flutter.keep_screen_on_enabled"
@@ -166,7 +166,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
             bmp.recycle()
             return@registerForActivityResult
         }
-        thread(name = "MiRoot-StickerExportWrite") {
+        AppExecutors.runInBackground {
             var ok = false
             try {
                 ctx.contentResolver.openOutputStream(uri)?.use { os ->
@@ -359,7 +359,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         }
         setRearDpiUiBusy(true)
         binding.textRearDpiStatus.setText(R.string.features_rear_dpi_unknown)
-        thread(name = "MiRoot-ReadRearDpi") {
+        AppExecutors.runInBackground {
             val dpi = try {
                 ts.currentRearDpi
             } catch (e: RemoteException) {
@@ -439,7 +439,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         }
         rearRotationApplyInFlight = true
         setRearDpiUiBusy(true)
-        thread(name = "MiRoot-SetRearRotation") {
+        AppExecutors.runInBackground {
             val ok = try {
                 ts.setDisplayRotation(REAR_DISPLAY_ID, target)
             } catch (e: RemoteException) {
@@ -480,7 +480,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
             return
         }
         setRearDpiUiBusy(true)
-        thread(name = "MiRoot-SetRearDpi") {
+        AppExecutors.runInBackground {
             val ok = try {
                 ts.setRearDpi(dpi)
             } catch (e: RemoteException) {
@@ -513,7 +513,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
             return
         }
         setRearDpiUiBusy(true)
-        thread(name = "MiRoot-ResetRearDpi") {
+        AppExecutors.runInBackground {
             val okDpi = try {
                 ts.resetRearDpi()
             } catch (e: RemoteException) {
@@ -1478,7 +1478,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         }
         imageView.setOnClickListener { fullDialog.dismiss() }
         fullDialog.show()
-        thread(name = "MiRoot-StickerFullscreen") {
+        AppExecutors.runInBackground {
             val bmp = try {
                 StickerPreviewRenderer.renderFullPixelForExport(ctx, overlay)
             } catch (_: OutOfMemoryError) {
@@ -1507,7 +1507,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
     private fun exportStickerPreview(dialogBinding: DialogStickerOverlayBinding) {
         val ctx = requireContext()
         val overlay = buildStickerPreviewOverlay(dialogBinding)
-        thread(name = "MiRoot-StickerExport") {
+        AppExecutors.runInBackground {
             val bmp = try {
                 StickerPreviewRenderer.renderFullPixelForExport(ctx, overlay)
             } catch (_: OutOfMemoryError) {
@@ -1544,7 +1544,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         val iv = b.imageStickerPreview
         val overlay = buildStickerPreviewOverlay(b)
         recycleStickerPreviewBitmap(iv)
-        thread(name = "MiRoot-StickerPreview") {
+        AppExecutors.runInBackground {
             val bmp = try {
                 StickerPreviewRenderer.render(ctx, overlay, maxSide = 0, grayscaleBackdrop = false)
             } catch (_: OutOfMemoryError) {

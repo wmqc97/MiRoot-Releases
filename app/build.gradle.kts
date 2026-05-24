@@ -35,8 +35,6 @@ val signLocal = loadSigningProperties()
 /** 爱发电开放接口（写入 local.properties 的 AFDIAN_USER_ID / AFDIAN_TOKEN，勿提交仓库）。 */
 val afdianUserId = signingProp("AFDIAN_USER_ID", signLocal) ?: ""
 val afdianToken = signingProp("AFDIAN_TOKEN", signLocal) ?: ""
-/** GitHub 个人访问令牌（写入 local.properties 的 GITHUB_TOKEN，私仓 Release 访问用）。 */
-val githubToken = signingProp("GITHUB_TOKEN", signLocal) ?: ""
 fun escapeForBuildConfigValue(s: String): String =
     s.replace("\\", "\\\\").replace("\"", "\\\"")
 
@@ -121,8 +119,8 @@ android {
         // Android 16 = API 36；minSdk 勿与 target 相同，否则仅 16+ 设备可安装
         minSdk = 28
         targetSdk = 36
-        versionCode = 23
-        versionName = "1.9.0"
+        versionCode = 25
+        versionName = "1.9.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -132,8 +130,6 @@ android {
 
         buildConfigField("String", "AFDIAN_USER_ID", "\"${escapeForBuildConfigValue(afdianUserId)}\"")
         buildConfigField("String", "AFDIAN_TOKEN", "\"${escapeForBuildConfigValue(afdianToken)}\"")
-        // GitHub 私仓访问令牌（写入 local.properties 的 GITHUB_TOKEN，无配置时为空）。
-        buildConfigField("String", "GITHUB_TOKEN", "\"${escapeForBuildConfigValue(githubToken)}\"")
         // 正式包签名校检：运行时从已安装包取证书 SHA-256 与该常量比对；不一致直接退出。
         buildConfigField("String", "RELEASE_CERT_SHA256", "\"${releaseCertSha256}\"")
     }

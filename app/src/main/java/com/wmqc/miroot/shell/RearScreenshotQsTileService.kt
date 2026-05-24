@@ -7,9 +7,9 @@ import android.os.Looper
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.widget.Toast
+import com.wmqc.miroot.AppExecutors
 import com.wmqc.miroot.R
 import com.wmqc.miroot.capability.EnvironmentProbe
-import kotlin.concurrent.thread
 
 /**
  * 快捷设置磁贴：背屏截图；是否带壳与功能页「带壳截图」开关一致（需 Root 或 Shizuku）。
@@ -34,7 +34,7 @@ class RearScreenshotQsTileService : TileService() {
 
     override fun onClick() {
         unlockAndRun {
-            thread(name = "MiRoot-QS-Screenshot") {
+            AppExecutors.runInBackground {
                 val priv = privilegedShellAvailable()
                 if (!priv) {
                     mainHandler.post {
@@ -44,7 +44,7 @@ class RearScreenshotQsTileService : TileService() {
                             Toast.LENGTH_LONG,
                         )
                     }
-                    return@thread
+                    return@runInBackground
                 }
                 val composite = DeviceGeometry.isScreenshotShellEnabled(applicationContext)
                 RearScreenshotCoordinator.capture(applicationContext, composite) { ok, msg ->

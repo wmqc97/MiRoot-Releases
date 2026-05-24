@@ -7,7 +7,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.UserManager
-import kotlin.concurrent.thread
+import com.wmqc.miroot.AppExecutors
 
 /**
  * 开机后若已开启自动投屏，则拉起 [MusicAutoProjectionService]，避免从未进入应用时无法监听媒体会话。
@@ -23,15 +23,15 @@ class MusicAutoProjectionBootReceiver : BroadcastReceiver() {
             return
         }
         val pendingResult = goAsync()
-        thread(name = "MiRootMusicAutoBoot") {
+        AppExecutors.runInBackground {
             val app = context.applicationContext
             if (!isUserUnlocked(app)) {
                 pendingResult.finish()
-                return@thread
+                return@runInBackground
             }
             if (!LyricsSettingsRepository.load(app).autoProjection) {
                 pendingResult.finish()
-                return@thread
+                return@runInBackground
             }
             Handler(Looper.getMainLooper()).post {
                 try {

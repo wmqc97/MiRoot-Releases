@@ -9,13 +9,13 @@ import android.os.Looper
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import android.widget.Toast
+import com.wmqc.miroot.AppExecutors
 import com.wmqc.miroot.R
 import com.wmqc.miroot.MainActivity
 import com.wmqc.miroot.capability.EnvironmentProbe
 import com.wmqc.miroot.capability.PrivilegedShell
 import com.wmqc.miroot.license.OfflineActivationRepository
 import com.wmqc.miroot.ui.music.MusicProjectionController
-import kotlin.concurrent.thread
 
 /**
  * 快捷设置磁贴：在主屏以横屏全屏打开音乐歌词界面（Intent 带 `isMainScreenLandscape`）。
@@ -53,7 +53,7 @@ class MusicProjectionQsTileService : TileService() {
                 scheduleRefreshTile()
                 return@unlockAndRun
             }
-            thread(name = "MiRoot-QS-MainMusic") {
+            AppExecutors.runInBackground {
                 if (!privilegedShellAvailable()) {
                     mainHandler.post {
                         MainDisplayUi.showToast(
@@ -62,7 +62,7 @@ class MusicProjectionQsTileService : TileService() {
                             Toast.LENGTH_LONG,
                         )
                     }
-                    return@thread
+                    return@runInBackground
                 }
                 if (RearScreenLyricsActivity.hasConflictingLyricsActivityForMainScreenTile()) {
                     MusicProjectionController.stop(applicationContext)

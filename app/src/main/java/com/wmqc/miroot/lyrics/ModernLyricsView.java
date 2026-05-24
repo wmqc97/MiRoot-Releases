@@ -78,7 +78,10 @@ public class ModernLyricsView extends View {
     private float LINE_SPACING = 160f;             // 行间距（背屏：随字号自动算；主屏横屏可由 setLineSpacing 固定）
     /** true 表示行距由外部 setLineSpacing 固定（如主屏横屏），false 时随字号/翻译行重算 */
     private boolean lineSpacingLockedByExternal = false;
-    private static final float LINE_SPACING_MIN_GAP = 28f; // 行与行之间的留白
+    private static final float LINE_SPACING_MIN_GAP = 28f; // 行与行之间的留白（作为上限参考，实际由 computeAutoLineSpacing 按字高比例计算）
+    private static final float LINE_SPACING_GAP_RATIO = 0.35f; // 行间距中留白占主歌词块高的比例
+    private static final float LINE_SPACING_GAP_MIN = 8f;  // 留白下限（小字不至于挤在一起）
+    private static final float LINE_SPACING_GAP_MAX = 48f; // 留白上限（大字不至于太松散）
     /** 翻译字号相对普通行；略小于原 0.7，为背屏三行留出空间。 */
     private static final float TRANSLATION_TEXT_SIZE_RATIO = 0.58f;
     private static final int MAX_TRANSLATION_WRAP_LINES = 2;
@@ -545,7 +548,8 @@ public class ModernLyricsView extends View {
         if (showTranslation && hasAnyTranslationInLyrics()) {
             transReserve = getMainTranslationGapPx() + measureMaxTranslationBlockHeight();
         }
-        return mainH + transReserve + LINE_SPACING_MIN_GAP;
+        float gap = Math.max(LINE_SPACING_GAP_MIN, Math.min(LINE_SPACING_GAP_MAX, mainH * LINE_SPACING_GAP_RATIO));
+        return mainH + transReserve + gap;
     }
 
     private boolean hasAnyTranslationInLyrics() {

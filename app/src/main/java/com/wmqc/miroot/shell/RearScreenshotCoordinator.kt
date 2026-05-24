@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaScannerConnection
 import android.os.Handler
 import android.os.Looper
+import com.wmqc.miroot.AppExecutors
 import com.wmqc.miroot.R
 import com.wmqc.miroot.capability.PrivilegedShell
 import com.wmqc.miroot.lyrics.RearScreenWakeService
@@ -12,7 +13,6 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.concurrent.thread
 
 /**
  * 背屏截图：临时文件在 [DeviceGeometry.screenshotWorkDir]，成品写入 `Pictures/RearDisplay/`（与旧版 TaskService 一致）。
@@ -31,13 +31,13 @@ object RearScreenshotCoordinator {
         onResult: (ok: Boolean, message: String) -> Unit,
     ) {
         val app = context.applicationContext
-        thread(name = "MiRoot-RearScreenshot") {
+        AppExecutors.runInBackground {
             synchronized(lock) {
                 if (busy) {
                     mainHandler.post {
                         onResult(false, app.getString(R.string.screenshot_busy))
                     }
-                    return@thread
+                    return@runInBackground
                 }
                 busy = true
             }

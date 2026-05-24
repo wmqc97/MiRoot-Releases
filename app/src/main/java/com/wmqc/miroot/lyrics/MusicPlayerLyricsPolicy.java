@@ -60,6 +60,14 @@ public final class MusicPlayerLyricsPolicy {
         return false;
     }
 
+    /** 酷我车机版：走 AUDIO_LYRIC 专用解析，不参与网络 API 严格匹配。 */
+    public static boolean isKuwoCarPackage(String packageName) {
+        if (packageName == null || packageName.trim().isEmpty()) {
+            return false;
+        }
+        return packageName.trim().equalsIgnoreCase("cn.kuwo.kwmusiccar");
+    }
+
     /**
      * 汽水 + 智能切换（MIXED）：最严行级逐字融合、先模块单句后完整歌词；网络链仍 qsgc→酷狗且严格匹配。
      */

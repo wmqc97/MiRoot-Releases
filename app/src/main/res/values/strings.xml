@@ -39,6 +39,8 @@
     <string name="update_log_v189_message">【简短说明】\nMiRoot 已更新至 V1.8.9：新增在线版本更新检查、逐字高亮进度准确性与切歌清旧歌词优化。\n\n【更新内容】\n• 新增「版本更新」：状态页支持检查 GitHub 新版本，一键下载与安装更新。\n• 歌词逐字高亮：修复逐字进度虚高问题（首字唱到一半显示 80%），预计算总权重后字时长加权更准确。\n• LRC 逐字等分拉伸：网络歌词内嵌逐字时间戳不均匀时自动等分到行时长，逐字高亮速度与演唱匹配。\n• 切歌清歌词：切换歌曲后立即清空旧歌词视图，减少残留与错句。\n• 背屏歌词投屏、显示体验持续优化。\n• 修复若干已知问题。</string>
     <string name="update_log_v190_title">MiRoot V1.9.0 更新</string>
     <string name="update_log_v190_message">【简短说明】\nMiRoot 已更新至 V1.9.0：升级弹窗焕新，自定义背景开关新增，背屏体验与稳定性持续改进。\n\n【更新内容】\n• 版本更新弹窗全新改版：更清晰的版本对比布局，更新日志独立展示，下载交互更直观。\n• 自定义背景功能：背屏支持自定义背景图片/视频，提供更多个性化选择。\n• 背屏歌词显示、投屏稳定性与切歌衔接持续优化。\n• Root / Shizuku 调用链路与异常兜底持续改进。\n• 修复若干已知问题。</string>
+    <string name="update_log_v191_title">MiRoot V1.9.1 更新</string>
+    <string name="update_log_v191_message">【简短说明】\nMiRoot 已更新至 V1.9.1：歌词智能切换全源严格匹配，线程模型重构，体验与稳定性持续提升。\n\n【更新内容】\n• 歌词「智能切换」严格匹配：所有音乐 App（除酷我车机）开启智能切换后，qsgc/酷狗/lrclib/lyrics.ovh 全源歌名+歌手严格校验（LRC 元数据标签 + API 结构化字段），匹配失败直接回落 SuperLyric 模块兜底，不再走模糊搜索。\n• 全局线程池重构（AppExecutors）：统一后台线程调度与 OkHttp 客户端，减少线程总数与虚拟内存占用，修复高核数设备原生 OOM 问题。\n• SuperLyric 预初始化与自适应轮询：更早注册 Binder 缩短首次逐字回调延迟；轮询间隔自适应翻倍（30ms 起步），响应速度与 CPU 开销更均衡。\n• 歌词 API 网络层改用 OkHttp：继承全局连接池减少 TCP 握手开销，弃用 HttpURLConnection。\n• 行间距自适应：背屏歌词行间距改为按字高比例动态计算，小字不挤大字不散。\n• 修复背屏 onResume 重复初始化 MediaSession 导致歌词请求序号失效、显示不对的问题。\n• 背屏歌词显示、投屏稳定性与切歌衔接持续优化。\n• 版本更新检查简化：适配公开仓库，移除令牌依赖，减少手动检测冷却间隔。\n• 修复若干已知问题。</string>
     <string name="update_log_v187_title">MiRoot V1.8.7 更新</string>
     <string name="update_log_v187_message">【简短说明】\nMiRoot 已更新至 V1.8.7：歌词智能切换逐字融合更稳，并修复已知问题。\n\n【更新内容】\n• 歌词「智能切换」：优化 SuperLyric 逐字与网络歌词的行级融合判定，当前播放行优先使用模块逐字轴；换行与行边界附近减少逐字高亮与 LRC 行时间戳模拟之间来回跳。\n• 背屏歌词显示、切歌衔接与投屏体验持续优化。\n• 修复若干已知问题。</string>
     <string name="update_log_v186_title">MiRoot V1.8.6 更新</string>

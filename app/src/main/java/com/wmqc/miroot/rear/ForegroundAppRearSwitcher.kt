@@ -7,13 +7,13 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.widget.Toast
+import com.wmqc.miroot.AppExecutors
 import com.wmqc.miroot.R
 import com.wmqc.miroot.lyrics.ITaskService
 import com.wmqc.miroot.lyrics.LyricsTaskTracking
 import com.wmqc.miroot.lyrics.LogHelper
 import com.wmqc.miroot.rear.RearAssistPrefs
 import com.wmqc.miroot.shell.SwitchToRearQsTileService
-import kotlin.concurrent.thread
 
 /**
  * 将主屏当前前台应用迁到背屏（与 [SwitchToRearQsTileService] 磁贴逻辑一致），供磁贴与外部广播共用。
@@ -129,7 +129,7 @@ object ForegroundAppRearSwitcher {
                     }
 
                     try {
-                        thread(name = "MiRoot-CollapseStatusBar") {
+                        AppExecutors.runInBackground {
                             try {
                                 ts.collapseStatusBar()
                             } catch (e: Exception) {
@@ -233,7 +233,7 @@ object ForegroundAppRearSwitcher {
         config: AppProjectionDisplayPrefs.AppDisplayConfig,
     ) {
         try {
-            thread(name = "MiRoot-ReapplyProjectionConfig") {
+            AppExecutors.runInBackground {
                 val waits = longArrayOf(180L, 420L, 900L)
                 for (wait in waits) {
                     Thread.sleep(wait)
@@ -246,7 +246,7 @@ object ForegroundAppRearSwitcher {
                     }
                     if (dpiOk && rotationOk) {
                         LogHelper.d(TAG, "reapply projection config success after ${wait}ms")
-                        return@thread
+                        return@runInBackground
                     }
                 }
             }

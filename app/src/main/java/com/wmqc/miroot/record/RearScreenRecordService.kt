@@ -41,6 +41,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.widget.ImageViewCompat
 import com.google.android.material.color.MaterialColors
+import com.wmqc.miroot.AppExecutors
 import com.wmqc.miroot.MainActivity
 import com.wmqc.miroot.R
 import com.wmqc.miroot.license.OfflineActivationRepository
@@ -363,7 +364,7 @@ class RearScreenRecordService : Service() {
                 )
                 if (wantsAudioNow && Build.VERSION.SDK_INT >= 31) {
                     // 检查 screenrecord 是否支持 --audio，避免直接使用导致 screenrecord 失败退出
-                    thread(name = "MiRoot-AudioProbe") {
+                    AppExecutors.runInBackground {
                         val audioOk = screenrecordSupportsAudio()
                         RecordSynthDebugLog.diagI("record click: screenrecord --audio support=$audioOk")
                         mainHandler.post {
@@ -676,7 +677,7 @@ class RearScreenRecordService : Service() {
             toastMain(getString(R.string.privilege_shell_required))
             return
         }
-        thread(name = "MiRoot-RecStart") {
+        AppExecutors.runInBackground {
             try {
                 sessionAudioWanted = mediaProjection != null || useBuiltinAudio
                 sessionPcmCapture = false
@@ -699,7 +700,7 @@ class RearScreenRecordService : Service() {
                     currentMediaProjection = mediaProjection
                     if (!RuntimePermissionGate.hasRecordAudio(this@RearScreenRecordService)) {
                         failStart(recordView, closeView, getString(R.string.record_need_record_audio))
-                        return@thread
+                        return@runInBackground
                     }
                     val prepLatch = CountDownLatch(1)
                     var prepError: Throwable? = null
@@ -723,12 +724,12 @@ class RearScreenRecordService : Service() {
                     }
                     if (!prepLatch.await(5, TimeUnit.SECONDS)) {
                         failStart(recordView, closeView, getString(R.string.record_busy))
-                        return@thread
+                        return@runInBackground
                     }
                     val err = prepError
                     if (err != null) {
                         failStart(recordView, closeView, err.message ?: "error")
-                        return@thread
+                        return@runInBackground
                     }
                 }
 
@@ -742,7 +743,7 @@ class RearScreenRecordService : Service() {
                 if (which.isEmpty()) {
                     RecordSynthDebugLog.diagW("start: which screenrecord empty")
                     failStart(recordView, closeView, getString(R.string.record_no_screenrecord))
-                    return@thread
+                    return@runInBackground
                 }
                 RecordSynthDebugLog.diagI("start: screenrecord bin=$which")
 
@@ -758,7 +759,7 @@ class RearScreenRecordService : Service() {
                         "start: launch failed | logTail=\n${snapshotScreenrecordLog()}",
                     )
                     failStart(recordView, closeView, getString(R.string.record_cmd_fail))
-                    return@thread
+                    return@runInBackground
                 }
 
                 var pcmStarted = false
@@ -803,7 +804,7 @@ class RearScreenRecordService : Service() {
                         "start: proc/file check failed | log=\n${snapshotScreenrecordLog()}",
                     )
                     failStart(recordView, closeView, getString(R.string.record_proc_fail))
-                    return@thread
+                    return@runInBackground
                 }
 
                 synchronized(stateLock) {

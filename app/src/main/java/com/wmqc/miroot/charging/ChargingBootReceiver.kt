@@ -8,8 +8,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.UserManager
 import androidx.core.content.ContextCompat
+import com.wmqc.miroot.AppExecutors
 import com.wmqc.miroot.capability.EnvironmentProbe
-import kotlin.concurrent.thread
 
 /**
  * 开机后若用户已开启充电动画且特权通道可用，则拉起 [ChargingService]，
@@ -26,19 +26,19 @@ class ChargingBootReceiver : BroadcastReceiver() {
             return
         }
         val pendingResult = goAsync()
-        thread(name = "MiRootChargingBoot") {
+        AppExecutors.runInBackground {
             val app = context.applicationContext
             if (!isUserUnlocked(app)) {
                 pendingResult.finish()
-                return@thread
+                return@runInBackground
             }
             if (!ChargingAnimationPrefs.isEnabled(app)) {
                 pendingResult.finish()
-                return@thread
+                return@runInBackground
             }
             if (!EnvironmentProbe.hasPrivilegedShellChannelSync()) {
                 pendingResult.finish()
-                return@thread
+                return@runInBackground
             }
             // 在主线程排队启动 FGS，减少与系统调度乱序导致 onCreate 延迟、触发超时杀进程的概率。
             Handler(Looper.getMainLooper()).post {

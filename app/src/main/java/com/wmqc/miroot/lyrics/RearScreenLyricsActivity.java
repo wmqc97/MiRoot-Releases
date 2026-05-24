@@ -49,6 +49,7 @@ import com.wmqc.miroot.rear.OfficialSubscreenMiRootProjectionSession;
 import com.wmqc.miroot.rear.ProjectionOngoingNotifications;
 import com.wmqc.miroot.rear.ProjectionOnlyNotificationHelper;
 import com.wmqc.miroot.rear.RearAssistPrefs;
+import com.wmqc.miroot.AppExecutors;
 import com.wmqc.miroot.lyrics.RootTaskServiceConnector;
 import com.wmqc.miroot.rear.RearMirootProjectionLifecycle;
 import com.wmqc.miroot.rear.RearProjectionProximitySession;
@@ -589,6 +590,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         updateMediaInfo();
         updatePlaybackState();
         registerActiveSessionsChangedListener();
+        mediaSessionInitializedThisCycle = true;
         if (getDisplayIdSafe() == RearMirootProjectionLifecycle.REAR_DISPLAY_ID
                 && hasLyricsView()
                 && !isFinishing()) {
@@ -1154,6 +1156,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private boolean uiAnimationsCancelled = false;
     private boolean projectionExitFlowStarted = false;
     private boolean projectionCleanupDone = false;
+    /** 标记本轮 onCreate（或迁屏后首次 initLyricsUiOnRearIfNeeded）已完成 MediaSession 初始化，
+     * 防止紧随的 onResume 重复调用 setupMediaController/updateMediaInfo 导致异步歌词请求序号失效。 */
+    private boolean mediaSessionInitializedThisCycle = false;
     /** 对齐充电动画：MiRoot 主动结束，onDestroy 后再 restore 官方背屏。 */
     private boolean finishRequestedByMiRoot = false;
     private Runnable rearUiInitPollRunnable;
@@ -1537,7 +1542,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             });
             return;
         }
-        new Thread(() -> {
+        AppExecutors.runInBackground(() -> {
             try {
                 SuperLyricApi.SuperLyricFallbackPayload payload =
                     SuperLyricApi.fetchFallbackPayload(titleSafe, artistSafe, pkgSafe);
@@ -1558,7 +1563,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             } catch (Exception e) {
                 LogHelper.w(TAG, "汽水单句预加载失败: " + e.getMessage());
             }
-        }, "QishuiSuperLyricBootstrap").start();
+        });
     }
 
     private void startSuperLyricRealtimeTicker() {
@@ -2478,8 +2483,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         registerLyricsProjectionBackPressedCallback();
         RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
         RootTaskServiceConnector.prewarm(this);
+        SuperLyricApi.init();
 
-        // 检查是否通过广播启动（通过Intent的extra参数判断）
+        // <!-- 检查是否通过广播启动（通过Intent的extra参数判断） -->
         Intent intent = getIntent();
         if (intent != null) {
             boolean isBroadcast = intent.getBooleanExtra("isBroadcast", false);
@@ -2586,6 +2592,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             bindTaskService();
             registerScreenReceiver();
             registerKeepScreenOnPreferenceListener();
+            mediaSessionInitializedThisCycle = true;
             return;
         }
 
@@ -4163,9 +4170,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         final String finalTitle = title;
         final String finalArtist = artist != null ? artist : "";
         final String sourcePkg = resolveCurrentLyricsPackageName();
-        new Thread(() -> {
+        AppExecutors.runInBackground(() -> {
             try {
-                // 先尝试 SuperLyric 模块 Binder 整曲歌词；仅 SuperLyric 模式禁止回落 MediaSession extras。
                 String superLyrics = isSuperLyricOnlySourceMode()
                     ? SuperLyricApi.fetchLyricsFromModuleBinderOnly(finalTitle, finalArtist, sourcePkg)
                     : SuperLyricApi.fetchLyrics(
@@ -4228,7 +4234,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 runOnUiThread(() -> scheduleNoLyricsIfStillEmpty(
                     requestSeq, trackKey, LyricsRuntimeSource.SUPER_LYRIC, "异常"));
             }
-        }).start();
+        });
     }
 
     /**
@@ -4302,7 +4308,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     }
 
     /**
-     * 网络 API · 逐字融合（MIXED）：首轮严格匹配；失败后再宽松网络 + 开放兜底。
+     * 智能切换（MIXED）：所有 App（除酷我车机）全源严格匹配 → 全部失败则 SuperLyric 模块兜底。
      * 网络优先（NETWORK_ONLY）：单次走完编排器全链路。
      */
     private boolean tryNetworkLyricsStrictThenLoose(
@@ -4316,62 +4322,44 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         final String networkPkg = kuwoCarLyricsSessionActive
             ? KuwoCarMediaSessionHelper.KUWO_PACKAGE
             : resolveCurrentLyricsPackageName();
-        if (MusicPlayerLyricsPolicy.appliesQishuiStrictNetworkFetch(networkPkg, mixedMode, networkOnly)) {
-            LogHelper.d(TAG, "汽水：网络 API 严格匹配 qsgc → 酷狗，不模糊搜索");
+
+        // 酷我车机：走 AUDIO_LYRIC 专用解析，网络回退不参与严格匹配
+        if (MusicPlayerLyricsPolicy.isKuwoCarPackage(networkPkg)) {
             return fetchAndApplyNetworkLyricsOnWorkerThread(
-                finalTitle,
-                finalArtist,
-                finalDurationMs,
-                true,
-                true,
-                requestSeq,
-                trackKey,
-                "✅ 网络API·汽水严格(qsgc→酷狗)："
+                finalTitle, finalArtist, finalDurationMs,
+                false, true, requestSeq, trackKey,
+                "✅ 网络API·酷我车机："
             );
         }
 
-        if (mixedMode && (finalArtist == null || finalArtist.trim().isEmpty())) {
-            LogHelper.d(TAG, "网络API·逐字融合：歌手元数据为空，跳过严格匹配，尝试宽松网络（含次级 API）");
+        // 智能切换：全源严格匹配，不再模糊搜索
+        if (mixedMode) {
+            if (finalArtist == null || finalArtist.trim().isEmpty()) {
+                LogHelper.d(TAG, "智能切换：歌手元数据为空，尝试宽松网络（含次级 API）");
+                return fetchAndApplyNetworkLyricsOnWorkerThread(
+                    finalTitle, finalArtist, finalDurationMs,
+                    false, true, requestSeq, trackKey,
+                    "✅ 网络API(宽松网络)："
+                );
+            }
+            LogHelper.d(TAG, "智能切换：全源严格匹配 qsgc → 酷狗 → lrclib ∥ lyrics.ovh");
             return fetchAndApplyNetworkLyricsOnWorkerThread(
-                finalTitle,
-                finalArtist,
-                finalDurationMs,
-                false,
-                true,
-                requestSeq,
-                trackKey,
-                "✅ 网络API·逐字融合(宽松网络)："
+                finalTitle, finalArtist, finalDurationMs,
+                true, true, requestSeq, trackKey,
+                "✅ 智能切换·全源严格："
             );
         }
 
-        boolean strict = mixedMode;
-        boolean secondary = networkOnly;
-        if (fetchAndApplyNetworkLyricsOnWorkerThread(
-                finalTitle,
-                finalArtist,
-                finalDurationMs,
-                strict,
-                secondary,
-                requestSeq,
-                trackKey,
-                "✅ 从第三方API获取到歌词: "
-            )) {
-            return true;
+        if (!networkOnly) {
+            return false;
         }
-        if (mixedMode && strict) {
-            LogHelper.d(TAG, "网络API·逐字融合：严格匹配无有效歌词，尝试宽松网络（酷狗 + 开放兜底）");
-            return fetchAndApplyNetworkLyricsOnWorkerThread(
-                finalTitle,
-                finalArtist,
-                finalDurationMs,
-                false,
-                true,
-                requestSeq,
-                trackKey,
-                "✅ 网络API·逐字融合(宽松网络)："
-            );
-        }
-        return false;
+
+        // 网络优先：单次走完编排器全链路
+        return fetchAndApplyNetworkLyricsOnWorkerThread(
+            finalTitle, finalArtist, finalDurationMs,
+            false, true, requestSeq, trackKey,
+            "✅ 网络API·网络优先："
+        );
     }
 
     /**
@@ -4420,7 +4408,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
 
         LogHelper.d(TAG, logTag + "，尝试从第三方API获取: " + finalTitle + " - " + finalArtist);
 
-        new Thread(() -> {
+        AppExecutors.runInBackground(() -> {
             try {
                 boolean networkOk = false;
                 try {
@@ -4429,8 +4417,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 } catch (Exception e) {
                     LogHelper.e(TAG, "从第三方API获取歌词失败: " + e.getMessage(), e);
                     if (isMixedLyricsSourceMode()
-                        && !MusicPlayerLyricsPolicy.appliesQishuiStrictNetworkFetch(
-                            resolveCurrentLyricsPackageName(), true, false)) {
+                        && MusicPlayerLyricsPolicy.isKuwoCarPackage(
+                            resolveCurrentLyricsPackageName())) {
                         try {
                             networkOk = fetchAndApplyNetworkLyricsOnWorkerThread(
                                 finalTitle,
@@ -4475,9 +4463,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     }
                 });
             }
-        }).start();
+        });
     }
-    
+
     /**
      * 更新媒体信息（歌名、歌手、歌词）
      */
@@ -7949,9 +7937,15 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             // 应用设置（同步主屏幕设置界面的修改）
             applySettings();
 
-            // 从后台回到前台或切换播放器后，重新解析活跃会话并刷新元数据/歌词
-            setupMediaController();
-            updateMediaInfo();
+            if (mediaSessionInitializedThisCycle) {
+                // 本轮 onCreate / 迁屏 init 已完成 MediaSession 初始化，跳过重复绑定与元数据加载，
+                // 避免异步歌词请求序号被递增导致首轮 API 结果被误丢弃，造成歌词显示不对/不更新。
+                mediaSessionInitializedThisCycle = false;
+            } else {
+                // 从后台回到前台或切换播放器后，重新解析活跃会话并刷新元数据/歌词
+                setupMediaController();
+                updateMediaInfo();
+            }
             registerActiveSessionsChangedListener();
 
             // 重新同步播放状态
@@ -8705,10 +8699,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         
         // 只有在背屏时才恢复Launcher
         if (displayId == 1 && taskService != null) {
-            new Thread(() -> {
+            AppExecutors.runInBackground(() -> {
                 try {
                     LogHelper.d(TAG, "🔄 开始恢复官方Launcher（退出投屏）");
-                    
+
                     // 确保恢复官方Launcher
                     // 注意：enableOfficialGesture() 可能已经调用了 enableSubScreenLauncher()
                     // 但这里仍然显式调用以确保恢复（enableSubScreenLauncher() 是幂等的）
@@ -8718,13 +8712,13 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     } else {
                         LogHelper.w(TAG, "⚠️ 恢复官方Launcher失败（enableSubScreenLauncher返回false）");
                     }
-                    
+
                     // 等待一下，确保Launcher启动
                     Thread.sleep(200);
                 } catch (Exception e) {
                     LogHelper.e(TAG, "❌ 恢复官方Launcher失败", e);
                 }
-            }).start();
+            });
         } else {
             if (displayId != 1) {
                 LogHelper.d(TAG, "ℹ️ 不在背屏（displayId=" + displayId + "），跳过恢复Launcher");

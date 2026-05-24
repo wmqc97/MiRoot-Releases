@@ -4,17 +4,16 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.wmqc.miroot.AppExecutors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 data class GitHubRelease(
     val tagName: String,
@@ -58,37 +57,22 @@ enum class DownloadErrorReason {
 object GitHubUpdateChecker {
 
     private const val OWNER = "wmqc97"
-    private const val REPO = "MiRoot"
+    private const val REPO = "MiRoot-Releases"
     private const val API_URL = "https://api.github.com/repos/$OWNER/$REPO/releases/latest"
     private const val USER_AGENT = "MiRoot-Android/1.0"
 
     /** 手动检测最小间隔（防按钮连点，毫秒）。 */
-    private const val MANUAL_COOLDOWN_MS = 30_000L
-
-    /** GitHub 认证令牌。私仓须在 [local.properties] 中配置 [GITHUB_TOKEN]，由 [init] 在 Application.onCreate 注入。 */
-    private var authToken: String? = null
+    private const val MANUAL_COOLDOWN_MS = 5_000L
 
     /** 上次调用 [fetchLatestRelease] 的时间戳（进程内，用于手动检测节流）。 */
     @Volatile
     private var lastFetchTimeMs: Long = 0L
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
-
-    /** 在 [Application.onCreate] 中调用，注入 [BuildConfig.GITHUB_TOKEN]。 */
-    fun init(token: String?) {
-        authToken = token?.takeIf { it.isNotBlank() }
-    }
+    private val client get() = AppExecutors.okHttpClient
 
     /** 手动检测节流：距上次检测不足 [MANUAL_COOLDOWN_MS] 时返回 true。 */
     fun isManualCheckThrottled(): Boolean =
         System.currentTimeMillis() - lastFetchTimeMs < MANUAL_COOLDOWN_MS
-
-    /** 若已配置令牌，返回 "token xxx"，否则 null。 */
-    private fun authHeaderValue(): String? =
-        authToken?.let { "token $it" }
 
     /**
      * Fetch latest release info from GitHub API.
@@ -102,7 +86,6 @@ object GitHubUpdateChecker {
                 .url(API_URL)
                 .header("Accept", "application/vnd.github.v3+json")
                 .header("User-Agent", USER_AGENT)
-                .apply { authHeaderValue()?.let { header("Authorization", it) } }
                 .build()
 
             client.newCall(req).execute().use { resp ->
@@ -213,7 +196,6 @@ object GitHubUpdateChecker {
 
         try {
             val req = Request.Builder().url(url)
-                .apply { authHeaderValue()?.let { header("Authorization", it) } }
                 .header("Accept", "application/octet-stream")
                 .build()
             client.newCall(req).execute().use { resp ->

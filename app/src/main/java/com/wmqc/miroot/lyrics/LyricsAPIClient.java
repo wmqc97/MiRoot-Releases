@@ -18,14 +18,12 @@ import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.Build;
 import android.icu.text.Transliterator;
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+
+import com.wmqc.miroot.AppExecutors;
+
 import java.io.InterruptedIOException;
-import java.net.HttpURLConnection;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
-import java.net.URL;
 import java.net.URLEncoder;
 import javax.net.ssl.SSLException;
 import java.nio.charset.StandardCharsets;
@@ -33,6 +31,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 
 /**
  * 第三方歌词API客户端
@@ -99,74 +102,47 @@ public class LyricsAPIClient {
     }
     
     /**
-     * 通用HTTP GET请求
+     * 基于 AppExecutors.okHttpClient 的通用 GET 请求，继承其连接池减少 TCP 握手开销。
      */
     private static String httpGet(String urlString) {
         return httpGet(urlString, CONNECT_TIMEOUT, READ_TIMEOUT);
     }
 
     private static String httpGet(String urlString, int connectTimeoutMs, int readTimeoutMs) {
-        HttpURLConnection connection = null;
-        BufferedReader reader = null;
-        
+        final long startNs = System.nanoTime();
         try {
-            URL url = new URL(urlString);
-            connection = (HttpURLConnection) url.openConnection();
-            connection.setRequestMethod("GET");
-            connection.setConnectTimeout(connectTimeoutMs);
-            connection.setReadTimeout(readTimeoutMs);
-            // 设置User-Agent，模拟浏览器请求（酷狗API可能需要）
-            connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36");
-            connection.setRequestProperty("Accept", "application/json, text/plain, */*");
-            connection.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-            // 允许重定向
-            connection.setInstanceFollowRedirects(true);
-            
-            int responseCode = connection.getResponseCode();
-            LogHelper.d(TAG, "HTTP请求: " + urlString + " -> " + responseCode);
-            
-            // 处理重定向
-            if (responseCode == HttpURLConnection.HTTP_MOVED_TEMP || 
-                responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
-                responseCode == HttpURLConnection.HTTP_SEE_OTHER) {
-                String redirectUrl = connection.getHeaderField("Location");
-                if (redirectUrl != null && !redirectUrl.isEmpty()) {
-                    LogHelper.d(TAG, "重定向到: " + redirectUrl);
-                    connection.disconnect();
-                    return httpGet(redirectUrl, connectTimeoutMs, readTimeoutMs);
-                }
-            }
-            
-            if (responseCode == HttpURLConnection.HTTP_OK) {
-                InputStream inputStream = connection.getInputStream();
-                reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8));
-                
-                StringBuilder response = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    response.append(line).append("\n");
-                }
-                
-                String result = response.toString();
-                LogHelper.d(TAG, "HTTP响应长度: " + result.length() + " 字符");
-                return result;
-            } else {
-                // 尝试读取错误流
-                InputStream errorStream = connection.getErrorStream();
-                if (errorStream != null) {
-                    reader = new BufferedReader(new InputStreamReader(errorStream, StandardCharsets.UTF_8));
-                    StringBuilder errorResponse = new StringBuilder();
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        errorResponse.append(line).append("\n");
-                    }
-                    LogHelper.w(TAG, "HTTP请求失败: " + responseCode + ", 错误响应: " + errorResponse.toString());
+            OkHttpClient client = AppExecutors.INSTANCE.getOkHttpClient().newBuilder()
+                .connectTimeout(connectTimeoutMs, TimeUnit.MILLISECONDS)
+                .readTimeout(readTimeoutMs, TimeUnit.MILLISECONDS)
+                .writeTimeout(readTimeoutMs, TimeUnit.MILLISECONDS)
+                .build();
+
+            Request request = new Request.Builder()
+                .url(urlString)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36")
+                .header("Accept", "application/json, text/plain, */*")
+                .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+                .build();
+
+            try (Response response = client.newCall(request).execute()) {
+                int code = response.code();
+                long costMs = (System.nanoTime() - startNs) / 1_000_000L;
+                LogHelper.d(TAG, "HTTP请求: " + urlString + " -> " + code + " (" + costMs + "ms)");
+
+                if (code >= 200 && code < 300) {
+                    String body = response.body() != null ? response.body().string() : "";
+                    LogHelper.d(TAG, "HTTP响应长度: " + body.length() + " 字符");
+                    return body;
                 } else {
-                    LogHelper.w(TAG, "HTTP请求失败: " + responseCode);
+                    String errorBody = response.body() != null ? response.body().string() : "";
+                    if (!errorBody.isEmpty()) {
+                        LogHelper.w(TAG, "HTTP请求失败: " + code + ", 响应: " + errorBody);
+                    } else {
+                        LogHelper.w(TAG, "HTTP请求失败: " + code);
+                    }
+                    return null;
                 }
-                return null;
             }
-            
         } catch (Exception e) {
             if (isExpectedNetworkException(e)) {
                 LogHelper.w(
@@ -180,17 +156,6 @@ public class LyricsAPIClient {
             }
             LogHelper.e(TAG, "HTTP请求异常: " + urlString, e);
             return null;
-        } finally {
-            try {
-                if (reader != null) {
-                    reader.close();
-                }
-                if (connection != null) {
-                    connection.disconnect();
-                }
-            } catch (Exception e) {
-                LogHelper.w(TAG, "关闭连接失败", e);
-            }
         }
     }
 
@@ -435,9 +400,16 @@ public class LyricsAPIClient {
      * 2) 若无结果，再仅搜索「歌名」
      */
     public static LyricsResult searchLyricsFromLrclib(Context context, String title, String artist) {
+        return searchLyricsFromLrclib(context, title, artist, false);
+    }
+
+    public static LyricsResult searchLyricsFromLrclib(Context context,
+                                                      String title,
+                                                      String artist,
+                                                      boolean strictTitleArtistMatch) {
         LyricsResult result = new LyricsResult();
         result.source = "lrclib";
-        result = searchLyricsFromLrclibInternal(context, title, artist, result);
+        result = searchLyricsFromLrclibInternal(context, title, artist, result, strictTitleArtistMatch);
         return result;
     }
 
@@ -599,7 +571,11 @@ public class LyricsAPIClient {
         }
     }
 
-    private static LyricsResult searchLyricsFromLrclibInternal(Context context, String title, String artist, LyricsResult result) {
+    private static LyricsResult searchLyricsFromLrclibInternal(Context context,
+                                                               String title,
+                                                               String artist,
+                                                               LyricsResult result,
+                                                               boolean strictTitleArtistMatch) {
         if (!isNetworkAvailable(context)) {
             result.error = "网络不可用";
             return result;
@@ -637,7 +613,7 @@ public class LyricsAPIClient {
                     continue;
                 }
 
-                String lyrics = pickBestLyricsFromLrclib(arr);
+                String lyrics = pickBestLyricsFromLrclib(arr, title, artist, strictTitleArtistMatch);
                 if (lyrics != null && !lyrics.trim().isEmpty()) {
                     result.lyrics = toSimplifiedChinese(lyrics);
                     result.success = true;
@@ -655,27 +631,76 @@ public class LyricsAPIClient {
 
     /**
      * 优先使用带时间轴的 syncedLyrics；否则退回 plainLyrics。
+     * strictTitleArtistMatch 时校验返回项的 name/artistName 与请求是否匹配。
      */
-    private static String pickBestLyricsFromLrclib(org.json.JSONArray arr) {
+    private static String pickBestLyricsFromLrclib(org.json.JSONArray arr,
+                                                   String reqTitle,
+                                                   String reqArtist,
+                                                   boolean strictTitleArtistMatch) {
         if (arr == null || arr.length() == 0) {
             return "";
         }
 
         String plainFallback = "";
+        String plainName = "";
+        String plainArtist = "";
         for (int i = 0; i < arr.length(); i++) {
             org.json.JSONObject item = arr.optJSONObject(i);
             if (item == null) {
                 continue;
             }
             String synced = item.optString("syncedLyrics", "").trim();
+            String name = item.optString("name", "").trim();
+            String artistName = item.optString("artistName", "").trim();
             if (!synced.isEmpty()) {
+                if (strictTitleArtistMatch
+                    && !isLrclibItemStrictMatch(reqTitle, reqArtist, name, artistName)) {
+                    LogHelper.w(TAG, "❌ lrclib 严格匹配失败: req=\""
+                        + reqTitle + " - " + reqArtist
+                        + "\" vs hit=\"" + name + " - " + artistName + "\"");
+                    continue;
+                }
                 return synced;
             }
             if (plainFallback.isEmpty()) {
                 plainFallback = item.optString("plainLyrics", "").trim();
+                plainName = name;
+                plainArtist = artistName;
             }
         }
-        return plainFallback;
+        if (!plainFallback.isEmpty()) {
+            if (strictTitleArtistMatch
+                && !isLrclibItemStrictMatch(reqTitle, reqArtist, plainName, plainArtist)) {
+                LogHelper.w(TAG, "❌ lrclib plainLyrics 严格匹配失败: req=\""
+                    + reqTitle + " - " + reqArtist
+                    + "\" vs hit=\"" + plainName + " - " + plainArtist + "\"");
+                return "";
+            }
+            return plainFallback;
+        }
+        return "";
+    }
+
+    private static boolean isLrclibItemStrictMatch(String reqTitle,
+                                                   String reqArtist,
+                                                   String itemName,
+                                                   String itemArtist) {
+        String rt = LyricsMatcher.normalize(reqTitle);
+        String ra = LyricsMatcher.normalize(reqArtist);
+        String ct = LyricsMatcher.normalize(itemName);
+        String ca = LyricsMatcher.normalize(itemArtist);
+        if (rt.isEmpty() || ct.isEmpty()) {
+            return false;
+        }
+        boolean titleOk = rt.equals(ct) || rt.contains(ct) || ct.contains(rt);
+        if (!titleOk) {
+            return false;
+        }
+        if (!ra.isEmpty() && !ca.isEmpty()) {
+            boolean artistOk = ra.equals(ca) || ra.contains(ca) || ca.contains(ra);
+            return artistOk;
+        }
+        return true;
     }
 
     /**
