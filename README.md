@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/wmqc97/MiRoot/main/assets/MiRoot.png" alt="MiRoot" width="128"/>
+  <img src="MiRoot.png" alt="MiRoot" width="128"/>
 </p>
 
 <h1 align="center">MiRoot Releases</h1>
