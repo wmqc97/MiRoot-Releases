@@ -31,15 +31,13 @@ class MainPermissionViewModel : ViewModel() {
             try {
                 val shizukuRunning = EnvironmentProbe.shizukuServiceRunning()
                 val shizukuGranted = EnvironmentProbe.shizukuPermissionGranted()
-                val xposed = EnvironmentProbe.xposedRuntimePresent()
-                // Shizuku / Xposed 为同步快检，先发布以免 Root 探测（最长约 12s）阻塞状态页刷新。
+                // Shizuku 为同步快检，先发布以免 Root 探测（最长约 12s）阻塞状态页刷新。
                 publishIfCurrent(
                     epoch,
                     PermissionSnapshot(
                         root = prev.root,
                         shizukuRunning = shizukuRunning,
                         shizukuGranted = shizukuGranted,
-                        xposed = xposed,
                     ),
                 )
                 val root = EnvironmentProbe.probeRoot()
@@ -49,7 +47,6 @@ class MainPermissionViewModel : ViewModel() {
                         root = root,
                         shizukuRunning = shizukuRunning,
                         shizukuGranted = shizukuGranted,
-                        xposed = xposed,
                     ),
                 )
             } catch (t: Throwable) {

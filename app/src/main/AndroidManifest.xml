@@ -41,7 +41,6 @@
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:description="@string/xposed_module_desc"
         android:fullBackupContent="@xml/backup_rules"
         android:enableOnBackInvokedCallback="false"
         android:icon="@mipmap/ic_launcher_v2"
@@ -64,6 +63,20 @@
         <meta-data
             android:name="miui.rear.policy"
             android:value="1"/>
+
+        <!-- SuperLyric API 接入声明 -->
+        <meta-data
+            android:name="superlyricapi"
+            android:value="true"
+            tools:replace="android:value" />
+        <meta-data
+            android:name="superlyricapi_version_name"
+            android:value="${superlyricApiVersionName}"
+            tools:replace="android:value" />
+        <meta-data
+            android:name="superlyricapi_version_code"
+            android:value="${superlyricApiVersionCode}"
+            tools:replace="android:value" />
 
         <provider
             android:name="rikka.shizuku.ShizukuProvider"

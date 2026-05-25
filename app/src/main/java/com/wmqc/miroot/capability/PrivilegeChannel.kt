@@ -15,7 +15,6 @@ data class PermissionSnapshot(
     val root: Boolean,
     val shizukuRunning: Boolean,
     val shizukuGranted: Boolean,
-    val xposed: Boolean,
 ) {
     val shizukuReady: Boolean get() = shizukuRunning && shizukuGranted
 
@@ -33,7 +32,6 @@ data class PermissionSnapshot(
             root = false,
             shizukuRunning = false,
             shizukuGranted = false,
-            xposed = false,
         )
     }
 }
