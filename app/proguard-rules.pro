@@ -56,6 +56,7 @@
     private com.wmqc.miroot.lyrics.ModernLyricsView lyricsView;
     private com.wmqc.miroot.lyrics.ITaskService taskService;
     private com.wmqc.miroot.lyrics.KuwoBroadcastLyricBridge kuwoBroadcastLyricBridge;
+    private boolean kuwoBroadcastWordTimestampsApplied;
     public void applyKuwoBroadcastLyrics(java.util.List);
     public void applyKuwoBroadcastProgress(long, boolean, int, int, int);
 }

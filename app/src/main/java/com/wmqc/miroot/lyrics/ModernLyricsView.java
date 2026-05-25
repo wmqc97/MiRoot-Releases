@@ -2486,9 +2486,11 @@ public class ModernLyricsView extends View {
         if (line == null) {
             return 0f;
         }
-        // Kuwo broadcast direct word hint: overrides time-based progress for pixel-accurate highlighting
-        if (mKuwoWordHintValid && hasActiveWordTimestamps(line)) {
-            final long kuwoHintStaleMs = 400L; // broadcast fires every ~100ms; 4× tolerance
+        // Kuwo broadcast direct word hint: overrides time-based progress for pixel-accurate highlighting.
+        // Only requires the hint itself and the target line — wordTimestamps on the line are not needed
+        // because the hint carries character positions (wordCharStart/wordCharEnd) directly.
+        if (mKuwoWordHintValid && line != null) {
+            final long kuwoHintStaleMs = 800L; // broadcast fires ~100ms; 8× tolerance for reliability
             if (android.os.SystemClock.uptimeMillis() - mKuwoWordHintTimestamp < kuwoHintStaleMs) {
                 int idx = lyricLines.indexOf(line);
                 if (idx >= 0 && idx == mKuwoWordHintLineIndex) {
@@ -3864,6 +3866,11 @@ public class ModernLyricsView extends View {
         this.mKuwoWordHintCharEnd = wordCharEnd;
         this.mKuwoWordHintTimestamp = android.os.SystemClock.uptimeMillis();
 
+        // 酷我广播驱动：收到逐字位置时自动启用逐字模式
+        if (!enableWordByWord) {
+            setEnableWordByWord(true);
+        }
+
         // Line change from broadcast: update current line and scroll
         if (lineIndex != currentLineIndex && lineIndex >= 0 && lineIndex < lyricLines.size()) {
             currentLineIndex = lineIndex;
@@ -3880,9 +3887,7 @@ public class ModernLyricsView extends View {
             }
         }
 
-        if (enableWordByWord) {
-            postInvalidate();
-        }
+        postInvalidate();
     }
 
     public void setEnableWordByWord(boolean enable) {

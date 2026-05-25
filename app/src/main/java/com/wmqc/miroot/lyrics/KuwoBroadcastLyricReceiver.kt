@@ -118,7 +118,11 @@ class KuwoBroadcastLyricReceiver : BroadcastReceiver() {
 
     // ── LYRIC_FULL parsing ────────────────────────────────────
 
+    private var fullCount = 0
+    private var progressCount = 0
+
     private fun onFullLyric(intent: Intent, l: Listener) {
+        fullCount++
         val musicId = intent.getLongExtra("music_id", -1L)
         val title = intent.getStringExtra("title") ?: ""
         val artist = intent.getStringExtra("artist") ?: ""
@@ -127,6 +131,9 @@ class KuwoBroadcastLyricReceiver : BroadcastReceiver() {
         val lines = intent.getStringArrayExtra("lines") ?: emptyArray()
         val lineTimesMs = intent.getIntArrayExtra("line_times_ms")
         val hasWordTiming = intent.getBooleanExtra("has_word_timing", false)
+
+        android.util.Log.wtf("MIR-Kuwo", "FULL#$fullCount id=$musicId type=$lyricType " +
+            "lines=${lines.size} hasWord=$hasWordTiming title=$title")
 
         var wordsJson: String? = null
         var wordsJsonMode: String? = null
@@ -159,6 +166,7 @@ class KuwoBroadcastLyricReceiver : BroadcastReceiver() {
     // ── LYRIC_PROGRESS parsing ────────────────────────────────
 
     private fun onProgress(intent: Intent, l: Listener) {
+        progressCount++
         val musicId = intent.getLongExtra("music_id", -1L)
         val title = intent.getStringExtra("title") ?: ""
         val artist = intent.getStringExtra("artist") ?: ""
@@ -176,6 +184,11 @@ class KuwoBroadcastLyricReceiver : BroadcastReceiver() {
         val wordEndMs = intent.getIntExtra("word_end_ms", -1)
         val wordCharStart = intent.getIntExtra("word_char_start", -1)
         val wordCharEnd = intent.getIntExtra("word_char_end", -1)
+
+        if (progressCount % 50 == 1) {
+            android.util.Log.wtf("MIR-Kuwo", "PROG#$progressCount pos=$positionMs " +
+                "line=$lineIndex words=$wordCount wi=$wordIndex cs=$wordCharStart ce=$wordCharEnd")
+        }
 
         l.onProgress(
             musicId, title, artist, positionMs,

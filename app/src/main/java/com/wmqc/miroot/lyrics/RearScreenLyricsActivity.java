@@ -1130,6 +1130,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     /** 酷我 AUDIO_LYRIC 去重：同曲同 payload 不重复解析/设置。 */
     private String lastKuwoAudioLyricTrackKey = "";
     private String lastKuwoAudioLyricPayload = "";
+    /** 酷我广播 LYRIC_FULL 已下发带逐字时间戳的歌词，阻止后续 AUDIO_LYRIC 无逐字覆盖。 */
+    private boolean kuwoBroadcastWordTimestampsApplied = false;
     /** 酷我：AUDIO_LYRIC 等待超时后再走网络/智能兜底（避免与专用解析并行抢结果）。 */
     private Runnable pendingKuwoNativeFallbackRunnable;
     private boolean kuwoPostNativeFallbackScheduled = false;
@@ -1409,6 +1411,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             apiAttemptedTrackKey = "";
             try {
                 enhancedLyricLines = new ArrayList<>();
+                kuwoBroadcastWordTimestampsApplied = false;
                 lastAbyssalRenderedLineIndex = -1;
                 lastAppliedLyricsTrackKey = "";
                 lastAppliedLyricsFingerprint = "";
@@ -4049,6 +4052,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         stableDurationMs = 0L;
         lastKuwoAudioLyricTrackKey = "";
         lastKuwoAudioLyricPayload = "";
+        kuwoBroadcastWordTimestampsApplied = false;
         apiAttemptedTrackKey = "";
         cancelPendingKuwoNativeFallbackWait();
         kuwoPostNativeFallbackScheduled = false;
@@ -4129,6 +4133,12 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return;
         }
         runOnUiThread(() -> {
+            if (kuwoBroadcastWordTimestampsApplied) {
+                lastKuwoAudioLyricTrackKey = kuwoTrackKey;
+                lastKuwoAudioLyricPayload = json != null ? json : "";
+                LogHelper.d(TAG, "🛡️ 酷我广播逐字已就绪，跳过 AUDIO_LYRIC 覆盖");
+                return;
+            }
             enhancedLyricLines = pr.lines;
             cancelPendingNoLyrics();
             superLyricFallbackModeActive = false;
@@ -4169,6 +4179,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 }
                 LogHelper.d(TAG, "✅ 已应用酷我 LYRIC_FULL 广播逐字数据：" + lines.size()
                     + " 行 / " + wordCount + " 字");
+                if (wordCount > 0) {
+                    kuwoBroadcastWordTimestampsApplied = true;
+                }
             } catch (Exception e) {
                 LogHelper.e(TAG, "❌ 应用酷我 LYRIC_FULL 广播失败", e);
             }
