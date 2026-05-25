@@ -52,12 +52,12 @@ class AudioCaptureHelper(
     fun start(path: String): Boolean {
         if (running.get()) return false
         bytesCaptured.set(0)
-        // Android 16 上不同 ROM 对采样率/声道容忍度差异更大，优先 48k 再回退 44.1k。
+        // 优先 44.1kHz Mono（与旧版一致，兼容酷我等车载音乐 App），再尝试高配回退。
         val profileOrder = listOf(
-            CaptureProfile(sampleRate = 48_000, channelMask = AudioFormat.CHANNEL_IN_STEREO, channelCount = 2),
-            CaptureProfile(sampleRate = 48_000, channelMask = AudioFormat.CHANNEL_IN_MONO, channelCount = 1),
-            CaptureProfile(sampleRate = SAMPLE_RATE, channelMask = AudioFormat.CHANNEL_IN_STEREO, channelCount = 2),
             CaptureProfile(sampleRate = SAMPLE_RATE, channelMask = AudioFormat.CHANNEL_IN_MONO, channelCount = 1),
+            CaptureProfile(sampleRate = SAMPLE_RATE, channelMask = AudioFormat.CHANNEL_IN_STEREO, channelCount = 2),
+            CaptureProfile(sampleRate = 48_000, channelMask = AudioFormat.CHANNEL_IN_MONO, channelCount = 1),
+            CaptureProfile(sampleRate = 48_000, channelMask = AudioFormat.CHANNEL_IN_STEREO, channelCount = 2),
         )
         for (profile in profileOrder) {
             val record = buildPlaybackRecord(profile) ?: continue
