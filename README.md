@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.9.1-blue" alt="version"/>
+  <img src="https://img.shields.io/badge/version-1.9.2-blue" alt="version"/>
   <img src="https://img.shields.io/badge/API-28%2B-brightgreen" alt="API"/>
   <img src="https://img.shields.io/badge/Xposed-101%2B-orange" alt="Xposed"/>
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="license"/>
