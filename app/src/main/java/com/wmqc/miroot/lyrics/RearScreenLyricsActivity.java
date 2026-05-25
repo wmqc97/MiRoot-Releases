@@ -1330,6 +1330,12 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     /**
      * 酷我专用解析失败后按来源模式兜底：网络歌词→仅网络 API；网络API·逐字融合→网络后 SuperLyric；仅 SuperLyric→SuperLyric。
      */
+    /**
+     * 酷我 extras 无有效逐行歌词时，在专用解析确认失败后走后续兜底。
+     * <p>
+     * 酷我车机版作为播放源时：仅使用酷我自身数据路径（AUDIO_LYRIC + LYRIC_FULL 广播），
+     * 不调用第三方 API（酷狗/SuperLyric）兜底，确保逐字数据来源统一。
+     */
     private void beginKuwoLyricsFallbackAfterNativeFailed(String reason,
                                                           int requestSeq,
                                                           String trackKey,
@@ -1353,32 +1359,14 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return;
         }
         kuwoPostNativeFallbackScheduled = false;
-        kuwoAllowThirdPartyFallback = true;
-        try {
-            if (shouldUseNetworkApiSource()) {
-                LogHelper.d(TAG, "酷我 AUDIO_LYRIC 未命中（" + reason + "）→ 网络API(酷狗优先)"
-                    + (isMixedLyricsSourceMode() ? " → 逐字融合" : ""));
-                String networkPkg = KuwoCarMediaSessionHelper.KUWO_PACKAGE;
-                MusicPlayerLyricsPolicy.PrimaryStrategy networkStrategy =
-                    MusicPlayerLyricsPolicy.resolvePrimaryStrategy(networkPkg);
-                updateHookSourceStatusText(
-                    LyricsRuntimeSource.NETWORK,
-                    "兜底·" + MusicPlayerLyricsPolicy.strategyDisplayLabel(networkStrategy)
-                );
-                fetchLyricsFromThirdPartyApi(title, artist, "酷我网络API兜底", requestSeq, trackKey);
-                return;
-            }
-            if (VALUE_LYRICS_SOURCE_SUPER_ONLY.equalsIgnoreCase(lyricsSourceMode)) {
-                LogHelper.d(TAG, "酷我 AUDIO_LYRIC 未命中（" + reason + "）→ SuperLyric");
-                updateHookSourceStatusText(LyricsRuntimeSource.SUPER_LYRIC);
-                startSuperLyricRealtimeTicker();
-                fetchLyricsFromSuperLyricApi(title, artist, requestSeq, trackKey);
-                return;
-            }
-            scheduleNoLyricsIfStillEmpty(requestSeq, trackKey, null, null);
-        } finally {
-            kuwoAllowThirdPartyFallback = false;
-        }
+
+        // 酷我车机版：仅使用自身数据源，不调用第三方 API 兜底。
+        // AUDIO_LYRIC（MediaSession extras）和 LYRIC_FULL（广播 words_json）均已尝试，
+        // 若仍无歌词则等待切歌后重新获取。
+        LogHelper.d(TAG, "酷我 AUDIO_LYRIC + 广播均未命中（" + reason
+            + "），不调用第三方兜底，等待下次切歌重试");
+        updateHookSourceStatusText(LyricsRuntimeSource.KUWO_AUDIO_LYRIC, "无歌词·等待切歌");
+        scheduleNoLyricsIfStillEmpty(requestSeq, trackKey, null, null);
     }
 
     private void beginLyricsAcquisitionForTrack(String pkg, String trackKey, int requestSeq, String title, String artist) {
