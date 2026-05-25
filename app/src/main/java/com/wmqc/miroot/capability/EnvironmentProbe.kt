@@ -20,7 +20,7 @@ enum class PrivilegedShellRoute {
 }
 
 /**
- * 运行环境探测：Root、Shizuku、Xposed/LSPosed。
+ * 运行环境探测：Root、Shizuku。
  * 后续背屏相关指令可在此集中选择可用的执行通道。
  */
 object EnvironmentProbe {
@@ -141,17 +141,6 @@ object EnvironmentProbe {
         probeRootSync() -> PrivilegedShellRoute.ROOT
         shizukuServiceRunning() && shizukuPermissionGranted() -> PrivilegedShellRoute.SHIZUKU
         else -> PrivilegedShellRoute.NONE
-    }
-
-    /**
-     * 检测 Xposed 运行时（含 LSPosed 等），不引入 compileOnly 依赖，避免非 Xposed 环境链接失败。
-     */
-    fun xposedRuntimePresent(): Boolean = try {
-        val c = Class.forName("de.robv.android.xposed.XposedBridge")
-        val v = c.getMethod("getXposedVersion").invoke(null) as Int
-        v > 0
-    } catch (_: Throwable) {
-        false
     }
 }
 

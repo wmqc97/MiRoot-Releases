@@ -290,8 +290,6 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.jieba.android)
     implementation("com.github.HChenX:SuperLyricApi:3.4")
-    // Modern Xposed API (LSPosed / libxposed) - compileOnly for module developers
-    compileOnly("io.github.libxposed:api:101.0.1")
     testImplementation(libs.junit)
     // JVM 单元测试中 android.jar 的 org.json 为桩，JSONObject.put 等会抛「not mocked」；测试用真实实现
     testImplementation(libs.json.org)

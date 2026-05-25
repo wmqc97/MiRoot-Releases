@@ -41,7 +41,6 @@
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:description="@string/xposed_module_desc"
         android:fullBackupContent="@xml/backup_rules"
         android:enableOnBackInvokedCallback="false"
         android:icon="@mipmap/ic_launcher_v2"

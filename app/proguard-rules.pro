@@ -32,9 +32,6 @@
 -dontwarn androidx.media3.**
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
 
-# Modern Xposed (LSPosed / libxposed) module metadata + entry class
--keep class com.wmqc.miroot.lsp.** { *; }
-
 # SuperLyricApi（官方 README 强烈建议，勿删）
 # Binder / AIDL / 数据模型类名被混淆会导致 registerReceiver、onLyric 回调异常。
 -keep class com.hchen.superlyricapi.** { *; }

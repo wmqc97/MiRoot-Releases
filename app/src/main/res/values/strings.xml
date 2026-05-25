@@ -124,7 +124,6 @@
     <string name="help_perm_status_card">展示 Root/Shizuku 状态与版本号。点击卡片查看授权说明，点击版本号查看使用说明。</string>
     <string name="help_runtime_auth">列出文件访问、悬浮窗、省电策略、通知等运行时权限状态。点击跳转系统设置，已授权项无需操作。</string>
     <string name="help_sys_info">展示系统版本与背屏组件信息，便于排查兼容性。</string>
-    <string name="help_more_xposed">展示本机是否检测到 Xposed/LSPosed 框架，仅供环境参考。</string>
     <string name="help_music_controls">开始或结束背屏歌词投屏。需要 Root/Shizuku 与通知使用权，请先播放音乐再点「开始投屏」。酷我车载自动从 AUDIO_LYRIC 获取歌词，其他应用走会话/通知与 API 回退。「自动投屏」随播放自动开关投屏。</string>
     <string name="help_music_display">调节歌词字号、字体、来源与显示模式。逐行模式可设置逐字显示、未唱歌词透明度、时间偏移及底图。专辑图背景请在「效果」卡片设置。部分选项与深渊镜等互斥。</string>
     <string name="help_music_effects">省电模式、专辑图背景、边框、跑马灯及呼吸、随机配色等微调参数。互斥项自动关闭。</string>
@@ -424,8 +423,6 @@
     <string name="status_no_root">未检测到 su 或拒绝授权</string>
     <string name="status_shizuku_off">Shizuku 服务未运行</string>
     <string name="status_shizuku_need_perm">需要 Shizuku 应用内授权</string>
-    <string name="status_xposed_on">检测到 Xposed 框架</string>
-    <string name="status_xposed_off">未检测到 Xposed 运行时</string>
     <string name="action_refresh">重新检测</string>
     <string name="action_force_stop_title">强制结束 MiRoot</string>
     <string name="action_force_stop_message">将立即终止 MiRoot 进程（含后台服务）。确定继续？</string>
@@ -606,9 +603,6 @@
     <string name="settings_overlay_reset_ok">已恢复内置默认</string>
 
     <string name="more_title">更多</string>
-    <string name="more_xposed_title">Xposed / LSPosed</string>
-    <string name="more_xposed_body">框架类能力需在 LSPosed 中启用对应模块。本页仅作环境说明，具体 Hook 请在模块内配置。</string>
-    <string name="xposed_module_desc">小米17pro系列背屏工具</string>
     <string name="more_afdian_title">爱发电解锁</string>
     <string name="more_afdian_body">在爱发电完成赞助后，将订单号粘贴到下方并验证，即可解锁相关功能（需联网）。</string>
     <string name="more_afdian_order_hint">订单号（out_trade_no）</string>
