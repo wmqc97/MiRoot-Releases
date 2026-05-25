@@ -2,7 +2,7 @@
   <img src="assets/MiRoot.png" alt="MiRoot" width="192"/>
 </p>
 
-<h1 align="center">MiRoot</h1>
+<h1 align="center">MiRoot V1.9.2</h1>
 
 <p align="center">
   <strong>小米 17 Pro 系列手机背屏增强工具</strong><br>
