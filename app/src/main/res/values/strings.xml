@@ -39,6 +39,8 @@
     <string name="update_log_v189_message">【简短说明】\nMiRoot 已更新至 V1.8.9：新增在线版本更新检查、逐字高亮进度准确性与切歌清旧歌词优化。\n\n【更新内容】\n• 新增「版本更新」：状态页支持检查 GitHub 新版本，一键下载与安装更新。\n• 歌词逐字高亮：修复逐字进度虚高问题（首字唱到一半显示 80%），预计算总权重后字时长加权更准确。\n• LRC 逐字等分拉伸：网络歌词内嵌逐字时间戳不均匀时自动等分到行时长，逐字高亮速度与演唱匹配。\n• 切歌清歌词：切换歌曲后立即清空旧歌词视图，减少残留与错句。\n• 背屏歌词投屏、显示体验持续优化。\n• 修复若干已知问题。</string>
     <string name="update_log_v190_title">MiRoot V1.9.0 更新</string>
     <string name="update_log_v190_message">【简短说明】\nMiRoot 已更新至 V1.9.0：升级弹窗焕新，自定义背景开关新增，背屏体验与稳定性持续改进。\n\n【更新内容】\n• 版本更新弹窗全新改版：更清晰的版本对比布局，更新日志独立展示，下载交互更直观。\n• 自定义背景功能：背屏支持自定义背景图片/视频，提供更多个性化选择。\n• 背屏歌词显示、投屏稳定性与切歌衔接持续优化。\n• Root / Shizuku 调用链路与异常兜底持续改进。\n• 修复若干已知问题。</string>
+    <string name="update_log_v193_title">MiRoot V1.9.3 更新</string>
+    <string name="update_log_v193_message">【简短说明】\nMiRoot 已更新至 V1.9.3：移除 Xposed/LSPosed 模块，精简代码与依赖。\n\n【更新内容】\n• 移除 Xposed/LSPosed 模块：不再作为 Xposed 模块运行，歌词等功能已全面走网络 API、SuperLyric IPC 与 Root/Shizuku 通道。\n• 移除 libxposed compileOnly 依赖与 ProGuard 规则。\n• 移除"更多"页 Xposed 环境检测与状态显示。\n• 精简相关代码与文档，安装后无需在 LSPosed 中启用模块。\n• 修复若干已知问题。</string>
     <string name="update_log_v192_title">MiRoot V1.9.2 更新</string>
     <string name="update_log_v192_message">【简短说明】\nMiRoot 已更新至 V1.9.2：酷我车机版新增逐字高亮效果，背屏歌词体验持续优化。\n\n【更新内容】\n• 酷我车机版（cn.kuwo.kwmusiccar）新增广播歌词桥接，支持直接逐字高亮，无需 SuperLyric 模块即可实现逐字歌词效果。\n• 酷我歌词解析优化：增强 LRC 解析器兼容性，修复逐字时间戳匹配问题。\n• 背屏歌词显示与投屏稳定性持续改进。\n• 修复若干已知问题。</string>
     <string name="update_log_v191_title">MiRoot V1.9.1 更新</string>
