@@ -1044,6 +1044,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private MediaController.Callback mediaControllerCallback;
     /** 酷我车载：MediaBrowser 直连 KwMediaSessionService */
     private KuwoCarMediaSessionHelper kuwoCarMediaSessionHelper;
+    /**
+     * 酷我车载：LYRIC_FULL / LYRIC_PROGRESS 广播桥（参考酷我移植参考文档.md §9）。
+     * 优先级：当广播到达时立即覆盖现有歌词；离开时不影响其它来源（MediaSession / 网络 / SuperLyric）。
+     */
+    private KuwoBroadcastLyricBridge kuwoBroadcastLyricBridge;
     /** 当前是否使用酷我 MediaBrowser 会话（用于 extras 歌词与 loadLyrics 分支） */
     private boolean kuwoCarLyricsSessionActive;
     /** 上次成功绑定的播放器包名；用于检测跨应用切换并重置歌词状态 */
@@ -3151,6 +3156,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             }
         }
         
+        android.util.Log.wtf("MIR", "lyrics-setup abyssal=" + abyssalMirrorEnabled);
+        System.out.println("MIR-LYRIC-SETUP abyssalMirrorEnabled=" + abyssalMirrorEnabled);
         if (!abyssalMirrorEnabled) {
             // 普通模式
             lyricsView = new ModernLyricsView(this);
@@ -3231,8 +3238,20 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             });
             
             rootLayout.addView(lyricsView);
-            
+
             LogHelper.d(TAG, "✅ 已创建普通歌词视图");
+
+            // 酷我车载广播桥：监听 LYRIC_FULL / LYRIC_PROGRESS（参考酷我移植参考文档.md §9）
+            try {
+                android.util.Log.wtf("MIR", "kuwo-bridge-start");
+                if (kuwoBroadcastLyricBridge == null) {
+                    kuwoBroadcastLyricBridge = new KuwoBroadcastLyricBridge(this, lyricsView);
+                }
+                kuwoBroadcastLyricBridge.start();
+                android.util.Log.wtf("MIR", "kuwo-bridge-started");
+            } catch (Exception e) {
+                android.util.Log.wtf("MIR", "kuwo-bridge-fail: " + e.getMessage());
+            }
         }
 
         // 控制按钮容器：左侧与歌词区一致的背屏留白，三键在条内均分
@@ -4120,6 +4139,74 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             markKuwoAudioLyricApplied();
             LogHelper.d(TAG, "✅ 已应用酷我 AUDIO_LYRIC，行数=" + enhancedLyricLines.size());
         });
+    }
+
+    /**
+     * 应用酷我车机版 LYRIC_FULL 广播携带的逐字歌词（参考酷我移植参考文档.md §9）。
+     * 与 AUDIO_LYRIC（仅行级）相比，本路径的 wordTimestamps 来自 words_json，可驱动逐字高亮。
+     * 数据通过 setLyricsToView 走与 AUDIO_LYRIC 一致的链路，更新 enhancedLyricLines 并交给 ModernLyricsView。
+     */
+    public void applyKuwoBroadcastLyrics(List<EnhancedLRCParser.EnhancedLyricLine> lines) {
+        if (lines == null || lines.isEmpty()) {
+            return;
+        }
+        runOnUiThread(() -> {
+            try {
+                enhancedLyricLines = lines;
+                cancelPendingNoLyrics();
+                superLyricFallbackModeActive = false;
+                applyFallbackRenderingModeIfNeeded();
+                setLyricsToView(enhancedLyricLines);
+                markKuwoAudioLyricApplied();
+                if (lyricsView != null) {
+                    lyricsView.setEnableWordByWord(true);
+                }
+                int wordCount = 0;
+                for (EnhancedLRCParser.EnhancedLyricLine l : lines) {
+                    if (l != null && l.wordTimestamps != null) {
+                        wordCount += l.wordTimestamps.size();
+                    }
+                }
+                LogHelper.d(TAG, "✅ 已应用酷我 LYRIC_FULL 广播逐字数据：" + lines.size()
+                    + " 行 / " + wordCount + " 字");
+            } catch (Exception e) {
+                LogHelper.e(TAG, "❌ 应用酷我 LYRIC_FULL 广播失败", e);
+            }
+        });
+    }
+
+    /**
+     * 应用酷我车机版 LYRIC_PROGRESS 广播携带的播放进度（参考酷我移植参考文档.md §9.4）。
+     * @param positionMs 绝对播放进度（毫秒）
+     * @param playing 是否正在播放
+     * @param lineIndex 当前行索引（-1 表示未提供）
+     * @param wordCharStart 当前字起始字符位置（-1 表示未提供）
+     * @param wordCharEnd 当前字结束字符位置（-1 表示未提供）
+     */
+    public void applyKuwoBroadcastProgress(long positionMs, boolean playing,
+                                           int lineIndex, int wordCharStart, int wordCharEnd) {
+        runOnUiThread(() -> {
+            try {
+                if (lyricsView != null) {
+                    lyricsView.setPlaybackActive(playing);
+                    if (positionMs > 0L && positionMs <= 3600000L) {
+                        lyricsView.updatePosition(positionMs);
+                    }
+                    // Direct word hint from Kuwo broadcast — bypass time-based interpolation
+                    if (lineIndex >= 0 && wordCharStart >= 0 && wordCharEnd >= 0) {
+                        lyricsView.setKuwoWordHighlightHint(lineIndex, wordCharStart, wordCharEnd);
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        });
+    }
+
+    /**
+     * 应用酷我车机版 LYRIC_PROGRESS 广播（仅进度，兼容旧调用方）。
+     */
+    public void applyKuwoBroadcastProgress(long positionMs, boolean playing) {
+        applyKuwoBroadcastProgress(positionMs, playing, -1, -1, -1);
     }
 
     /**
@@ -5468,7 +5555,15 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         long lastTime = last != null ? last.time : -1L;
         int firstHash = first != null && first.text != null ? first.text.hashCode() : 0;
         int lastHash = last != null && last.text != null ? last.text.hashCode() : 0;
-        return lines.size() + "|" + firstTime + "|" + lastTime + "|" + firstHash + "|" + lastHash;
+        // 计入逐字时间戳总数：从无逐字升级到有逐字（如 AUDIO_LYRIC → 酷我广播 LYRIC_FULL）
+        // 时不会被指纹去重误判为同源，确保升级到带逐字数据的来源能立即生效。
+        long wordCount = 0L;
+        for (EnhancedLRCParser.EnhancedLyricLine line : lines) {
+            if (line != null && line.wordTimestamps != null) {
+                wordCount += line.wordTimestamps.size();
+            }
+        }
+        return lines.size() + "|" + firstTime + "|" + lastTime + "|" + firstHash + "|" + lastHash + "|w" + wordCount;
     }
 
     private String buildTrackKey(String title, String artist, String packageName, long durationMs) {
@@ -8493,6 +8588,14 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         cancelMainScreenPlaceholderTimeout();
         cancelRearStopExitGrace();
         stopSuperLyricRealtimeTicker();
+        try {
+            if (kuwoBroadcastLyricBridge != null) {
+                kuwoBroadcastLyricBridge.stop();
+                kuwoBroadcastLyricBridge = null;
+            }
+        } catch (Exception e) {
+            LogHelper.w(TAG, "停止酷我广播歌词桥失败: " + e.getMessage());
+        }
         try {
             lyricsParseExecutor.shutdownNow();
         } catch (Exception ignored) {

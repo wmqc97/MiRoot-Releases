@@ -240,6 +240,12 @@ public class ModernLyricsView extends View {
     private long lastWordProgressSampleUptimeMs = 0L;
     private int wordTimestampsRevision = 0;
     private int lastWordProgressRevision = -1;
+    // Kuwo broadcast direct word hint — overrides time-based progress for accurate word-by-word
+    private boolean mKuwoWordHintValid = false;
+    private int mKuwoWordHintLineIndex = -1;   // line index from broadcast
+    private int mKuwoWordHintCharStart = -1;   // wordCharStart from broadcast
+    private int mKuwoWordHintCharEnd = -1;     // wordCharEnd from broadcast
+    private long mKuwoWordHintTimestamp = 0L;  // uptimeMs when hint was set
     private float scrollY = 0f;
     private float targetScrollY = 0f;
     /** 时间调整偏移量（毫秒）：正数表示相对媒体进度提前显示（与歌词滞后于声音时调大）。 */
@@ -2480,6 +2486,24 @@ public class ModernLyricsView extends View {
         if (line == null) {
             return 0f;
         }
+        // Kuwo broadcast direct word hint: overrides time-based progress for pixel-accurate highlighting
+        if (mKuwoWordHintValid && hasActiveWordTimestamps(line)) {
+            final long kuwoHintStaleMs = 400L; // broadcast fires every ~100ms; 4× tolerance
+            if (android.os.SystemClock.uptimeMillis() - mKuwoWordHintTimestamp < kuwoHintStaleMs) {
+                int idx = lyricLines.indexOf(line);
+                if (idx >= 0 && idx == mKuwoWordHintLineIndex) {
+                    String text = line.text != null ? line.text : "";
+                    if (text.length() > 0) {
+                        // Position highlight at end of current word character.
+                        // wordCharEnd is inclusive; +1 makes it the first un-sung char position.
+                        float charProgress = (float)(mKuwoWordHintCharEnd + 1) / (float)text.length();
+                        return Math.max(0f, Math.min(1f, charProgress));
+                    }
+                }
+            } else {
+                mKuwoWordHintValid = false; // auto-expire stale hint
+            }
+        }
         if (hasActiveWordTimestamps(line)) {
             if (hasModuleWordHighlightTimeline(line)) {
                 float wordTarget = computeFusedWordHighlightTarget(
@@ -2674,6 +2698,19 @@ public class ModernLyricsView extends View {
         float clamped = Math.max(0f, Math.min(1f, target));
         String key = wordProgressLineKey(line);
         long now = SystemClock.uptimeMillis();
+
+        // Kuwo broadcast direct hint: accept progress immediately (monotonic-only guard)
+        if (mKuwoWordHintValid && line != null) {
+            int idx = lyricLines.indexOf(line);
+            if (idx >= 0 && idx == mKuwoWordHintLineIndex) {
+                if (clamped >= lastWordProgressValue || !key.equals(lastWordProgressLineKey)) {
+                    lastWordProgressLineKey = key;
+                    lastWordProgressValue = clamped;
+                }
+                lastWordProgressSampleUptimeMs = now;
+                return lastWordProgressValue;
+            }
+        }
 
         if (!key.equals(lastWordProgressLineKey)) {
             lastWordProgressLineKey = key;
@@ -3807,7 +3844,47 @@ public class ModernLyricsView extends View {
         applyAutoLineSpacingFromFontIfNeeded();
         invalidate();
     }
-    
+
+    /**
+     * Kuwo broadcast LYRIC_PROGRESS provides exact word index and char positions.
+     * This hint overrides the time-based word progress calculation for accurate highlighting.
+     *
+     * @param lineIndex     current singing line index from broadcast
+     * @param wordCharStart inclusive char start index of current word
+     * @param wordCharEnd   inclusive char end index of current word
+     */
+    public void setKuwoWordHighlightHint(int lineIndex, int wordCharStart, int wordCharEnd) {
+        if (lineIndex < 0 || wordCharStart < 0 || wordCharEnd < 0) {
+            this.mKuwoWordHintValid = false;
+            return;
+        }
+        this.mKuwoWordHintValid = true;
+        this.mKuwoWordHintLineIndex = lineIndex;
+        this.mKuwoWordHintCharStart = wordCharStart;
+        this.mKuwoWordHintCharEnd = wordCharEnd;
+        this.mKuwoWordHintTimestamp = android.os.SystemClock.uptimeMillis();
+
+        // Line change from broadcast: update current line and scroll
+        if (lineIndex != currentLineIndex && lineIndex >= 0 && lineIndex < lyricLines.size()) {
+            currentLineIndex = lineIndex;
+            targetScrollY = currentLineIndex * LINE_SPACING;
+            lastAutoCenterAnimatedLineIndex = -1;
+            lastLineChangedAtMs = System.currentTimeMillis();
+            stableShuffleSignature = "";
+            stableShuffleTokens.clear();
+            applyPowerSavingLineColorIfNeeded(true);
+            if (!isDragging && Math.abs(scrollY - targetScrollY) > 4f) {
+                animateScroll(scrollY, targetScrollY);
+            } else if (!isDragging) {
+                scrollY = targetScrollY;
+            }
+        }
+
+        if (enableWordByWord) {
+            postInvalidate();
+        }
+    }
+
     public void setEnableWordByWord(boolean enable) {
         boolean oldValue = this.enableWordByWord;
         this.enableWordByWord = enable;

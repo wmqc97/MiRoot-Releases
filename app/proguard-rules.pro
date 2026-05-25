@@ -44,11 +44,30 @@
 # jieba 分词（词典在 AAR 内，类名勿混淆以免反射/序列化异常）
 -keep class com.huaban.analysis.jieba.** { *; }
 
-# Release 下通过字段名反射访问（ProjectionHelper / MusicProjectionService 等）
+# Kuwo car edition broadcast lyrics bridge (LYRIC_FULL / LYRIC_PROGRESS)
+-keep class com.wmqc.miroot.lyrics.KuwoBroadcastLyricBridge { *; }
+-keep class com.wmqc.miroot.lyrics.KuwoBroadcastLyricParser { *; }
+-keep class com.wmqc.miroot.lyrics.KuwoBroadcastLyricReceiver { *; }
+-keep class com.wmqc.miroot.lyrics.KuwoBroadcastLyricReceiver$Listener { *; }
+-keep class com.wmqc.miroot.lyrics.KuwoCarLyricsPolicy { *; }
+-keep class com.wmqc.miroot.lyrics.KuwoAudioLyricParser { *; }
 -keepclassmembers class com.wmqc.miroot.lyrics.RearScreenLyricsActivity {
     private static com.wmqc.miroot.lyrics.RearScreenLyricsActivity currentInstance;
     private com.wmqc.miroot.lyrics.ModernLyricsView lyricsView;
     private com.wmqc.miroot.lyrics.ITaskService taskService;
+    private com.wmqc.miroot.lyrics.KuwoBroadcastLyricBridge kuwoBroadcastLyricBridge;
+    public void applyKuwoBroadcastLyrics(java.util.List);
+    public void applyKuwoBroadcastProgress(long, boolean, int, int, int);
+}
+
+# Kuwo broadcast word hint fields+method in ModernLyricsView
+-keepclassmembers class com.wmqc.miroot.lyrics.ModernLyricsView {
+    public void setKuwoWordHighlightHint(int, int, int);
+    boolean mKuwoWordHintValid;
+    int mKuwoWordHintLineIndex;
+    int mKuwoWordHintCharStart;
+    int mKuwoWordHintCharEnd;
+    long mKuwoWordHintTimestamp;
 }
 -keepclassmembers class com.wmqc.miroot.car.RearScreenCarControlActivity {
     private static com.wmqc.miroot.car.RearScreenCarControlActivity currentInstance;
