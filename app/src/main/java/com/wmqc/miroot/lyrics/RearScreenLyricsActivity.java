@@ -1279,6 +1279,22 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         updateHookSourceStatusText(LyricsRuntimeSource.KUWO_AUDIO_LYRIC);
     }
 
+    /**
+     * 检查当前歌词是否包含来自 LYRIC_FULL 广播的逐字时间戳。
+     * 用于防止 AUDIO_LYRIC（仅行级）覆盖更优的广播逐字数据。
+     */
+    private boolean hasBroadcastWordTimestamps() {
+        if (enhancedLyricLines == null || enhancedLyricLines.isEmpty()) {
+            return false;
+        }
+        for (EnhancedLRCParser.EnhancedLyricLine line : enhancedLyricLines) {
+            if (line != null && line.wordTimestamps != null && !line.wordTimestamps.isEmpty()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void cancelPendingKuwoNativeFallbackWait() {
         if (pendingKuwoNativeFallbackRunnable != null) {
             uiHandler.removeCallbacks(pendingKuwoNativeFallbackRunnable);
@@ -4114,6 +4130,12 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             LogHelper.d(TAG, "酷我 extras 为空，继续等待 AUDIO_LYRIC（由超时任务兜底）");
             return;
         }
+        // 如果 enhancedLyricLines 已包含来自 LYRIC_FULL 广播的逐字时间戳（words_json），
+        // 则跳过 AUDIO_LYRIC（仅行级），因为广播数据更优。
+        if (hasBroadcastWordTimestamps()) {
+            LogHelper.d(TAG, "🛡️ 跳过 AUDIO_LYRIC：广播 LYRIC_FULL 已提供逐字时间戳数据");
+            return;
+        }
         String json = extras.getString(KuwoAudioLyricParser.EXTRA_AUDIO_LYRIC);
         final String kuwoTrackKey = buildTrackKey(stableTitle, stableArtist, resolveCurrentLyricsPackageName(), stableDurationMs);
         if (kuwoTrackKey.equals(lastKuwoAudioLyricTrackKey)
@@ -4144,6 +4166,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     /**
      * 应用酷我车机版 LYRIC_FULL 广播携带的逐字歌词（参考酷我移植参考文档.md §9）。
      * 与 AUDIO_LYRIC（仅行级）相比，本路径的 wordTimestamps 来自 words_json，可驱动逐字高亮。
+     * 此来源优先级最高：接收到广播数据后，其他来源（AUDIO_LYRIC、网络 API、SuperLyric）不会覆盖。
      * 数据通过 setLyricsToView 走与 AUDIO_LYRIC 一致的链路，更新 enhancedLyricLines 并交给 ModernLyricsView。
      */
     public void applyKuwoBroadcastLyrics(List<EnhancedLRCParser.EnhancedLyricLine> lines) {
@@ -4158,6 +4181,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 applyFallbackRenderingModeIfNeeded();
                 setLyricsToView(enhancedLyricLines);
                 markKuwoAudioLyricApplied();
+                // 更新来源标识为广播逐字（覆盖 AUDIO_LYRIC 的通用标记）
+                updateHookSourceStatusText(LyricsRuntimeSource.KUWO_AUDIO_LYRIC, "广播·逐字");
                 if (lyricsView != null) {
                     lyricsView.setEnableWordByWord(true);
                 }
@@ -4168,7 +4193,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     }
                 }
                 LogHelper.d(TAG, "✅ 已应用酷我 LYRIC_FULL 广播逐字数据：" + lines.size()
-                    + " 行 / " + wordCount + " 字");
+                    + " 行 / " + wordCount + " 字（优先级：最高，广播 > AUDIO_LYRIC > 其他来源）");
             } catch (Exception e) {
                 LogHelper.e(TAG, "❌ 应用酷我 LYRIC_FULL 广播失败", e);
             }
@@ -5140,18 +5165,24 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 lyrics = "";
                 if (mediaController != null) {
                     try {
-                        Bundle ex = mediaController.getExtras();
-                        String json = ex != null ? ex.getString(KuwoAudioLyricParser.EXTRA_AUDIO_LYRIC) : null;
-                        EnhancedLRCParser.ParseResult kuwoPr = KuwoAudioLyricParser.parse(json);
-                        if (kuwoPr != null && kuwoPr.lines != null && !kuwoPr.lines.isEmpty()) {
-                            enhancedLyricLines = kuwoPr.lines;
-                            cancelPendingNoLyrics();
-                            superLyricFallbackModeActive = false;
-                            applyFallbackRenderingModeIfNeeded();
-                            setLyricsToView(enhancedLyricLines);
-                            markKuwoAudioLyricApplied();
-                            LogHelper.d(TAG, "✅ 酷我 AUDIO_LYRIC 已解析: " + enhancedLyricLines.size() + " 行");
-                            return;
+                        // 如果广播已提供带逐字时间戳的歌词（LYRIC_FULL），跳过 AUDIO_LYRIC
+                        if (hasBroadcastWordTimestamps()) {
+                            LogHelper.d(TAG, "🛡️ loadLyrics 跳过 AUDIO_LYRIC：广播逐字数据已就绪");
+                            // 不 return，继续检查是否需要第三方 API 兜底
+                        } else {
+                            Bundle ex = mediaController.getExtras();
+                            String json = ex != null ? ex.getString(KuwoAudioLyricParser.EXTRA_AUDIO_LYRIC) : null;
+                            EnhancedLRCParser.ParseResult kuwoPr = KuwoAudioLyricParser.parse(json);
+                            if (kuwoPr != null && kuwoPr.lines != null && !kuwoPr.lines.isEmpty()) {
+                                enhancedLyricLines = kuwoPr.lines;
+                                cancelPendingNoLyrics();
+                                superLyricFallbackModeActive = false;
+                                applyFallbackRenderingModeIfNeeded();
+                                setLyricsToView(enhancedLyricLines);
+                                markKuwoAudioLyricApplied();
+                                LogHelper.d(TAG, "✅ 酷我 AUDIO_LYRIC 已解析: " + enhancedLyricLines.size() + " 行");
+                                return;
+                            }
                         }
                     } catch (Exception e) {
                         LogHelper.w(TAG, "酷我歌词解析失败: " + e.getMessage());
