@@ -325,11 +325,8 @@ public class CarButtonStateManager {
                 // 非 pending 态：直接同步远程状态
                 boolean newVal = resolveStateFromPrefsOrStatus(info.key, status, prefs);
                 if (info.remoteOn != newVal) {
-                    // 仅当 API 数据可用时更新，避免 API 返回"未知"导致串联按钮错误改变状态
-                    if (isApiDataAvailable(info.key, status)) {
-                        info.remoteOn = newVal;
-                        notifyStateChanged(i);
-                    }
+                    info.remoteOn = newVal;
+                    notifyStateChanged(i);
                 }
             }
             // pending 但不可轮询的（AC/座椅加热）：不处理，等待命令结果
@@ -399,23 +396,6 @@ public class CarButtonStateManager {
                 return false; // always show "off" initially
             default:
                 return extractStateFromStatus(key, status);
-        }
-    }
-
-    /**
-     * 检查 API 返回的某个功能字段是否可用（非"未知"）。
-     * 仅在数据可用时更新非 pending 按钮状态，避免 API 返回不完整数据时串联按钮状态。
-     */
-    private static boolean isApiDataAvailable(CarButtonInfo.FunctionKey key,
-                                               VehicleStatusService.VehicleStatusInfo status) {
-        if (status == null) return false;
-        switch (key) {
-            case LOCK:      return !"未知".equals(status.doorLockStatusDriver);
-            case WINDOW:    return !"未知".equals(status.winStatusDriver);
-            case ENGINE:    return !"未知".equals(status.engineStatus);
-            case TRUNK:     return !"未知".equals(status.trunkOpenStatus);
-            case VENTILATE: return !"未知".equals(status.winPosDriver);
-            default:        return true;
         }
     }
 
