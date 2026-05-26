@@ -57,7 +57,7 @@ enum class DownloadErrorReason {
 object GitHubUpdateChecker {
 
     private const val OWNER = "wmqc97"
-    private const val REPO = "MiRoot"
+    private const val REPO = "MiRoot-Releases"
     private const val API_URL = "https://api.github.com/repos/$OWNER/$REPO/releases/latest"
     private const val USER_AGENT = "MiRoot-Android/1.0"
 
