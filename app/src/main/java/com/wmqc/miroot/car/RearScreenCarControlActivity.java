@@ -1937,18 +1937,22 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         if (text == null) {
             return false;
         }
-        if ("解锁".equals(text) || "开窗".equals(text) || "打开空调".equals(text) || "打开座椅加热".equals(text)
-                || "点火".equals(text) || "主驾加热".equals(text) || "副驾加热".equals(text)
-                || "寻车".equals(text)) {
+        // 蓝底：未锁、窗开、空调开、加热开、尾箱开等（车辆处于"活跃"状态）
+        if ("锁车".equals(text) || "关窗".equals(text) || "关闭空调".equals(text) || "关闭座椅加热".equals(text)
+                || "熄火".equals(text) || "关闭主驾加热".equals(text) || "关闭副驾加热".equals(text)) {
             return true;
         }
-        // 尾箱未开启时，开后备箱类按钮为白底
+        // 寻车为单次操作，按下去时蓝底
+        if ("寻车".equals(text)) {
+            return true;
+        }
+        // 尾箱开启时蓝底（与 isOpenState 一致）
         if ("尾箱".equals(text) || "后备箱".equals(text) || "开后备箱".equals(text)) {
-            return !isTrunkOpen;
+            return isTrunkOpen;
         }
         // 透气按钮：仅车窗位置在透气范围（一条缝）时蓝底，全开或关闭时白底
         if ("透气".equals(text)) {
-            return !isVentMode;
+            return isVentMode;
         }
         return false;
     }
