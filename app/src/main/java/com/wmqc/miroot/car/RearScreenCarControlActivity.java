@@ -204,6 +204,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     // 控制按钮（动态创建，最多8个）
     public Button[] controlButtons = new Button[8];
     private String[] buttonFunctions = new String[8];
+    private CarButtonStateManager carButtonStateManager;
     
     // ViewPager相关
     private androidx.viewpager2.widget.ViewPager2 buttonPageContainer;
@@ -215,8 +216,10 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
 
     // 后备箱状态（用于判断背景色）
     private boolean isTrunkOpen = false;
-    // 车窗状态（用于判断透气按钮颜色）
+    // 车窗状态（用于判断开窗/关窗按钮）
     private boolean isWindowOpen = false;
+    // 透气模式：车窗位置为一条缝（区别于全开），用于透气按钮背景色
+    private boolean isVentMode = false;
 
     /** 车控圆形按钮底色 / 图标色（随 {@link #syncCarControlThemeColors()} 与系统深浅色变化） */
     private int carBtnBgPrimary = 0xFFB3E5FC;
@@ -255,7 +258,6 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     
     // Handler和Runnable（用于避免内存泄漏）
     private Handler mainHandler;
-    private Runnable refreshCarInfoRunnable; // 5秒延迟刷新车辆信息
     private Runnable retryDisableGestureRunnable; // 重试屏蔽手势服务
     private Runnable retryEnableGestureRunnable; // 重试恢复手势服务
     private Runnable delayedResumeCheckRunnable; // onResume延迟检查
@@ -1657,7 +1659,85 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         
         // 从配置加载按钮
         loadButtonConfig();
-        
+
+        // 初始化 CarButtonStateManager（必须在 setupViewPager 之前，确保按钮状态可用）
+        carButtonStateManager = new CarButtonStateManager(this);
+        SharedPreferences carPrefs = getSharedPreferences(CAR_CONTROL_PREFS, MODE_PRIVATE);
+        carButtonStateManager.loadFromPrefs(carPrefs);
+        // 恢复上次确认的后备箱/透气状态，避免异步 API 返回前按钮颜色闪烁
+        isTrunkOpen = carPrefs.getBoolean(KEY_IS_TRUNK_OPEN, false);
+        isVentMode = carPrefs.getBoolean(KEY_IS_VENT_MODE, false);
+        carButtonStateManager.setCallback(new CarButtonStateManager.Callback() {
+            @Override
+            public void onButtonStateChanged(int slotIndex) {
+                if (isFinishing() || isDestroyed()) return;
+                String newText = carButtonStateManager.getDisplayText(slotIndex);
+                updateButtonText(slotIndex, newText);
+                if (buttonFunctions != null && slotIndex < buttonFunctions.length) {
+                    buttonFunctions[slotIndex] = newText;
+                }
+                // 车窗状态变化时同步更新透气按钮背景
+                if (carButtonStateManager.getFunctionKey(slotIndex) == CarButtonInfo.FunctionKey.WINDOW) {
+                    isWindowOpen = carButtonStateManager.getRemoteOn(slotIndex);
+                    for (int v = 0; v < 8; v++) {
+                        if (carButtonStateManager.getFunctionKey(v) == CarButtonInfo.FunctionKey.VENTILATE) {
+                            updateButtonBackground(v, "透气");
+                            break;
+                        }
+                    }
+                }
+                // 透气按钮状态变化时持久化 isVentMode
+                if (carButtonStateManager.getFunctionKey(slotIndex) == CarButtonInfo.FunctionKey.VENTILATE) {
+                    isVentMode = carButtonStateManager.getRemoteOn(slotIndex);
+                    getSharedPreferences(CAR_CONTROL_PREFS, MODE_PRIVATE)
+                        .edit().putBoolean(KEY_IS_VENT_MODE, isVentMode).apply();
+                }
+                // 后备箱状态变化时更新 isTrunkOpen
+                if (carButtonStateManager.getFunctionKey(slotIndex) == CarButtonInfo.FunctionKey.TRUNK) {
+                    isTrunkOpen = carButtonStateManager.getRemoteOn(slotIndex);
+                    getSharedPreferences(CAR_CONTROL_PREFS, MODE_PRIVATE)
+                        .edit().putBoolean(KEY_IS_TRUNK_OPEN, isTrunkOpen).apply();
+                }
+            }
+
+            @Override
+            public void onSyncStart() {
+                if (!isFinishing() && !isDestroyed()) {
+                    startRefreshIconRotation();
+                }
+            }
+
+            @Override
+            public void onSyncComplete() {
+                if (!isFinishing() && !isDestroyed()) {
+                    stopRefreshIconRotation();
+                }
+            }
+
+            @Override
+            public void onCommandResult(int slotIndex, boolean success, String message) {
+                if (isFinishing() || isDestroyed()) return;
+                if (success) {
+                    // 首次成功（message==null）时震动反馈；"confirmed" 轮询确认只刷新 UI 不重复震
+                    if (message == null) {
+                        vibrate(VIBRATE_SUCCESS_LONG_PRESS_MS);
+                    }
+                    showToast("执行成功");
+                    // 延迟刷新车辆信息面板（等待 API 状态同步）
+                    if (mainHandler != null) {
+                        mainHandler.postDelayed(() -> {
+                            if (!isFinishing() && !isDestroyed()) {
+                                initCarInfo();
+                            }
+                        }, 2000);
+                    }
+                } else {
+                    vibrate(VIBRATE_TOUCH_DOWN_MS); // 失败短震
+                    showToast(message != null ? "失败: " + message : "执行失败");
+                }
+            }
+        });
+
         // 设置ViewPager2（必须在loadButtonConfig之后）
         setupViewPager();
 
@@ -1865,6 +1945,10 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         // 尾箱未开启时，开后备箱类按钮为白底
         if ("尾箱".equals(text) || "后备箱".equals(text) || "开后备箱".equals(text)) {
             return !isTrunkOpen;
+        }
+        // 透气按钮：仅车窗位置在透气范围（一条缝）时蓝底，全开或关闭时白底
+        if ("透气".equals(text)) {
+            return !isVentMode;
         }
         return false;
     }
@@ -2189,7 +2273,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                "关闭主驾加热".equals(text) ||  // 关闭主驾加热按钮表示当前打开（开启状态）
                "关闭副驾加热".equals(text) ||  // 关闭副驾加热按钮表示当前打开（开启状态）
                "关窗".equals(text) ||  // 关窗按钮表示当前车窗打开（开启状态）
-               ("透气".equals(text) && isWindowOpen) ||  // 透气按钮：车窗打开时表示当前已透气（开启状态）
+               ("透气".equals(text) && isVentMode) ||  // 透气按钮：仅透气模式（一条缝）时显示开启状态
                (("尾箱".equals(text) || "后备箱".equals(text) || "开后备箱".equals(text)) && isTrunkOpen);
     }
     
@@ -2407,6 +2491,8 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     private static final String KEY_AC_TEMPERATURE = "ac_temperature";  // 空调温度（℃）
     private static final String KEY_SEAT_HEATING_DURATION = "seat_heating_duration";  // 座椅加热时长（分钟）
     private static final String KEY_SEAT_HEATING_LEVEL = "seat_heating_level";  // 座椅加热等级（1或2）
+    private static final String KEY_IS_TRUNK_OPEN = "is_trunk_open";
+    private static final String KEY_IS_VENT_MODE = "is_vent_mode";
     
     // 默认参数值（与SettingsActivity保持一致）
     private static final int DEFAULT_AC_DURATION = 10;  // 默认10分钟
@@ -2683,7 +2769,8 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 final String interiorTempStr = interiorTemp;
                 final String exteriorTempStr = exteriorTemp;
                 final String updateTime = updateTimeStr;
-                
+                final VehicleStatusService.VehicleStatusInfo finalStatusInfo = statusInfo;
+
                 // 在主线程更新UI
                 if (mainHandler != null) {
                     mainHandler.post(() -> {
@@ -2691,7 +2778,28 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                         stopRefreshIconRotation();
                         if (!isFinishing() && !isDestroyed()) {
                             isTrunkOpen = trunkOpen; // 更新后备箱状态
-                            isWindowOpen = "已开".equals(windowStatus); // 更新车窗状态（用于透气按钮）
+                            isWindowOpen = "已开".equals(windowStatus); // 更新车窗状态
+                            // 解析透气模式：winPosDriver 非0且未全开=透气（一条缝）
+                            isVentMode = false;
+                            if (finalStatusInfo != null && finalStatusInfo.winPosDriver != null) {
+                                try {
+                                    int pos = Integer.parseInt(finalStatusInfo.winPosDriver);
+                                    isVentMode = pos > 0 && pos <= 50;
+                                } catch (NumberFormatException ignored) {}
+                            }
+
+                            // 持久化后备箱/透气状态
+                            SharedPreferences prefs = getSharedPreferences(CAR_CONTROL_PREFS, MODE_PRIVATE);
+                            prefs.edit()
+                                .putBoolean(KEY_IS_TRUNK_OPEN, isTrunkOpen)
+                                .putBoolean(KEY_IS_VENT_MODE, isVentMode)
+                                .apply();
+
+                            // 同步 CarButtonStateManager（会触发 onButtonStateChanged 回调更新按钮 UI）
+                            if (carButtonStateManager != null) {
+                                carButtonStateManager.syncFromRemote(finalStatusInfo, prefs);
+                            }
+
                             updateCarInfo(range, fuel, odometerStr, interiorTempStr, exteriorTempStr, updateTime, lockStatus, windowStatus);
                         }
                     });
@@ -2800,77 +2908,21 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             updateTimeText.setTextColor(colorCarUpdateTime);
         }
         
-        // 根据车辆状态更新按钮文本（解锁/锁车、开窗/关窗）
-        updateButtonTextByStatus(lockStatus, windowStatus);
-        
-        LogHelper.d(TAG, "✅ 车辆信息已更新 - 续航: " + range + "km, 油量: " + fuelPercent + "%, 总里程: " + odometer + "km, 车内: " + interiorTemp + "℃, 车外: " + exteriorTemp + "℃");
-    }
-    
-    /**
-     * 根据车辆状态更新按钮文本
-     * @param lockStatus 锁车状态（小写）
-     * @param windowStatus 车窗状态（小写）
-     */
-    private void updateButtonTextByStatus(String lockStatus, String windowStatus) {
-        for (int i = 0; i < controlButtons.length && i < buttonFunctions.length; i++) {
-            String function = buttonFunctions[i];
-            
-            // 判断锁车状态并更新按钮文本（处理合并后的按钮）
-            if ("解锁".equals(function) || "锁车".equals(function)) {
-                if (!"未知".equals(lockStatus)) {
-                    // 使用翻译后的状态值判断（"已锁"或"未锁"）
-                    boolean isLocked = "已锁".equals(lockStatus);
-                    String newText = isLocked ? "解锁" : "锁车";
-                    
-                    // 如果当前按钮文本与状态不符，更新按钮文本和背景色
-                    if (!newText.equals(function)) {
-                        updateButtonText(i, newText);
-                        buttonFunctions[i] = newText;
-                        LogHelper.d(TAG, "🔄 根据锁车状态更新按钮[" + i + "]文本: " + function + " -> " + newText + " (状态: " + lockStatus + ")");
-                    } else {
-                        // 即使文本已匹配，也确保背景色正确（根据当前文本更新背景色）
-                        updateButtonBackground(i, newText);
-                        LogHelper.d(TAG, "✅ 按钮[" + i + "]文本已匹配状态，确保背景色正确: " + newText);
-                    }
-                }
-            }
-            // 判断车窗状态并更新按钮文本
-            else if ("开窗".equals(function) || "关窗".equals(function)) {
-                if (!"未知".equals(windowStatus)) {
-                    // 使用翻译后的状态值判断（"已关"或"已开"）
-                    boolean isOpen = "已开".equals(windowStatus);
-                    String newText = isOpen ? "关窗" : "开窗";
-                    
-                    // 如果当前按钮文本与状态不符，更新按钮文本和背景色
-                    if (!newText.equals(function)) {
-                        updateButtonText(i, newText);
-                        buttonFunctions[i] = newText;
-                        LogHelper.d(TAG, "🔄 根据车窗状态更新按钮[" + i + "]文本: " + function + " -> " + newText + " (状态: " + windowStatus + ")");
-                    } else {
-                        // 即使文本已匹配，也确保背景色正确（根据当前文本更新背景色）
-                        updateButtonBackground(i, newText);
-                        LogHelper.d(TAG, "✅ 按钮[" + i + "]文本已匹配状态，确保背景色正确: " + newText);
-                    }
-                }
-            }
-            // 判断透气按钮状态并更新按钮背景色（文本保持不变，跟随车窗状态）
-            else if ("透气".equals(function)) {
-                // 透气按钮文本保持不变，但根据车窗状态更新图标和颜色
-                // 车窗打开时显示蓝色（已透气），车窗关闭时显示黑色（未透气）
-                updateButtonBackground(i, function);
-            }
-            // 判断后备箱状态并更新按钮背景色（文本保持不变，只更新背景色）
-            else if ("尾箱".equals(function) || "后备箱".equals(function) || "开后备箱".equals(function)) {
-                // 尾箱按钮文本保持不变，只根据状态更新背景色
-                updateButtonBackground(i, function);
+        // 更新车窗状态关联的透气按钮背景色
+        for (int i = 0; i < 8; i++) {
+            if (carButtonStateManager != null && carButtonStateManager.getFunctionKey(i) == CarButtonInfo.FunctionKey.VENTILATE) {
+                updateButtonBackground(i, "透气");
+                break;
             }
         }
+
+        LogHelper.d(TAG, "✅ 车辆信息已更新 - 续航: " + range + "km, 油量: " + fuelPercent + "%, 总里程: " + odometer + "km, 车内: " + interiorTemp + "℃, 车外: " + exteriorTemp + "℃");
     }
     
     /**
      * 按住达到时长即执行车控（无需松手）；仅支持按住触发，无单击。
      */
-    private static final long CAR_CONTROL_HOLD_TO_EXECUTE_MS = 700;
+    private static final long CAR_CONTROL_HOLD_TO_EXECUTE_MS = 1200;
 
     private void setupButtons() {
         for (int i = 0; i < controlButtons.length; i++) {
@@ -2914,6 +2966,9 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                     gestureActive[0] = true;
                     downX[0] = event.getX();
                     downY[0] = event.getY();
+                    // 按下视觉反馈
+                    button.setAlpha(0.6f);
+                    // 按下不震动，长按触发时才震
                     if (holdRunnable[0] != null) {
                         mainHandler.removeCallbacks(holdRunnable[0]);
                         holdRunnable[0] = null;
@@ -2923,13 +2978,15 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                         if (isFinishing() || isDestroyed() || !gestureActive[0]) {
                             return;
                         }
-                        if (buttonFunctions != null && index < buttonFunctions.length) {
-                            String currentFunction = buttonFunctions[index];
-                            if (currentFunction == null || currentFunction.isEmpty()) {
-                                return;
-                            }
-                            LogHelper.d(TAG, "🔘 按住触发: " + currentFunction + " (索引=" + index + ", 按住=" + CAR_CONTROL_HOLD_TO_EXECUTE_MS + "ms)");
-                            executeControlFunction(currentFunction, index, true);
+                        if (carButtonStateManager != null && carButtonStateManager.get(index) != null) {
+                            LogHelper.d(TAG, "🔘 按住触发: 索引=" + index + ", 按住=" + CAR_CONTROL_HOLD_TO_EXECUTE_MS + "ms)");
+                            // 长按触发时恢复透明度
+                            button.setAlpha(1.0f);
+                            // 长按触发短震动 + 开始执行
+                            vibrate(VIBRATE_SUCCESS_TAP_MS);
+                            showToast("执行中");
+                            SharedPreferences prefs = getSharedPreferences(CAR_CONTROL_PREFS, MODE_PRIVATE);
+                            carButtonStateManager.execute(index, RearScreenCarControlActivity.this, prefs);
                         }
                     };
                     mainHandler.postDelayed(holdRunnable[0], CAR_CONTROL_HOLD_TO_EXECUTE_MS);
@@ -2956,10 +3013,11 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                         return false;
                     }
                     gestureActive[0] = false;
+                    // 恢复视觉状态
+                    button.setAlpha(1.0f);
                     if (holdRunnable[0] != null) {
                         mainHandler.removeCallbacks(holdRunnable[0]);
                         holdRunnable[0] = null;
-                        LogHelper.d(TAG, "👆 按钮[" + index + "]抬起/取消，未到按住时间则未执行");
                     }
                     return true;
 
@@ -2973,7 +3031,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     
     /** 执行成功：单击 / 长按 震动时长（与 {@link VibrationHelper} 一致，体感明显） */
     private static final long VIBRATE_SUCCESS_TAP_MS = 85;
-    private static final long VIBRATE_SUCCESS_LONG_PRESS_MS = 220;
+    private static final long VIBRATE_SUCCESS_LONG_PRESS_MS = 500;
     /** 按下瞬间短震（略短于成功反馈） */
     private static final long VIBRATE_TOUCH_DOWN_MS = 45;
 
@@ -2989,261 +3047,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     private void vibrate() {
         vibrate(VIBRATE_TOUCH_DOWN_MS);
     }
-    
-    /**
-     * 执行车控功能（按照脚本逻辑执行，参数从0.json提取，添加反馈提示）
-     * @param function 功能名称
-     * @param buttonIndex 按钮索引，用于更新按钮文本
-     * @param isLongPress 是否为长按触发，长按时震动反馈更长
-     */
-    private void executeControlFunction(String function, int buttonIndex, boolean isLongPress) {
-        showToast("执行中");
-        LogHelper.d(TAG, "🔘 执行车控功能: " + function + " (按钮索引: " + buttonIndex + ")");
-        
-        new Thread(() -> {
-            try {
-                VehicleControlService.ControlResult result = null;
-                String actualFunction = function; // 实际执行的功能名称
-                String toastFunction = function; // 用于Toast显示的功能名称（会根据执行结果更新）
-                
-                // 按照脚本逻辑执行各个功能
-                // 对于解锁/锁车和开窗/关窗，根据当前按钮文本确定要执行的操作
-                switch (function) {
-                    case "解锁":
-                    case "锁车":
-                        // 如果当前是"解锁"，执行解锁；如果当前是"锁车"，执行锁车
-                        if ("解锁".equals(function)) {
-                            actualFunction = "解锁";
-                            result = VehicleControlService.unlock(this);
-                        } else {
-                            actualFunction = "锁车";
-                            result = VehicleControlService.lock(this);
-                        }
-                        break;
-                    case "开窗":
-                    case "关窗":
-                        // 如果当前是"开窗"，执行开窗；如果当前是"关窗"，执行关窗
-                        if ("开窗".equals(function)) {
-                            actualFunction = "开窗";
-                            result = VehicleControlService.openWindow(this);
-                        } else {
-                            actualFunction = "关窗";
-                            result = VehicleControlService.closeWindow(this);
-                        }
-                        break;
-                    case "寻车":
-                        // 寻车功能：车辆鸣笛双闪
-                        actualFunction = "寻车";
-                        result = VehicleControlService.findCar(this);
-                        break;
-                    case "尾箱":
-                    case "开后备箱":
-                        result = VehicleControlService.openTrunk(this);
-                        break;
-                    case "点火":
-                        result = VehicleControlService.startEngine(this, 10); // 10分钟
-                        break;
-                    case "熄火":
-                        result = VehicleControlService.stopEngine(this);
-                        break;
-                    case "打开空调":
-                        {
-                            SharedPreferences prefs = getSharedPreferences(CAR_CONTROL_PREFS, MODE_PRIVATE);
-                            int duration = prefs.getInt(KEY_AC_DURATION, DEFAULT_AC_DURATION);
-                            int temperature = prefs.getInt(KEY_AC_TEMPERATURE, DEFAULT_AC_TEMPERATURE);
-                            result = VehicleControlService.openAirConditioner(this, duration, temperature);
-                            if (result != null && result.success) {
-                                prefs.edit().putBoolean(KEY_AC_STATUS, true).apply();
-                            }
-                        }
-                        break;
-                    case "关闭空调":
-                        result = VehicleControlService.closeAirConditioner(this);
-                        if (result != null && result.success) {
-                            SharedPreferences prefs = getSharedPreferences(CAR_CONTROL_PREFS, MODE_PRIVATE);
-                            prefs.edit().putBoolean(KEY_AC_STATUS, false).apply();
-                        }
-                        break;
-                    case "透气":
-                        result = VehicleControlService.ventilate(this);
-                        break;
-                    case "打开座椅加热":
-                        {
-                            SharedPreferences prefs = getSharedPreferences(CAR_CONTROL_PREFS, MODE_PRIVATE);
-                            int duration = prefs.getInt(KEY_SEAT_HEATING_DURATION, DEFAULT_SEAT_HEATING_DURATION);
-                            int level = prefs.getInt(KEY_SEAT_HEATING_LEVEL, DEFAULT_SEAT_HEATING_LEVEL);
-                            result = VehicleControlService.openSeatHeating(this, duration, level);
-                            if (result != null && result.success) {
-                                prefs.edit().putBoolean(KEY_SEAT_HEATING_STATUS, true).apply();
-                            }
-                        }
-                        break;
-                    case "关闭座椅加热":
-                        result = VehicleControlService.closeSeatHeating(this);
-                        if (result != null && result.success) {
-                            SharedPreferences prefs = getSharedPreferences(CAR_CONTROL_PREFS, MODE_PRIVATE);
-                            prefs.edit().putBoolean(KEY_SEAT_HEATING_STATUS, false).apply();
-                        }
-                        break;
-                    case "主驾加热":
-                        // 使用保存的参数
-                        {
-                            SharedPreferences prefs = getSharedPreferences(CAR_CONTROL_PREFS, MODE_PRIVATE);
-                            int duration = prefs.getInt(KEY_SEAT_HEATING_DURATION, DEFAULT_SEAT_HEATING_DURATION);
-                            int level = prefs.getInt(KEY_SEAT_HEATING_LEVEL, DEFAULT_SEAT_HEATING_LEVEL);
-                            result = VehicleControlService.openDriverSeatHeating(this, duration, level);
-                        }
-                        break;
-                    case "副驾加热":
-                        // 使用保存的参数
-                        {
-                            SharedPreferences prefs = getSharedPreferences(CAR_CONTROL_PREFS, MODE_PRIVATE);
-                            int duration = prefs.getInt(KEY_SEAT_HEATING_DURATION, DEFAULT_SEAT_HEATING_DURATION);
-                            int level = prefs.getInt(KEY_SEAT_HEATING_LEVEL, DEFAULT_SEAT_HEATING_LEVEL);
-                            result = VehicleControlService.openPassengerSeatHeating(this, duration, level);
-                        }
-                        break;
-                    default:
-                        result = new VehicleControlService.ControlResult();
-                        result.success = false;
-                        result.message = "未知功能: " + function;
-                        break;
-                }
-                
-                // 在主线程更新UI并显示反馈
-                final VehicleControlService.ControlResult finalResult = result;
-                final String finalActualFunction = actualFunction;
-                if (mainHandler != null) {
-                    mainHandler.post(() -> {
-                        if (isFinishing() || isDestroyed()) {
-                            return;
-                        }
-                    if (finalResult != null) {
-                        // 重要：只有在执行成功时才显示Toast和修改按钮文本
-                        if (finalResult.success) {
-                            vibrate(isLongPress ? VIBRATE_SUCCESS_LONG_PRESS_MS : VIBRATE_SUCCESS_TAP_MS);
-                            
-                            // 根据执行的功能确定Toast显示的文本
-                            String toastText = finalActualFunction;
-                            LogHelper.d(TAG, "✅ " + finalActualFunction + "成功: " + finalResult.message);
-                            
-                            // 对于解锁/锁车和开窗/关窗，执行成功后切换按钮文本
-                            // Toast显示当前执行的功能，按钮文本切换为下一个功能
-                            // 注意：按钮文本修改和Toast显示都在成功分支内，失败时不会执行
-                            if ("解锁".equals(function)) {
-                                // 解锁成功，Toast显示"解锁"，按钮文本切换为"锁车"
-                                toastText = "解锁"; // Toast显示当前执行的功能
-                                updateButtonText(buttonIndex, "锁车");
-                                buttonFunctions[buttonIndex] = "锁车";
-                                LogHelper.d(TAG, "🔄 解锁成功，按钮文本已切换为: 锁车");
-                            } else if ("锁车".equals(function)) {
-                                // 锁车成功，Toast显示"锁车"，按钮文本切换为"解锁"
-                                toastText = "锁车"; // Toast显示当前执行的功能
-                                updateButtonText(buttonIndex, "解锁");
-                                buttonFunctions[buttonIndex] = "解锁";
-                                LogHelper.d(TAG, "🔄 锁车成功，按钮文本已切换为: 解锁");
-                            } else if ("开窗".equals(function)) {
-                                // 开窗成功，Toast显示"开窗"，按钮文本切换为"关窗"
-                                toastText = "开窗"; // Toast显示当前执行的功能
-                                updateButtonText(buttonIndex, "关窗");
-                                buttonFunctions[buttonIndex] = "关窗";
-                                LogHelper.d(TAG, "🔄 开窗成功，按钮文本已切换为: 关窗");
-                            } else if ("关窗".equals(function)) {
-                                // 关窗成功，Toast显示"关窗"，按钮文本切换为"开窗"
-                                toastText = "关窗"; // Toast显示当前执行的功能
-                                updateButtonText(buttonIndex, "开窗");
-                                buttonFunctions[buttonIndex] = "开窗";
-                                LogHelper.d(TAG, "🔄 关窗成功，按钮文本已切换为: 开窗");
-                            } else if ("点火".equals(function)) {
-                                // 点火成功，Toast显示"点火"，按钮文本切换为"熄火"
-                                toastText = "点火";
-                                updateButtonText(buttonIndex, "熄火");
-                                buttonFunctions[buttonIndex] = "熄火";
-                                LogHelper.d(TAG, "🔄 点火成功，按钮文本已切换为: 熄火");
-                            } else if ("熄火".equals(function)) {
-                                // 熄火成功，Toast显示"熄火"，按钮文本切换为"点火"
-                                toastText = "熄火";
-                                updateButtonText(buttonIndex, "点火");
-                                buttonFunctions[buttonIndex] = "点火";
-                                LogHelper.d(TAG, "🔄 熄火成功，按钮文本已切换为: 点火");
-                            } else if ("打开空调".equals(function)) {
-                                // 打开空调成功，Toast显示"打开空调"，按钮文本切换为"关闭空调"
-                                toastText = "打开空调";
-                                updateButtonText(buttonIndex, "关闭空调");
-                                buttonFunctions[buttonIndex] = "关闭空调";
-                                LogHelper.d(TAG, "🔄 打开空调成功，按钮文本已切换为: 关闭空调");
-                            } else if ("关闭空调".equals(function)) {
-                                // 关闭空调成功，Toast显示"关闭空调"，按钮文本切换为"打开空调"
-                                toastText = "关闭空调";
-                                updateButtonText(buttonIndex, "打开空调");
-                                buttonFunctions[buttonIndex] = "打开空调";
-                                LogHelper.d(TAG, "🔄 关闭空调成功，按钮文本已切换为: 打开空调");
-                            } else if ("打开座椅加热".equals(function)) {
-                                // 打开座椅加热成功，Toast显示"打开座椅加热"，按钮文本切换为"关闭座椅加热"
-                                toastText = "打开座椅加热";
-                                updateButtonText(buttonIndex, "关闭座椅加热");
-                                buttonFunctions[buttonIndex] = "关闭座椅加热";
-                                LogHelper.d(TAG, "🔄 打开座椅加热成功，按钮文本已切换为: 关闭座椅加热");
-                            } else if ("关闭座椅加热".equals(function)) {
-                                // 关闭座椅加热成功，Toast显示"关闭座椅加热"，按钮文本切换为"打开座椅加热"
-                                toastText = "关闭座椅加热";
-                                updateButtonText(buttonIndex, "打开座椅加热");
-                                buttonFunctions[buttonIndex] = "打开座椅加热";
-                                LogHelper.d(TAG, "🔄 关闭座椅加热成功，按钮文本已切换为: 打开座椅加热");
-                            }
-                            
-                            // 显示精简的成功提示（去掉图标）
-                            // 注意：只有在成功时才会显示Toast和修改按钮文本
-                            showToast(toastText);
-                        } else {
-                            // 显示精简的失败提示（去掉图标，只显示功能名称）
-                            showToast(finalActualFunction);
-                            LogHelper.e(TAG, "❌ " + finalActualFunction + "失败: " + finalResult.message);
-                        }
-                        
-                        // 执行后等待5秒刷新车辆状态（用于解锁/锁车功能）
-                        if ("解锁".equals(function) || "锁车".equals(function)) {
-                            if (mainHandler != null) {
-                                // 清理之前的延迟刷新任务
-                                if (refreshCarInfoRunnable != null) {
-                                    mainHandler.removeCallbacks(refreshCarInfoRunnable);
-                                }
-                                refreshCarInfoRunnable = () -> {
-                                    if (!isFinishing() && !isDestroyed()) {
-                                        LogHelper.d(TAG, "⏰ 5秒后刷新车辆状态（解锁/锁车）");
-                                        initCarInfo();
-                                    }
-                                };
-                                mainHandler.postDelayed(refreshCarInfoRunnable, 5000); // 5秒后刷新
-                            }
-                        } else {
-                            // 其他功能立即刷新
-                            initCarInfo();
-                        }
-                    } else {
-                        showToast(finalActualFunction);
-                        LogHelper.e(TAG, "❌ " + finalActualFunction + "失败: result为null");
-                    }
-                    });
-                } else {
-                    // Handler未初始化，直接使用默认值
-                    isRefreshingCarInfo = false;
-                    runOnUiThread(this::stopRefreshIconRotation);
-                }
-                
-            } catch (Exception e) {
-                LogHelper.e(TAG, "❌ 执行" + function + "异常", e);
-                if (mainHandler != null) {
-                    mainHandler.post(() -> {
-                        if (!isFinishing() && !isDestroyed()) {
-                            showToast(function); // 精简异常提示
-                        }
-                    });
-                }
-            }
-        }).start();
-    }
-    
+
     /**
      * 更新按钮文本和图标
      * @param buttonIndex 按钮索引
@@ -4123,7 +3927,13 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         LogHelper.d(TAG, "🔵 onDestroy");
         cancelMainScreenPlaceholderTimeout();
         cancelRearStopExitGrace();
-        
+
+        // 释放 CarButtonStateManager
+        if (carButtonStateManager != null) {
+            carButtonStateManager.release();
+            carButtonStateManager = null;
+        }
+
         // 立即清除静态实例，避免在检查时误判为正在运行
         if (currentInstance == this) {
             currentInstance = null;
@@ -4156,10 +3966,6 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         
         // 清理所有Handler的Runnable，避免内存泄漏
         if (mainHandler != null) {
-            if (refreshCarInfoRunnable != null) {
-                mainHandler.removeCallbacks(refreshCarInfoRunnable);
-                refreshCarInfoRunnable = null;
-            }
             if (retryDisableGestureRunnable != null) {
                 mainHandler.removeCallbacks(retryDisableGestureRunnable);
                 retryDisableGestureRunnable = null;
