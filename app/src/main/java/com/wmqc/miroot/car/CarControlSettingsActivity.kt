@@ -3,6 +3,8 @@ import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
@@ -10,68 +12,88 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.wmqc.miroot.R
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.CardColors
-import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.theme.LocalContentColor
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
-import androidx.compose.ui.unit.dp
 
 /**
  * 车控设置（界面风格 [Miuix](https://github.com/compose-miuix-ui/miuix)）。
+ * 主界面为现代车控仪表盘风格：车模图片 + 车辆信息 + 底部双列按钮 + 二级设置页。
  */
 class CarControlSettingsActivity : ComponentActivity() {
 
@@ -189,6 +211,9 @@ class CarControlSettingsActivity : ComponentActivity() {
     }
 }
 
+/** 屏幕状态 */
+private enum class Screen { DASHBOARD, SETTINGS }
+
 @Composable
 private fun CarControlSettingsScreen(
     onReLogin: () -> Unit,
@@ -197,9 +222,1020 @@ private fun CarControlSettingsScreen(
     onResetCarModel: () -> Unit,
     onLogout: () -> Unit,
 ) {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var currentScreen by remember { mutableStateOf(Screen.DASHBOARD) }
+
+    when (currentScreen) {
+        Screen.DASHBOARD -> DashboardScreen(
+            onNavigateToSettings = { currentScreen = Screen.SETTINGS },
+            onReLogin = onReLogin,
+        )
+        Screen.SETTINGS -> SettingsSubScreen(
+            onBack = { currentScreen = Screen.DASHBOARD },
+            onStartProjection = onStartProjection,
+            onPickCarModel = onPickCarModel,
+            onResetCarModel = onResetCarModel,
+            onLogout = onLogout,
+        )
+    }
+}
+
+// ─── Dashboard ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun DashboardScreen(
+    onNavigateToSettings: () -> Unit,
+    onReLogin: () -> Unit,
+) {
+    val ctx = LocalContext.current
     val appCtx = ctx.applicationContext
+    val scrollPad = dimensionResource(R.dimen.mi_page_scroll_padding)
+    val pageBg = Color(ContextCompat.getColor(ctx, R.color.mi_page_bg))
+    val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
+    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+
+    var vehicleUi by remember { mutableStateOf<CarVehicleDisplayUi?>(null) }
+    var vehicleLoading by remember { mutableStateOf(true) }
+
+    // 车模图片 bitmap
+    var carModelBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var carModelLoading by remember { mutableStateOf(true) }
+
+    // 底部按钮配置
+    var rearButtons by remember { mutableStateOf(defaultRearButtonsForFirstInstall()) }
+    var currentPage by remember { mutableIntStateOf(0) }
+
+    // 空调 & 座椅加热状态与参数
+    var acStatus by remember { mutableStateOf(false) }
+    var acDuration by remember { mutableStateOf(10) }
+    var acTemp by remember { mutableStateOf(22) }
+    var seatHeatingStatus by remember { mutableStateOf(false) }
+    var seatHeatingDuration by remember { mutableStateOf(10) }
+    var seatHeatingLevel by remember { mutableStateOf(1) }
+
+    // 加载车辆数据
+    LaunchedEffect(Unit) {
+        vehicleUi = withContext(Dispatchers.IO) { CarVehicleDisplayHelper.load(appCtx) }
+        vehicleLoading = false
+    }
+
+    // 加载车模图片
+    LaunchedEffect(Unit) {
+        carModelBitmap = withContext(Dispatchers.IO) { loadCarModelBitmap(appCtx) }
+        carModelLoading = false
+    }
+
+    // 加载底部按钮配置
+    LaunchedEffect(Unit) {
+        val p = ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
+        val saved = loadRearButtonsForDashboard(p.getString(KEY_DASHBOARD_REAR_BUTTONS, null))
+        rearButtons = saved
+    }
+
+    // 加载空调 & 座椅加热状态
+    LaunchedEffect(Unit) {
+        val p = ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
+        acStatus = p.getBoolean("ac_status", false)
+        acDuration = p.getInt(KEY_AC_DURATION, 10)
+        acTemp = p.getInt(KEY_AC_TEMPERATURE, 22)
+        seatHeatingStatus = p.getBoolean("seat_heating_status", false)
+        seatHeatingDuration = p.getInt(KEY_SEAT_HEATING_DURATION, 10)
+        seatHeatingLevel = p.getInt(KEY_SEAT_HEATING_LEVEL, 1)
+    }
+
+    // 计算总页数（每页4个按钮，2列2行）
+    val totalPages = ((rearButtons.size + 3) / 4).coerceIn(1, 2)
+
     val scope = rememberCoroutineScope()
+    var isRefreshing by remember { mutableStateOf(false) }
+    fun refreshVehicleData() {
+        isRefreshing = true
+        scope.launch(Dispatchers.IO) {
+            val ui = CarVehicleDisplayHelper.load(appCtx)
+            try {
+                val status = VehicleStatusService.getVehicleStatus(appCtx)
+                ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
+                    .putBoolean("is_locked", "已锁" == VehicleStatusService.translateDoorLockStatus(status.doorLockStatusDriver))
+                    .putBoolean("is_engine_on", "运行中" == VehicleStatusService.translateEngineStatus(status.engineStatus))
+                    .putBoolean("is_window_open", "已开" == status.winStatusDriver)
+                    .apply()
+            } catch (_: Exception) { }
+            withContext(Dispatchers.Main) {
+                vehicleUi = ui
+                vehicleLoading = false
+                isRefreshing = false
+            }
+        }
+    }
+
+    fun toggleAc() {
+        val newState = !acStatus
+        acStatus = newState
+        scope.launch(Dispatchers.IO) {
+            executeByText(appCtx, "空调")
+            ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putBoolean("ac_status", newState)
+                .apply()
+        }
+    }
+
+    fun persistAcParams(duration: Int, temp: Int) {
+        ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_AC_DURATION, duration)
+            .putInt(KEY_AC_TEMPERATURE, temp)
+            .apply()
+        acDuration = duration
+        acTemp = temp
+    }
+
+    fun toggleSeatHeating() {
+        val newState = !seatHeatingStatus
+        seatHeatingStatus = newState
+        scope.launch(Dispatchers.IO) {
+            executeByText(appCtx, "座椅加热")
+            ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
+                .putBoolean("seat_heating_status", newState)
+                .apply()
+        }
+    }
+
+    fun persistSeatHeatingParams(duration: Int, level: Int) {
+        ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putInt(KEY_SEAT_HEATING_DURATION, duration)
+            .putInt(KEY_SEAT_HEATING_LEVEL, level)
+            .apply()
+        seatHeatingDuration = duration
+        seatHeatingLevel = level
+    }
+
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = { refreshVehicleData() },
+        modifier = Modifier.fillMaxSize().background(pageBg),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            // ── 顶部栏 ──
+            TopBar(
+                title = stringResource(R.string.car_control_settings_title),
+                onSettingsClick = onNavigateToSettings,
+            )
+
+            // ── 车模图片区域 ──
+            CarModelSection(
+                bitmap = carModelBitmap,
+                loading = carModelLoading,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad)
+                    .padding(top = 8.dp),
+            )
+
+            Spacer(Modifier.size(16.dp))
+
+            // ── 车辆信息 ──
+            VehicleInfoSection(
+                ui = vehicleUi,
+                loading = vehicleLoading,
+                onRefresh = { refreshVehicleData() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad),
+            )
+
+            Spacer(Modifier.size(12.dp))
+
+            // ── 底部按钮（2列，分页） ──
+            RearButtonGrid(
+                buttons = rearButtons,
+                pageIndex = currentPage,
+                onPageChange = { currentPage = it },
+                totalPages = totalPages,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad),
+            )
+
+            Spacer(Modifier.size(12.dp))
+
+            // ── 空调控制 ──
+            AcControlCard(
+                status = acStatus,
+                duration = acDuration,
+                temp = acTemp,
+                onToggle = { toggleAc() },
+                onDurationChange = { d -> persistAcParams(d, acTemp) },
+                onTempChange = { t -> persistAcParams(acDuration, t) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad),
+            )
+
+            Spacer(Modifier.size(12.dp))
+
+            // ── 座椅加热控制 ──
+            SeatHeatingControlCard(
+                status = seatHeatingStatus,
+                duration = seatHeatingDuration,
+                level = seatHeatingLevel,
+                onToggle = { toggleSeatHeating() },
+                onDurationChange = { d -> persistSeatHeatingParams(d, seatHeatingLevel) },
+                onLevelChange = { l -> persistSeatHeatingParams(seatHeatingDuration, l) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad),
+            )
+
+            Spacer(Modifier.size(12.dp))
+
+            // ── 车辆状态信息（胎压等，可折叠） ──
+            if (vehicleUi != null) {
+                val rows = vehicleUi!!.vehicleStatusRows + vehicleUi!!.mileageEnergyRows
+                if (rows.isNotEmpty()) {
+                    var expanded by remember { mutableStateOf(false) }
+
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = scrollPad),
+                        cornerRadius = 20.dp,
+                        insideMargin = PaddingValues(horizontal = scrollPad, vertical = 12.dp),
+                        colors = CardColors(
+                            color = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface)),
+                            contentColor = onPagePrimary,
+                        ),
+                    ) {
+                        Column {
+                            // 可折叠标题行
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { expanded = !expanded },
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "更多车辆信息",
+                                    style = MiuixTheme.textStyles.body2,
+                                    fontWeight = FontWeight.Medium,
+                                    color = onPagePrimary,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    text = if (expanded) "▼" else "▶",
+                                    fontSize = 12.sp,
+                                    color = onPageSecondary,
+                                )
+                            }
+
+                            // 折叠内容
+                            if (expanded) {
+                                Spacer(Modifier.height(8.dp))
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    rows.forEach { row ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                        ) {
+                                            Text(
+                                                text = row.label,
+                                                style = MiuixTheme.textStyles.body2,
+                                                color = onPageSecondary,
+                                            )
+                                            Text(
+                                                text = row.value,
+                                                style = MiuixTheme.textStyles.body2,
+                                                color = onPagePrimary,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.size(24.dp))
+        }
+    }
+}
+
+// ─── TopBar ────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun TopBar(
+    title: String,
+    onSettingsClick: () -> Unit,
+) {
+    val scrollPad = dimensionResource(R.dimen.mi_page_scroll_padding)
+    val ctx = LocalContext.current
+    val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = scrollPad, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = onPagePrimary,
+            modifier = Modifier.weight(1f),
+        )
+        // 设置齿轮图标 → 二级设置页
+        IconButton(onClick = onSettingsClick) {
+            Text(
+                text = "⚙",
+                fontSize = 22.sp,
+                color = onPagePrimary,
+            )
+        }
+    }
+}
+
+// ─── CarModelSection ───────────────────────────────────────────────────────────
+
+/**
+ * 车模展示区域：大图居中展示。
+ */
+@Composable
+private fun CarModelSection(
+    bitmap: Bitmap?,
+    loading: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (loading) {
+        Box(
+            modifier = modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(modifier = Modifier.size(32.dp))
+        }
+    } else {
+        val painter = if (bitmap != null) {
+            BitmapPainter(bitmap.asImageBitmap())
+        } else {
+            painterResource(R.drawable.ic_car_control_refresh)
+        }
+        Box(
+            modifier = modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter = painter,
+                contentDescription = "车模",
+                modifier = Modifier.fillMaxWidth(0.78f),
+                contentScale = ContentScale.Fit,
+            )
+        }
+    }
+}
+
+// ─── VehicleInfoSection ─────────────────────────────────────────────────────
+
+/**
+ * 车辆信息卡片（位于车模图片下方）：续航、油量进度条、温度、更新时间。
+ */
+@Composable
+private fun VehicleInfoSection(
+    ui: CarVehicleDisplayUi?,
+    loading: Boolean,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = LocalContext.current
+    val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
+    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+    val cardColor = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
+
+    if (ui == null) return
+
+    Card(
+        modifier = modifier,
+        cornerRadius = 20.dp,
+        insideMargin = PaddingValues(16.dp),
+        colors = CardColors(color = cardColor, contentColor = onPagePrimary),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 续航 + 油量
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = ui.rangeKmText,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = onPagePrimary,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = stringResource(R.string.car_control_vehicle_range),
+                        fontSize = 12.sp,
+                        color = onPageSecondary,
+                        maxLines = 1,
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    Text(
+                        text = ui.fuelPercentText,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = fuelPercentInfoColor(ui.fuelPercent),
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = stringResource(R.string.car_control_vehicle_fuel_pct),
+                        fontSize = 12.sp,
+                        color = onPageSecondary,
+                        maxLines = 1,
+                    )
+                }
+            }
+
+            // 油量进度条
+            val fuelProgress = (ui.fuelPercent.toFloat() / 100f).coerceIn(0f, 1f)
+            val fuelBarColor = when {
+                ui.fuelPercent < 0 -> onPageSecondary
+                ui.fuelPercent < 10 -> Color(0xFFFF0000)
+                ui.fuelPercent < 30 -> Color(0xFF2196F3)
+                else -> Color(0xFFFF9800)
+            }
+            LinearProgressIndicator(
+                progress = { fuelProgress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp)),
+                color = fuelBarColor,
+                trackColor = onPageSecondary.copy(alpha = 0.15f),
+            )
+
+            // 温度 + 更新时间 + 刷新
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = ui.interiorTempText,
+                    fontSize = 14.sp,
+                    color = onPagePrimary,
+                    maxLines = 1,
+                )
+                Text(
+                    text = " / ",
+                    fontSize = 14.sp,
+                    color = onPageSecondary.copy(alpha = 0.5f),
+                )
+                Text(
+                    text = ui.exteriorTempText,
+                    fontSize = 14.sp,
+                    color = onPagePrimary,
+                    maxLines = 1,
+                )
+
+                Spacer(Modifier.weight(1f))
+
+                Text(
+                    text = ui.updateTimeShort,
+                    fontSize = 11.sp,
+                    color = onPageSecondary.copy(alpha = 0.6f),
+                    maxLines = 1,
+                )
+
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp).padding(start = 6.dp),
+                        strokeWidth = 2.dp,
+                        color = onPagePrimary,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.car_control_vehicle_refresh),
+                        fontSize = 11.sp,
+                        color = Color(0xFF2196F3),
+                        modifier = Modifier
+                            .clickable { onRefresh() }
+                            .padding(start = 8.dp),
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private fun fuelPercentInfoColor(fuelPercent: Int): Color = when {
+    fuelPercent < 0 -> Color.White
+    fuelPercent < 10 -> Color(0xFFFF0000)
+    fuelPercent < 30 -> Color(0xFF2196F3)
+    else -> Color(0xFFFF9800)
+}
+
+// ─── AcControlCard ──────────────────────────────────────────────────────────────
+
+/**
+ * 空调控制卡片：显示空调状态、温度、时长参数，支持直接开关与参数调整。
+ */
+@Composable
+private fun AcControlCard(
+    status: Boolean,
+    duration: Int,
+    temp: Int,
+    onToggle: () -> Unit,
+    onDurationChange: (Int) -> Unit,
+    onTempChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
+    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+    val cardColor = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
+    val accentColor = Color(0xFF2196F3)
+
+    Card(
+        modifier = modifier,
+        cornerRadius = 20.dp,
+        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        colors = CardColors(color = cardColor, contentColor = onPagePrimary),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // 标题行 + 参数 + 状态（长按 1000ms 开启/关闭）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown()
+                            try {
+                                withTimeout(CAR_CONTROL_HOLD_TO_EXECUTE_MS) {
+                                    do {
+                                        val event = awaitPointerEvent(PointerEventPass.Main)
+                                    } while (event.changes.any { it.pressed })
+                                }
+                            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                                scope.launch { onToggle() }
+                            }
+                        }
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.car_control_ac_title),
+                    style = MiuixTheme.textStyles.body1,
+                    fontWeight = FontWeight.Medium,
+                    color = onPagePrimary,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                Text(
+                    text = "${temp}℃",
+                    fontSize = 12.sp,
+                    color = onPageSecondary,
+                    modifier = Modifier.padding(end = 6.dp),
+                )
+                Text(
+                    text = "${duration}分钟",
+                    fontSize = 12.sp,
+                    color = onPageSecondary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = if (status) "● 已开启" else "已关闭",
+                    fontSize = 13.sp,
+                    color = if (status) accentColor else onPageSecondary,
+                )
+            }
+
+            // 分割线
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(onPageSecondary.copy(alpha = 0.2f)),
+            )
+
+            // 参数调整按钮
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ParamAdjustGroup(
+                    label = "温度",
+                    value = "${temp}℃",
+                    onDecrement = { onTempChange((temp - 1).coerceAtLeast(17)) },
+                    onIncrement = { onTempChange((temp + 1).coerceAtMost(32)) },
+                    modifier = Modifier.weight(1f),
+                )
+                ParamAdjustGroup(
+                    label = "时长",
+                    value = "${duration}分钟",
+                    onDecrement = { onDurationChange((duration - 1).coerceAtLeast(3)) },
+                    onIncrement = { onDurationChange((duration + 1).coerceAtMost(10)) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+// ─── SeatHeatingControlCard ─────────────────────────────────────────────────────
+
+/**
+ * 座椅加热控制卡片：显示加热状态、等级、时长参数，支持直接开关与参数调整。
+ */
+@Composable
+private fun SeatHeatingControlCard(
+    status: Boolean,
+    duration: Int,
+    level: Int,
+    onToggle: () -> Unit,
+    onDurationChange: (Int) -> Unit,
+    onLevelChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
+    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+    val cardColor = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
+    val accentColor = Color(0xFFFF9800)
+
+    Card(
+        modifier = modifier,
+        cornerRadius = 20.dp,
+        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        colors = CardColors(color = cardColor, contentColor = onPagePrimary),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // 标题行 + 参数 + 状态（长按 1000ms 开启/关闭）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown()
+                            try {
+                                withTimeout(CAR_CONTROL_HOLD_TO_EXECUTE_MS) {
+                                    do {
+                                        val event = awaitPointerEvent(PointerEventPass.Main)
+                                    } while (event.changes.any { it.pressed })
+                                }
+                            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                                scope.launch { onToggle() }
+                            }
+                        }
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.car_control_seat_heating_title),
+                    style = MiuixTheme.textStyles.body1,
+                    fontWeight = FontWeight.Medium,
+                    color = onPagePrimary,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                Text(
+                    text = "等级${level}",
+                    fontSize = 12.sp,
+                    color = onPageSecondary,
+                    modifier = Modifier.padding(end = 6.dp),
+                )
+                Text(
+                    text = "${duration}分钟",
+                    fontSize = 12.sp,
+                    color = onPageSecondary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = if (status) "● 已开启" else "已关闭",
+                    fontSize = 13.sp,
+                    color = if (status) accentColor else onPageSecondary,
+                )
+            }
+
+            // 分割线
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(onPageSecondary.copy(alpha = 0.2f)),
+            )
+
+            // 参数调整按钮
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ParamAdjustGroup(
+                    label = "等级",
+                    value = "${level}级",
+                    onDecrement = { onLevelChange((level - 1).coerceAtLeast(1)) },
+                    onIncrement = { onLevelChange((level + 1).coerceAtMost(3)) },
+                    modifier = Modifier.weight(1f),
+                )
+                ParamAdjustGroup(
+                    label = "时长",
+                    value = "${duration}分钟",
+                    onDecrement = { onDurationChange((duration - 1).coerceAtLeast(3)) },
+                    onIncrement = { onDurationChange((duration + 1).coerceAtMost(10)) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+// ─── ParamAdjustGroup (compact +/- control) ────────────────────────────────────
+
+/**
+ * 紧凑型参数调整组件：标签 + 当前值 + [－][＋] 按钮。
+ */
+@Composable
+private fun ParamAdjustGroup(
+    label: String,
+    value: String,
+    onDecrement: () -> Unit,
+    onIncrement: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = LocalContext.current
+    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+    val adjustBg = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = label,
+            fontSize = 11.sp,
+            color = onPageSecondary,
+        )
+        Spacer(Modifier.height(4.dp))
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(adjustBg.copy(alpha = 0.6f))
+                    .clickable { onDecrement() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(text = "－", fontSize = 16.sp, color = onPageSecondary)
+            }
+            Text(
+                text = value,
+                fontSize = 13.sp,
+                color = onPageSecondary,
+                modifier = Modifier.padding(horizontal = 10.dp),
+            )
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(adjustBg.copy(alpha = 0.6f))
+                    .clickable { onIncrement() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(text = "＋", fontSize = 16.sp, color = onPageSecondary)
+            }
+        }
+    }
+}
+
+/**
+ * 底部按钮，每页一行4个大圆按钮（图标 + 下方标题），支持左右滑动切换页面。
+ * 下方有统一页面圆点指示器。
+ */
+@Composable
+private fun RearButtonGrid(
+    buttons: List<String>,
+    pageIndex: Int,
+    onPageChange: (Int) -> Unit,
+    totalPages: Int,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = LocalContext.current
+    val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
+    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+    val cardColor = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
+
+    if (buttons.isEmpty()) {
+        Text(
+            text = stringResource(R.string.car_control_rear_buttons_desc),
+            color = onPageSecondary,
+            style = MiuixTheme.textStyles.footnote1,
+            modifier = modifier,
+        )
+        return
+    }
+
+    var dragTotal by remember { mutableStateOf(0f) }
+    val consumeConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                return available
+            }
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .nestedScroll(consumeConnection)
+            .pointerInput(pageIndex, totalPages) {
+                val threshold = 80.dp.toPx()
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        when {
+                            dragTotal < -threshold && pageIndex < totalPages - 1 ->
+                                onPageChange(pageIndex + 1)
+                            dragTotal > threshold && pageIndex > 0 ->
+                                onPageChange(pageIndex - 1)
+                        }
+                        dragTotal = 0f
+                    },
+                    onHorizontalDrag = { _, dragAmount ->
+                        dragTotal += dragAmount
+                    },
+                )
+            },
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 20.dp,
+            insideMargin = PaddingValues(12.dp),
+            colors = CardColors(color = cardColor, contentColor = onPagePrimary),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // 当前页：一行4个大圆按钮
+                val startIndex = pageIndex * 4
+                val pageButtons = buttons.drop(startIndex).take(4)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    pageButtons.forEach { func ->
+                        RearButtonCell(
+                            text = func,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    for (i in pageButtons.size until 4) {
+                        Spacer(Modifier.weight(1f))
+                    }
+                }
+
+                // 统一页面圆点指示器
+                if (totalPages > 1) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                    ) {
+                        for (i in 0 until totalPages) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 4.dp)
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (i == pageIndex) onPagePrimary
+                                        else onPageSecondary.copy(alpha = 0.35f)
+                                    )
+                                    .clickable { onPageChange(i) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 大圆按钮：图标（与背屏一致）+ 下方标题。
+ * 背景色根据车辆状态动态变化：蓝色表示可执行的操作（与当前状态相反），浅灰表示当前状态/不可用。
+ */
+@Composable
+private fun RearButtonCell(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val isDark = isSystemInDarkTheme()
+    val isAlert = isButtonAlertState(ctx, text)
+
+    val bg = if (isAlert) {
+        if (isDark) Color(0xFF5A5A5A) else Color(0xFF81D4FA)
+    } else {
+        if (isDark) Color(0xFF2E2E2E) else Color(0xFFE8EEF1)
+    }
+    val textColor = if (isAlert) {
+        if (isDark) Color.White else Color(0xFF0D47A1)
+    } else {
+        if (isDark) Color.LightGray else Color(0xFF666666)
+    }
+
+    var iconBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(text) {
+        iconBitmap = withContext(Dispatchers.IO) { loadCarControlIcon(ctx, text) }
+    }
+
+    Column(
+        modifier = modifier
+            .pointerInput(text) {
+                detectTapGestures(
+                    onDoubleTap = {
+                        scope.launch(Dispatchers.IO) {
+                            executeByText(ctx, text)
+                        }
+                    },
+                )
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(bg),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (iconBitmap != null) {
+                Image(
+                    painter = BitmapPainter(iconBitmap!!.asImageBitmap()),
+                    contentDescription = text,
+                    modifier = Modifier.size(32.dp),
+                    colorFilter = ColorFilter.tint(textColor),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        Text(
+            text = text,
+            fontSize = 12.sp,
+            color = textColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * 判断按钮是否应显示为"可操作"状态（蓝色底）。
+ * 蓝色表示可执行的操作（与当前车辆状态相反），浅灰表示当前状态/不可操作。
+ * 逻辑与 [RearScreenCarControlActivity.isCarControlAlertSecondaryState] 一致。
+ * 从 SharedPreferences 读取车辆各功能状态（背屏通过 WebSocket 实时更新这些状态）。
+ */
+private fun isButtonAlertState(context: Context, text: String): Boolean {
+    val prefs = context.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
+    return when (text) {
+        "寻车" -> false
+        "锁车/解锁" -> !prefs.getBoolean("is_locked", false)
+        "点火/熄火" -> !prefs.getBoolean("is_engine_on", false)
+        "开窗/关窗" -> !prefs.getBoolean("is_window_open", false)
+        "空调" -> !prefs.getBoolean("ac_status", false)
+        "座椅加热" -> !prefs.getBoolean("seat_heating_status", false)
+        "主驾加热" -> !prefs.getBoolean("seat_heating_status", false)
+        "副驾加热" -> !prefs.getBoolean("seat_heating_status", false)
+        "开后备箱" -> !prefs.getBoolean("is_trunk_open", false)
+        "透气" -> !prefs.getBoolean("is_vent_mode", false)
+        else -> false
+    }
+}
+
+// ─── Settings Sub-Screen（二级设置页） ─────────────────────────────────────────
+
+@Composable
+private fun SettingsSubScreen(
+    onBack: () -> Unit,
+    onStartProjection: () -> Unit,
+    onPickCarModel: () -> Unit,
+    onResetCarModel: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    val ctx = LocalContext.current
     val scrollPad = dimensionResource(R.dimen.mi_page_scroll_padding)
     val pageBg = Color(ContextCompat.getColor(ctx, R.color.mi_page_bg))
     val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
@@ -208,35 +1244,23 @@ private fun CarControlSettingsScreen(
         color = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface)),
         contentColor = onPagePrimary,
     )
-    val scheme = MiuixTheme.colorScheme
 
-    var vehicleUi by remember { mutableStateOf<CarVehicleDisplayUi?>(null) }
-    var vehicleLoading by remember { mutableStateOf(true) }
     var acDuration by remember { mutableStateOf(10) }
     var acTemp by remember { mutableStateOf(22) }
     var seatHeatingDuration by remember { mutableStateOf(10) }
     var seatHeatingLevel by remember { mutableStateOf(1) }
-    var rearButtonsSummary by remember { mutableStateOf(defaultRearButtons().joinToString("、")) }
-    var rearButtons by remember { mutableStateOf(defaultRearButtons()) }
+    var rearButtons by remember { mutableStateOf(defaultRearButtonsForFirstInstall()) }
+    var rearButtonsSummary by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
-        vehicleUi = withContext(Dispatchers.IO) { CarVehicleDisplayHelper.load(appCtx) }
-        vehicleLoading = false
         val p = ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
         acDuration = p.getInt(KEY_AC_DURATION, 10)
         acTemp = p.getInt(KEY_AC_TEMPERATURE, 22)
         seatHeatingDuration = p.getInt(KEY_SEAT_HEATING_DURATION, 10)
         seatHeatingLevel = p.getInt(KEY_SEAT_HEATING_LEVEL, 1)
-        rearButtons = normalizeValidRearButtons(loadRearButtons(p.getString(KEY_REAR_BUTTONS_ORDER, null)))
-        rearButtonsSummary = rearButtons.joinToString("、")
-    }
-
-    fun refreshVehicleData() {
-        scope.launch {
-            vehicleLoading = true
-            vehicleUi = withContext(Dispatchers.IO) { CarVehicleDisplayHelper.load(appCtx) }
-            vehicleLoading = false
-        }
+        val saved = loadRearButtonsForDashboard(p.getString(KEY_DASHBOARD_REAR_BUTTONS, null))
+        rearButtons = saved
+        rearButtonsSummary = saved.joinToString("、")
     }
 
     fun persistAcConfig(duration: Int, temp: Int) {
@@ -260,518 +1284,164 @@ private fun CarControlSettingsScreen(
     fun persistRearButtons(buttons: List<String>) {
         val normalized = normalizeValidRearButtons(buttons)
         ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
-            .putString(KEY_REAR_BUTTONS_ORDER, encodeRearButtons(normalized))
+            .putString(KEY_DASHBOARD_REAR_BUTTONS, encodeRearButtons(normalized))
             .apply()
         rearButtons = normalized
         rearButtonsSummary = normalized.joinToString("、")
     }
 
-    fun runControl(label: String, action: () -> VehicleControlService.ControlResult) {
-        scope.launch(Dispatchers.IO) {
-            val result = runCatching { action() }.getOrNull()
-            withContext(Dispatchers.Main) {
-                MainDisplayUi.showToast(
-                    ctx,
-                    when {
-                        result == null -> "$label 失败"
-                        result.success -> "✅ ${label}成功"
-                        else -> "❌ ${label}失败: ${result.message}"
-                    },
-                    Toast.LENGTH_LONG,
-                )
-                refreshVehicleData()
-            }
-        }
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(pageBg),
-    ) {
-        CompositionLocalProvider(LocalContentColor provides onPagePrimary) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = scrollPad, vertical = scrollPad),
-                verticalArrangement = Arrangement.spacedBy(scrollPad),
-            ) {
-                Text(
-                    text = stringResource(R.string.car_control_settings_title),
-                    fontSize = pageTitleTextUnit(),
-                    fontWeight = FontWeight.SemiBold,
-                    color = onPagePrimary,
-                )
-
-                VehicleDataCard(
-                    ui = vehicleUi,
-                    loading = vehicleLoading,
-                    onRefresh = { refreshVehicleData() },
-                    onReLogin = onReLogin,
-                    cardColors = cardColors,
-                    onPagePrimary = onPagePrimary,
-                    onPageSecondary = onPageSecondary,
-                    errorColor = scheme.error,
-                )
-
-                ControlGroupCard(
-                    title = stringResource(R.string.car_control_actions_title),
-                    cardColors = cardColors,
-                    collapsible = true,
-                    onPageSecondary = onPageSecondary,
-                ) {
-                    ControlButtonRow("解锁/锁车") {
-                        Button(onClick = { runControl("解锁") { VehicleControlService.unlock(ctx) } }, modifier = Modifier.weight(1f)) { Text("解锁") }
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Button(onClick = { runControl("锁车") { VehicleControlService.lock(ctx) } }, modifier = Modifier.weight(1f)) { Text("锁车") }
-                    }
-                    ControlButtonRow("寻车/导航") {
-                        Button(onClick = { runControl("寻车") { VehicleControlService.findCar(ctx) } }, modifier = Modifier.weight(1f)) { Text("寻车") }
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Button(onClick = { runControl("导航到车") { VehicleControlService.navigateToCar(ctx) } }, modifier = Modifier.weight(1f)) { Text("导航到车") }
-                    }
-                    ControlButtonRow("点火/熄火") {
-                        Button(onClick = { runControl("点火") { VehicleControlService.startEngine(ctx, 10) } }, modifier = Modifier.weight(1f)) { Text("点火") }
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Button(onClick = { runControl("熄火") { VehicleControlService.stopEngine(ctx) } }, modifier = Modifier.weight(1f)) { Text("熄火") }
-                    }
-                    ControlButtonRow("空调") {
-                        Button(onClick = { runControl("打开空调") { VehicleControlService.openAirConditioner(ctx, acDuration, acTemp) } }, modifier = Modifier.weight(1f)) { Text("开空调") }
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Button(onClick = { runControl("关闭空调") { VehicleControlService.closeAirConditioner(ctx) } }, modifier = Modifier.weight(1f)) { Text("关空调") }
-                    }
-                    ControlButtonRow("车窗/后备箱") {
-                        Button(onClick = { runControl("开窗") { VehicleControlService.openWindow(ctx) } }, modifier = Modifier.weight(1f)) { Text("开窗") }
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Button(onClick = { runControl("关窗") { VehicleControlService.closeWindow(ctx) } }, modifier = Modifier.weight(1f)) { Text("关窗") }
-                    }
-                    ControlButtonRow("透气/后备箱") {
-                        Button(onClick = { runControl("透气") { VehicleControlService.ventilate(ctx) } }, modifier = Modifier.weight(1f)) { Text("透气") }
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Button(onClick = { runControl("开后备箱") { VehicleControlService.openTrunk(ctx) } }, modifier = Modifier.weight(1f)) { Text("开后备箱") }
-                    }
-                    ControlButtonRow("座椅加热") {
-                        Button(onClick = { runControl("座椅加热") { VehicleControlService.openSeatHeating(ctx, seatHeatingDuration, seatHeatingLevel) } }, modifier = Modifier.weight(1f)) { Text("座椅加热") }
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Button(onClick = { runControl("关闭座椅加热") { VehicleControlService.closeSeatHeating(ctx) } }, modifier = Modifier.weight(1f)) { Text("关闭加热") }
-                    }
-                    ControlButtonRow("主副驾") {
-                        Button(onClick = { runControl("主驾加热") { VehicleControlService.openDriverSeatHeating(ctx, seatHeatingDuration, seatHeatingLevel) } }, modifier = Modifier.weight(1f)) { Text("主驾加热") }
-                        Spacer(modifier = Modifier.size(8.dp))
-                        Button(onClick = { runControl("副驾加热") { VehicleControlService.openPassengerSeatHeating(ctx, seatHeatingDuration, seatHeatingLevel) } }, modifier = Modifier.weight(1f)) { Text("副驾加热") }
-                    }
-                }
-
-                ControlGroupCard(title = stringResource(R.string.car_control_ac_title), cardColors = cardColors) {
-                    Text(text = "时长：${acDuration}分钟   温度：${acTemp}℃", style = MiuixTheme.textStyles.body2, color = onPageSecondary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        Button(onClick = { persistAcConfig((acDuration - 1).coerceAtLeast(3), acTemp) }, modifier = Modifier.weight(1f)) { Text("时长-") }
-                        Button(onClick = { persistAcConfig((acDuration + 1).coerceAtMost(10), acTemp) }, modifier = Modifier.weight(1f)) { Text("时长+") }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        Button(onClick = { persistAcConfig(acDuration, (acTemp - 1).coerceAtLeast(17)) }, modifier = Modifier.weight(1f)) { Text("温度-") }
-                        Button(onClick = { persistAcConfig(acDuration, (acTemp + 1).coerceAtMost(32)) }, modifier = Modifier.weight(1f)) { Text("温度+") }
-                    }
-                }
-
-                ControlGroupCard(title = stringResource(R.string.car_control_seat_heating_title), cardColors = cardColors) {
-                    Text(text = "时长：${seatHeatingDuration}分钟   等级：${seatHeatingLevel}级", style = MiuixTheme.textStyles.body2, color = onPageSecondary)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        Button(onClick = { persistSeatHeatingConfig((seatHeatingDuration - 1).coerceAtLeast(3), seatHeatingLevel) }, modifier = Modifier.weight(1f)) { Text("时长-") }
-                        Button(onClick = { persistSeatHeatingConfig((seatHeatingDuration + 1).coerceAtMost(10), seatHeatingLevel) }, modifier = Modifier.weight(1f)) { Text("时长+") }
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        Button(onClick = { persistSeatHeatingConfig(seatHeatingDuration, 1) }, modifier = Modifier.weight(1f)) { Text("1级") }
-                        Button(onClick = { persistSeatHeatingConfig(seatHeatingDuration, 2) }, modifier = Modifier.weight(1f)) { Text("2级") }
-                    }
-                }
-
-                ControlGroupCard(title = stringResource(R.string.car_control_rear_buttons_title), cardColors = cardColors) {
-                    Text(text = stringResource(R.string.car_control_rear_buttons_desc), style = MiuixTheme.textStyles.body2, color = onPageSecondary)
-                    Text(text = rearButtonsSummary, style = MiuixTheme.textStyles.footnote1, color = onPagePrimary)
-                    Spacer(modifier = Modifier.size(6.dp))
-                    Button(
-                        onClick = {
-                            val act = ctx as? android.app.Activity ?: return@Button
-                            RearButtonConfigDialog.show(act, rearButtons) { newList ->
-                                persistRearButtons(newList)
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColorsPrimary(),
-                    ) {
-                        Text(stringResource(R.string.car_control_rear_buttons_edit))
-                    }
-                }
-
-                Card(modifier = Modifier.fillMaxWidth(), cornerRadius = 20.dp, insideMargin = PaddingValues(scrollPad), colors = cardColors) {
-                    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Button(onClick = onStartProjection, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColorsPrimary()) { Text(stringResource(R.string.car_control_start_projection)) }
-                        Button(onClick = onPickCarModel, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors()) { Text(stringResource(R.string.car_control_pick_car_model)) }
-                        Button(onClick = onResetCarModel, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors()) { Text(stringResource(R.string.car_control_reset_car_model)) }
-                        Button(onClick = onLogout, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors()) { Text(stringResource(R.string.car_control_logout)) }
-                    }
-                }
-
-            }
-        }
-    }
-
-}
-
-@Composable
-private fun VehicleDataCard(
-    ui: CarVehicleDisplayUi?,
-    loading: Boolean,
-    onRefresh: () -> Unit,
-    onReLogin: () -> Unit,
-    cardColors: CardColors,
-    onPagePrimary: Color,
-    onPageSecondary: Color,
-    errorColor: Color,
-) {
-    val scrollPad = dimensionResource(R.dimen.mi_page_scroll_padding)
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        cornerRadius = 20.dp,
-        insideMargin = PaddingValues(
-            horizontal = scrollPad,
-            vertical = 10.dp,
-        ),
-        colors = cardColors,
-    ) {
+    Box(modifier = Modifier.fillMaxSize().background(pageBg)) {
         Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = scrollPad, vertical = scrollPad),
+            verticalArrangement = Arrangement.spacedBy(scrollPad),
         ) {
+            // 标题行 + 返回按钮
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = stringResource(R.string.car_control_vehicle_section_title),
-                    style = MiuixTheme.textStyles.body1,
+                    text = "←",
+                    fontSize = 22.sp,
+                    color = onPagePrimary,
+                    modifier = Modifier
+                        .clickable { onBack() }
+                        .padding(end = 12.dp),
+                )
+                Text(
+                    text = stringResource(R.string.car_control_settings_title),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = onPagePrimary,
                     modifier = Modifier.weight(1f),
                 )
-                if (loading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .padding(end = 6.dp)
-                            .size(18.dp),
-                        strokeWidth = 2.dp,
-                    )
-                }
-                TextButton(
-                    text = stringResource(R.string.car_control_vehicle_refresh),
-                    onClick = onRefresh,
-                    enabled = !loading,
-                    colors = ButtonDefaults.textButtonColorsPrimary(),
-                )
             }
 
-            if (ui == null && loading) {
+            // ── 空调设置 ──
+            ControlGroupCard(
+                title = stringResource(R.string.car_control_ac_title),
+                cardColors = cardColors,
+                onPageSecondary = onPageSecondary,
+            ) {
                 Text(
-                    text = stringResource(R.string.car_control_vehicle_loading),
-                    style = MiuixTheme.textStyles.footnote1,
+                    text = "${stringResource(R.string.car_control_ac_duration)}：${acDuration}分钟    ${stringResource(R.string.car_control_ac_temp)}：${acTemp}℃",
+                    style = MiuixTheme.textStyles.body2,
                     color = onPageSecondary,
                 )
-                return@Column
-            }
-            if (ui == null) return@Column
-
-            ui.warningMessage?.let { msg ->
-                Text(
-                    text = msg,
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = errorColor,
-                )
-                if (ui.loginInvalid) {
-                    TextButton(
-                        text = stringResource(R.string.car_control_vehicle_relogin),
-                        onClick = onReLogin,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.textButtonColorsPrimary(),
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { persistAcConfig((acDuration - 1).coerceAtLeast(3), acTemp) }, modifier = Modifier.weight(1f)) { Text("时长-") }
+                    Button(onClick = { persistAcConfig((acDuration + 1).coerceAtMost(10), acTemp) }, modifier = Modifier.weight(1f)) { Text("时长+") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { persistAcConfig(acDuration, (acTemp - 1).coerceAtLeast(17)) }, modifier = Modifier.weight(1f)) { Text("温度-") }
+                    Button(onClick = { persistAcConfig(acDuration, (acTemp + 1).coerceAtMost(32)) }, modifier = Modifier.weight(1f)) { Text("温度+") }
                 }
             }
 
-            VehicleCompactCoreBlock(
-                ui = ui,
-                onPagePrimary = onPagePrimary,
+            // ── 座椅加热设置 ──
+            ControlGroupCard(
+                title = stringResource(R.string.car_control_seat_heating_title),
+                cardColors = cardColors,
                 onPageSecondary = onPageSecondary,
-            )
-
-            if (ui.vehicleStatusRows.isNotEmpty()) {
-                VehicleExpandableNamedRows(
-                    title = stringResource(R.string.car_control_vehicle_subsection_status),
-                    rows = ui.vehicleStatusRows,
-                    onPageSecondary = onPageSecondary,
-                    valueColorForRow = { onPagePrimary },
+            ) {
+                Text(
+                    text = "${stringResource(R.string.car_control_seat_heating_duration)}：${seatHeatingDuration}分钟    ${stringResource(R.string.car_control_seat_heating_level)}：${seatHeatingLevel}级",
+                    style = MiuixTheme.textStyles.body2,
+                    color = onPageSecondary,
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { persistSeatHeatingConfig((seatHeatingDuration - 1).coerceAtLeast(3), seatHeatingLevel) }, modifier = Modifier.weight(1f)) { Text("时长-") }
+                    Button(onClick = { persistSeatHeatingConfig((seatHeatingDuration + 1).coerceAtMost(10), seatHeatingLevel) }, modifier = Modifier.weight(1f)) { Text("时长+") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { persistSeatHeatingConfig(seatHeatingDuration, 1) }, modifier = Modifier.weight(1f)) { Text("1级") }
+                    Button(onClick = { persistSeatHeatingConfig(seatHeatingDuration, 2) }, modifier = Modifier.weight(1f)) { Text("2级") }
+                }
             }
 
-            if (ui.mileageEnergyRows.isNotEmpty()) {
-                VehicleExpandableNamedRows(
-                    title = stringResource(R.string.car_control_vehicle_subsection_mileage),
-                    rows = ui.mileageEnergyRows,
-                    onPageSecondary = onPageSecondary,
-                    valueColorForRow = { row ->
-                        if (row.label == "油量%") {
-                            fuelPercentTextColor(ui.fuelPercent, onPagePrimary)
-                        } else {
-                            onPagePrimary
+            // ── 背屏按钮配置 ──
+            ControlGroupCard(
+                title = stringResource(R.string.car_control_rear_buttons_title),
+                cardColors = cardColors,
+                onPageSecondary = onPageSecondary,
+            ) {
+                Text(
+                    text = stringResource(R.string.car_control_rear_buttons_desc),
+                    style = MiuixTheme.textStyles.body2,
+                    color = onPageSecondary,
+                )
+                Text(
+                    text = rearButtonsSummary,
+                    style = MiuixTheme.textStyles.footnote1,
+                    color = onPagePrimary,
+                )
+                Spacer(Modifier.size(6.dp))
+                Button(
+                    onClick = {
+                        val act = ctx as? android.app.Activity ?: return@Button
+                        RearButtonConfigDialog.show(act, rearButtons) { newList ->
+                            persistRearButtons(newList)
                         }
                     },
-                )
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(stringResource(R.string.car_control_rear_buttons_edit)) }
             }
-        }
-    }
-}
 
-/** 占位或与占位同义的「无数据」不掩码，避免满屏星号。 */
-private fun maskedPrivacyValue(raw: String, hideSecret: Boolean, dash: String): String {
-    if (!hideSecret) return raw
-    if (raw.isBlank() || raw == dash) return raw
-    return "*".repeat(raw.length.coerceAtLeast(1))
-}
-
-@Composable
-private fun VehicleCompactCoreBlock(
-    ui: CarVehicleDisplayUi,
-    onPagePrimary: Color,
-    onPageSecondary: Color,
-) {
-    val style = MiuixTheme.textStyles.footnote1
-    val dash = stringResource(R.string.car_control_vehicle_dash)
-    val plateL = stringResource(R.string.car_control_vehicle_plate)
-    val colorL = stringResource(R.string.car_control_vehicle_color)
-    val seriesL = stringResource(R.string.car_control_vehicle_series_model)
-    val vinL = stringResource(R.string.car_control_vehicle_vin)
-    val rangeL = stringResource(R.string.car_control_vehicle_range)
-    val fuelL = stringResource(R.string.car_control_vehicle_fuel_pct)
-    val updatedL = stringResource(R.string.car_control_vehicle_updated)
-
-    var plateHidden by remember { mutableStateOf(false) }
-    var vinHidden by remember { mutableStateOf(false) }
-
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Text(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { plateHidden = !plateHidden },
-            text = "$plateL ${maskedPrivacyValue(ui.plateNo, plateHidden, dash)}  ·  $colorL ${ui.colorName}",
-            style = style,
-            color = onPagePrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = "$seriesL ${ui.seriesModel}",
-            style = style,
-            color = onPagePrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { vinHidden = !vinHidden },
-            text = "$vinL ${maskedPrivacyValue(ui.vin, vinHidden, dash)}",
-            style = style,
-            color = onPagePrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "$rangeL ${ui.rangeKmText}",
-                style = style,
-                color = onPagePrimary,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 6.dp),
+            // ── 启动投屏和车模设置 ──
+            ControlGroupCard(
+                title = "启动投屏和车模设置",
+                cardColors = cardColors,
+                onPageSecondary = onPageSecondary,
             ) {
-                Text(text = "$fuelL ", style = style, color = onPageSecondary)
-                Text(
-                    text = ui.fuelPercentText,
-                    style = style,
-                    color = fuelPercentTextColor(ui.fuelPercent, onPagePrimary),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-        Text(
-            text = "${ui.interiorTempText}  ·  ${ui.exteriorTempText}  ·  $updatedL ${ui.updateTimeShort}",
-            style = style,
-            color = onPageSecondary,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
+                Button(
+                    onClick = onStartProjection,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColorsPrimary(),
+                ) { Text(stringResource(R.string.car_control_start_projection)) }
 
-@Composable
-private fun VehicleExpandableNamedRows(
-    title: String,
-    rows: List<CarNamedDisplayRow>,
-    onPageSecondary: Color,
-    valueColorForRow: (CarNamedDisplayRow) -> Color,
-) {
-    val collapseByDefault = rows.size > 3
-    var expanded by remember(rows.size) { mutableStateOf(!collapseByDefault) }
-
-    val headerStyle = MiuixTheme.textStyles.footnote1
-    val countStr = stringResource(R.string.car_control_vehicle_item_count_fmt, rows.size)
-    val toggleStr = stringResource(
-        if (expanded) {
-            R.string.car_control_vehicle_collapse
-        } else {
-            R.string.car_control_vehicle_expand
-        },
-    )
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { expanded = !expanded }
-            .padding(vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = buildString {
-                append(title)
-                append(" · ")
-                append(countStr)
-                append(" · ")
-                append(toggleStr)
-            },
-            style = headerStyle,
-            color = onPageSecondary,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-
-    if (expanded) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(3.dp),
-        ) {
-            rows.chunked(2).forEach { pair ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    pair.forEach { row ->
-                        VehicleNamedRowMiniCell(
-                            row = row,
-                            valueColor = valueColorForRow(row),
-                            onPageSecondary = onPageSecondary,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    if (pair.size == 1) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
+                    Button(
+                        onClick = onPickCarModel,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(),
+                    ) { Text(stringResource(R.string.car_control_pick_car_model), fontSize = 13.sp) }
+                    Button(
+                        onClick = onResetCarModel,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(),
+                    ) { Text(stringResource(R.string.car_control_reset_car_model), fontSize = 13.sp) }
                 }
             }
+
+            // ── 退出登录 ──
+            Button(
+                onClick = onLogout,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(),
+            ) { Text(stringResource(R.string.car_control_logout)) }
+
+            Spacer(Modifier.size(24.dp))
         }
     }
 }
 
-@Composable
-private fun VehicleNamedRowMiniCell(
-    row: CarNamedDisplayRow,
-    valueColor: Color,
-    onPageSecondary: Color,
-    modifier: Modifier = Modifier,
-) {
-    val style = MiuixTheme.textStyles.footnote1
-    Column(modifier = modifier) {
-        Text(
-            text = row.label,
-            style = style,
-            color = onPageSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = row.value,
-            style = style,
-            color = valueColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-private fun fuelPercentTextColor(fuelPercent: Int, default: Color): Color {
-    if (fuelPercent < 0) return default
-    return when {
-        fuelPercent < 10 -> Color(0xFFFF0000)
-        fuelPercent < 30 -> Color(0xFF2196F3)
-        else -> Color(0xFFFF9800)
-    }
-}
-
-/** 与音乐页、[TextAppearance.MiRoot.PageTitle]（`mi_page_title_text_size`）一致的大标题字号。 */
-@Composable
-private fun pageTitleTextUnit(): TextUnit {
-    val ctx = LocalContext.current
-    val d = LocalDensity.current
-    val px = ctx.resources.getDimension(R.dimen.mi_page_title_text_size)
-    return (px / (d.density * d.fontScale)).sp
-}
-
-private const val KEY_AC_DURATION = "ac_duration"
-private const val KEY_AC_TEMPERATURE = "ac_temperature"
-private const val KEY_SEAT_HEATING_DURATION = "seat_heating_duration"
-private const val KEY_SEAT_HEATING_LEVEL = "seat_heating_level"
-private const val KEY_REAR_BUTTONS_ORDER = "rear_buttons_order"
-
-private fun defaultRearButtons(): List<String> = defaultRearButtonsForFirstInstall()
-
-private fun loadRearButtons(raw: String?): List<String> {
-    if (raw.isNullOrBlank()) return defaultRearButtons()
-    return runCatching {
-        val arr = org.json.JSONArray(raw)
-        buildList {
-            for (i in 0 until arr.length()) add(arr.getString(i))
-        }
-    }.getOrElse { defaultRearButtons() }.ifEmpty { defaultRearButtons() }
-}
-
-private fun encodeRearButtons(buttons: List<String>): String = org.json.JSONArray(buttons).toString()
-
-private fun normalizeValidRearButtons(buttons: List<String>): List<String> {
-    val allowed = RearButtonConfigDialog.CONTROL_FUNCTIONS.toSet()
-    return buttons.map { it.trim() }.filter { it.isNotEmpty() && it in allowed }.distinct().take(8)
-        .ifEmpty { defaultRearButtons() }
-}
+// ─── Reusable Components ───────────────────────────────────────────────────────
 
 @Composable
 private fun ControlGroupCard(
     title: String,
     cardColors: CardColors,
-    collapsible: Boolean = false,
     onPageSecondary: Color = Color.Unspecified,
-    initiallyExpanded: Boolean = true,
-    content: @Composable ColumnScope.() -> Unit,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -783,89 +1453,172 @@ private fun ControlGroupCard(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (collapsible) {
-                var expanded by remember(title) { mutableStateOf(initiallyExpanded) }
-                val toggleLabel = stringResource(
-                    if (expanded) R.string.car_control_vehicle_collapse else R.string.car_control_vehicle_expand,
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { expanded = !expanded },
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = title,
-                        style = MiuixTheme.textStyles.subtitle,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = toggleLabel,
-                        style = MiuixTheme.textStyles.footnote1,
-                        color = onPageSecondary,
-                        modifier = Modifier.padding(start = 8.dp),
-                    )
-                }
-                if (expanded) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        content()
-                    }
-                }
-            } else {
-                Text(text = title, style = MiuixTheme.textStyles.subtitle)
-                content()
-            }
-        }
-    }
-}
-
-@Composable
-private fun ControlButtonRow(
-    title: String,
-    content: @Composable () -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(text = title, style = MiuixTheme.textStyles.footnote1, color = Color.Unspecified)
-        Row(modifier = Modifier.fillMaxWidth()) {
+            Text(text = title, style = MiuixTheme.textStyles.subtitle)
             content()
         }
     }
 }
 
-@Composable
-private fun SettingsSwitchRow(
-    title: String,
-    subtitle: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    val onPageSecondary = Color(
-        ContextCompat.getColor(
-            androidx.compose.ui.platform.LocalContext.current,
-            R.color.mi_text_secondary,
-        ),
-    )
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
-            Text(text = title, style = MiuixTheme.textStyles.body1)
-            Text(
-                text = subtitle,
-                style = MiuixTheme.textStyles.footnote1,
-                color = onPageSecondary,
-            )
+// ─── Car Model Image Loading (ported from RearScreenCarControlActivity) ────────
+
+/**
+ * 加载车模图片：自定义路径 → assets/car/xingrui.webp → drawable xingrui → null。
+ * 与 [RearScreenCarControlActivity.loadCarModelImage] 逻辑一致。
+ */
+private fun loadCarModelBitmap(context: Context): Bitmap? {
+    val prefs = context.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
+
+    // 1) 自定义车模
+    val customPath = prefs.getString(KEY_CAR_MODEL_PATH, null)
+    if (customPath != null) {
+        val f = File(customPath)
+        if (f.exists()) {
+            return try {
+                BitmapFactory.decodeStream(FileInputStream(f))
+            } catch (_: Exception) { null }
         }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-        )
+    }
+
+    // 2) assets/car/xingrui.webp
+    val assetPath = CarControlAssets.webpPath("xingrui")
+    if (CarControlAssets.exists(context, assetPath)) {
+        return CarControlAssets.decodeBitmap(context, assetPath)
+    }
+
+    // 3) drawable xingrui
+    val resId = context.resources.getIdentifier("xingrui", "drawable", context.packageName)
+    if (resId != 0) {
+        return try {
+            BitmapFactory.decodeResource(context.resources, resId)
+        } catch (_: Exception) { null }
+    }
+
+    return null
+}
+
+private const val KEY_CAR_MODEL_PATH = "car_model_path"
+
+// ─── Buttons helpers (same as CarControlSettingsActivity original) ─────────────
+
+private const val KEY_AC_DURATION = "ac_duration"
+private const val KEY_AC_TEMPERATURE = "ac_temperature"
+private const val KEY_SEAT_HEATING_DURATION = "seat_heating_duration"
+private const val KEY_SEAT_HEATING_LEVEL = "seat_heating_level"
+private const val KEY_DASHBOARD_REAR_BUTTONS = "rear_buttons_order"
+
+private fun loadRearButtonsForDashboard(raw: String?): List<String> {
+    if (raw.isNullOrBlank()) return defaultRearButtonsForFirstInstall()
+    return runCatching {
+        val arr = org.json.JSONArray(raw)
+        buildList {
+            for (i in 0 until arr.length()) add(arr.getString(i))
+        }
+    }.getOrElse { defaultRearButtonsForFirstInstall() }.ifEmpty { defaultRearButtonsForFirstInstall() }
+}
+
+private fun encodeRearButtons(buttons: List<String>): String = org.json.JSONArray(buttons).toString()
+
+private fun normalizeValidRearButtons(buttons: List<String>): List<String> {
+    val allowed = RearButtonConfigDialog.CONTROL_FUNCTIONS.toSet()
+    return buttons.map { it.trim() }.filter { it.isNotEmpty() && it in allowed }.distinct().take(8)
+        .ifEmpty { defaultRearButtonsForFirstInstall() }
+}
+
+// ─── Button Icon Helpers (same mapping as RearScreenCarControlActivity) ─────────
+
+/** 根据按钮功能文本获取 assets 图标资源名，与 [RearScreenCarControlActivity.getIconResourceName] 一致。 */
+private fun getCarControlIconName(text: String): String = when (text) {
+    "锁车/解锁" -> "ic_car_index_lock"
+    "寻车" -> "ic_car_index_find_car"
+    "点火/熄火" -> "ic_car_index_engine"
+    "空调" -> "ic_ac_unit"
+    "开窗/关窗" -> "ic_car_index_open_window"
+    "透气" -> "ic_car_index_wind"
+    "开后备箱" -> "ic_car_index_trunk"
+    "座椅加热" -> "ic_seat_heating"
+    "主驾加热" -> "ic_seat_heating_driver"
+    "副驾加热" -> "ic_seat_heating_passenger"
+    else -> "ic_car_index_find_car"
+}
+
+/** 从 assets 加载按钮图标位图，与背屏使用的资源一致。 */
+private fun loadCarControlIcon(context: Context, text: String): Bitmap? {
+    val name = getCarControlIconName(text)
+    val path = CarControlAssets.pngPath(name)
+    return CarControlAssets.decodeBitmap(context, path)
+}
+
+private const val CAR_CONTROL_HOLD_TO_EXECUTE_MS = 1000L
+
+/**
+ * 根据按钮文本执行对应的车控指令，逻辑与 [CarButtonStateManager.executeCommand] 一致。
+ * 通过当前 SharedPreferences 及车辆状态判断应执行"开启"还是"关闭"操作。
+ */
+private fun executeByText(context: Context, text: String) {
+    val prefs = context.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
+    val appCtx = context.applicationContext
+    try {
+        val result = when (text) {
+            "锁车/解锁" -> {
+                val status = VehicleStatusService.getVehicleStatus(appCtx)
+                val locked = "已锁" == VehicleStatusService.translateDoorLockStatus(status.doorLockStatusDriver)
+                if (locked) VehicleControlService.unlock(appCtx) else VehicleControlService.lock(appCtx)
+            }
+            "寻车" -> VehicleControlService.findCar(appCtx)
+            "点火/熄火" -> {
+                val status = VehicleStatusService.getVehicleStatus(appCtx)
+                val running = "运行中" == VehicleStatusService.translateEngineStatus(status.engineStatus)
+                if (running) VehicleControlService.stopEngine(appCtx) else VehicleControlService.startEngine(appCtx, 10)
+            }
+            "空调" -> {
+                val isOn = prefs.getBoolean("ac_status", false)
+                if (isOn) VehicleControlService.closeAirConditioner(appCtx)
+                else {
+                    val mins = prefs.getInt(KEY_AC_DURATION, 10)
+                    val temp = prefs.getInt(KEY_AC_TEMPERATURE, 22)
+                    VehicleControlService.openAirConditioner(appCtx, mins, temp)
+                }
+            }
+            "开窗/关窗" -> {
+                val status = VehicleStatusService.getVehicleStatus(appCtx)
+                val open = "已开" == status.winStatusDriver
+                if (open) VehicleControlService.closeWindow(appCtx) else VehicleControlService.openWindow(appCtx)
+            }
+            "透气" -> VehicleControlService.ventilate(appCtx)
+            "开后备箱" -> VehicleControlService.openTrunk(appCtx)
+            "座椅加热" -> {
+                val isOn = prefs.getBoolean("seat_heating_status", false)
+                if (isOn) VehicleControlService.closeSeatHeating(appCtx)
+                else {
+                    val mins = prefs.getInt(KEY_SEAT_HEATING_DURATION, 10)
+                    val level = prefs.getInt(KEY_SEAT_HEATING_LEVEL, 1)
+                    VehicleControlService.openSeatHeating(appCtx, mins, level)
+                }
+            }
+            "主驾加热" -> {
+                val isOn = prefs.getBoolean("seat_heating_status", false)
+                if (isOn) VehicleControlService.closeDriverSeatHeating(appCtx)
+                else {
+                    val mins = prefs.getInt(KEY_SEAT_HEATING_DURATION, 10)
+                    val level = prefs.getInt(KEY_SEAT_HEATING_LEVEL, 1)
+                    VehicleControlService.openDriverSeatHeating(appCtx, mins, level)
+                }
+            }
+            "副驾加热" -> {
+                val isOn = prefs.getBoolean("seat_heating_status", false)
+                if (isOn) VehicleControlService.closePassengerSeatHeating(appCtx)
+                else {
+                    val mins = prefs.getInt(KEY_SEAT_HEATING_DURATION, 10)
+                    val level = prefs.getInt(KEY_SEAT_HEATING_LEVEL, 1)
+                    VehicleControlService.openPassengerSeatHeating(appCtx, mins, level)
+                }
+            }
+            else -> null
+        }
+        if (result != null && !result.success) {
+            MainDisplayUi.showToast(context, result.message.ifEmpty { "执行失败" }, Toast.LENGTH_SHORT)
+        }
+    } catch (e: Exception) {
+        MainDisplayUi.showToast(context, e.message ?: "执行失败", Toast.LENGTH_SHORT)
     }
 }
