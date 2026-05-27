@@ -1206,6 +1206,7 @@ private fun RearButtonCell(
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
 
 /**
  * 根据车辆状态解析按钮当前可执行的单个状态标题（如"解锁"或"锁车"），
@@ -1231,9 +1232,9 @@ private fun isButtonAlertState(context: Context, text: String): Boolean {
     val prefs = context.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
     return when (text) {
         "寻车" -> false
-        "锁车/解锁" -> prefs.getBoolean("is_locked", false)  // 已锁→蓝色（可解锁）
-        "点火/熄火" -> prefs.getBoolean("is_engine_on", false)  // 运行中→蓝色（可熄火）
-        "开窗/关窗" -> prefs.getBoolean("is_window_open", false)  // 已开→蓝色（可关窗）
+        "锁车/解锁" -> prefs.getBoolean("is_locked", false)  // 已锁->蓝色(可解锁)
+        "点火/熄火" -> prefs.getBoolean("is_engine_on", false)  // 运行中->蓝色(可熄火)
+        "开窗/关窗" -> prefs.getBoolean("is_window_open", false)  // 已开->蓝色(可关窗)
         "空调" -> !prefs.getBoolean("ac_status", false)
         "座椅加热" -> !prefs.getBoolean("seat_heating_status", false)
         "主驾加热" -> !prefs.getBoolean("seat_heating_status", false)
