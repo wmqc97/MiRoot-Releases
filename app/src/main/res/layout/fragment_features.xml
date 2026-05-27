@@ -387,19 +387,12 @@
                         android:text="@string/features_rear_rotation_deg_270"
                         android:textSize="12sp" />
                 </com.google.android.material.button.MaterialButtonToggleGroup>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-        <com.google.android.material.card.MaterialCardView
-            style="@style/Widget.MiRoot.Card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/mi_features_card_spacing">
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="@dimen/mi_features_card_inner_padding">
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:background="?android:attr/listDivider" />
 
                 <TextView
                     android:id="@+id/text_section_features_rear_assist"
@@ -502,24 +495,17 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="@dimen/mi_features_compose_slider_top"
                     android:minHeight="@dimen/mi_features_compose_slider_min_height" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
 
-        <com.google.android.material.card.MaterialCardView
-            style="@style/Widget.MiRoot.Card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/mi_features_card_spacing">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="@dimen/mi_features_card_inner_padding">
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:background="?android:attr/listDivider" />
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
                     android:text="@string/features_section_rear_gesture"
                     android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
 
@@ -530,20 +516,12 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="@dimen/mi_features_section_gap"
                     android:text="@string/features_rear_gesture_config_button" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
 
-        <com.google.android.material.card.MaterialCardView
-            style="@style/Widget.MiRoot.Card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/mi_features_card_spacing">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="@dimen/mi_features_card_inner_padding">
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:background="?android:attr/listDivider" />
 
                 <TextView
                     android:id="@+id/text_section_features_charging"
