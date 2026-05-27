@@ -508,18 +508,16 @@ private fun DashboardScreen(
                     .padding(horizontal = scrollPad),
             )
 
-            // 高德车辆位置地图
-            if (!vehicleLng.isNaN() && !vehicleLat.isNaN()) {
-                Spacer(Modifier.size(12.dp))
-                MapSection(
-                    lng = vehicleLng,
-                    lat = vehicleLat,
-                    refreshKey = mapRefreshKey,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = scrollPad),
-                )
-            }
+            // 高德车辆位置地图（始终显示，无坐标时显示占位）
+            Spacer(Modifier.size(12.dp))
+            MapSection(
+                lng = vehicleLng,
+                lat = vehicleLat,
+                refreshKey = mapRefreshKey,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad),
+            )
 
             Spacer(Modifier.size(24.dp))
         }

@@ -2,7 +2,9 @@ package com.wmqc.miroot.car
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import android.net.Uri
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -508,18 +510,20 @@ fun MapSection(
 ) {
     val CarUiColors = carColors()
     val ctx = LocalContext.current
+    val hasCoords = !lng.isNaN() && !lat.isNaN()
+
     var mapBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var loading by remember { mutableStateOf(true) }
     var addressText by remember { mutableStateOf("") }
     var addressLoading by remember { mutableStateOf(true) }
-    val scope = rememberCoroutineScope()
 
     // Build AMap static map URL via AmapApiService
     val mapUrl = remember(lng, lat, refreshKey) {
-        AmapApiService.staticMapUrl(lng, lat, 600, 300, 15)
+        if (hasCoords) AmapApiService.staticMapUrl(lng, lat, 600, 300, 15) else null
     }
 
     LaunchedEffect(mapUrl) {
+        if (mapUrl == null) { loading = false; return@LaunchedEffect }
         loading = true
         withContext(Dispatchers.IO) {
             try {
@@ -545,6 +549,7 @@ fun MapSection(
 
     // Reverse geocoding for address
     LaunchedEffect(lng, lat) {
+        if (!hasCoords) { addressLoading = false; return@LaunchedEffect }
         addressLoading = true
         withContext(Dispatchers.IO) {
             val addr = AmapApiService.regeoShortAddress(lng, lat)
@@ -553,6 +558,16 @@ fun MapSection(
                 addressLoading = false
             }
         }
+    }
+
+    // Navigation fallback: open Amap via web URL (works in browser, prompts to open app)
+    val openNavigation = {
+        try {
+            if (hasCoords) {
+                val navUrl = "https://uri.amap.com/navigation?to=$lng,$lat,车辆位置&mode=car&callnative=1"
+                ctx.startActivity(Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(navUrl)))
+            }
+        } catch (_: Exception) { }
     }
 
     Card(
@@ -575,7 +590,7 @@ fun MapSection(
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(CarUiColors.btnActiveBg)
-                        .clickable { VehicleControlService.navigateToCar(ctx) }
+                        .clickable { openNavigation() }
                         .padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
@@ -596,7 +611,7 @@ fun MapSection(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-            } else if (addressLoading) {
+            } else if (hasCoords && addressLoading) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -615,7 +630,25 @@ fun MapSection(
                     .background(CarUiColors.mapBg),
                 contentAlignment = Alignment.Center
             ) {
-                if (loading || mapBitmap == null) {
+                if (!hasCoords) {
+                    // No GPS data placeholder
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("🗺", fontSize = 36.sp)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "暂无位置信息",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = CarUiColors.textPrimary
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            "获取车辆状态后自动更新",
+                            fontSize = 11.sp,
+                            color = CarUiColors.textSecondary
+                        )
+                    }
+                } else if (loading || mapBitmap == null) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator(
                             Modifier.size(24.dp),

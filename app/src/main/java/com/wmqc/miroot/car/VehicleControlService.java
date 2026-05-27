@@ -558,58 +558,18 @@ public class VehicleControlService {
             
             LogHelper.d(TAG, "🚗 寻车功能: 车辆位置 lat=" + latStr + ", lon=" + lonStr);
             
-            // 5. 调用高德地图导航（参考脚本：步行导航）
-            // 脚本中使用：amapuri://openFeature?featureName=OnFootNavi&lon=$lon&lat=$lat&dev=1
-            // 或者使用路线规划：amapuri://route/plan/?&dlon=$lon&dlat=$lat&dname=车位置&dev=1&t=2&rideType=elebike
-            // 这里使用路线规划方式，让用户选择导航方式
-            // 添加高德地图API key
-            String uriString = String.format(
-                "amapuri://route/plan/?&dlon=%s&dlat=%s&dname=车位置&dev=1&t=2&rideType=elebike&key=%s",
-                lonStr, latStr, AMAP_API_KEY
+            // 5. 优先使用高德 URI 中转页（https://uri.amap.com/navigation）
+            //    优点：无需安装高德 APP，浏览器打开后自动唤起 APP 或跳转 web 版
+            String navUrl = String.format(
+                "https://uri.amap.com/navigation?to=%s,%s,车辆位置&mode=car&callnative=1",
+                lonStr, latStr
             );
-            
             Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setData(Uri.parse(uriString));
-            intent.setPackage("com.autonavi.minimap"); // 指定高德地图包名
-            
-            // 检查是否有应用可以处理此Intent
-            if (intent.resolveActivity(context.getPackageManager()) != null) {
-                context.startActivity(intent);
-                result.success = true;
-                result.message = "正在打开导航...";
-                LogHelper.d(TAG, "✅ 寻车功能：已启动高德地图导航");
-            } else {
-                // 如果没有安装高德地图，尝试使用通用导航Intent
-                // 或者使用步行导航方式
-                uriString = String.format(
-                    "amapuri://openFeature?featureName=OnFootNavi&lon=%s&lat=%s&dev=1&key=%s",
-                    lonStr, latStr, AMAP_API_KEY
-                );
-                intent.setData(Uri.parse(uriString));
-                
-                if (intent.resolveActivity(context.getPackageManager()) != null) {
-                    context.startActivity(intent);
-                    result.success = true;
-                    result.message = "正在打开导航...";
-                    LogHelper.d(TAG, "✅ 寻车功能：已启动高德地图导航（步行方式）");
-                } else {
-                    // 如果高德地图未安装，尝试使用通用地图Intent
-                    uriString = String.format("geo:%s,%s?q=车位置", latStr, lonStr);
-                    intent = new Intent(Intent.ACTION_VIEW);
-                    intent.setData(Uri.parse(uriString));
-                    
-                    if (intent.resolveActivity(context.getPackageManager()) != null) {
-                        context.startActivity(intent);
-                        result.success = true;
-                        result.message = "正在打开地图...";
-                        LogHelper.d(TAG, "✅ 寻车功能：已启动通用地图应用");
-                    } else {
-                        result.success = false;
-                        result.message = "未找到可用的地图应用，请安装高德地图";
-                        LogHelper.e(TAG, "❌ 寻车功能：未找到可用的地图应用");
-                    }
-                }
-            }
+            intent.setData(Uri.parse(navUrl));
+            context.startActivity(intent);
+            result.success = true;
+            result.message = "正在打开导航...";
+            LogHelper.d(TAG, "✅ 寻车功能：已启动高德导航中转页");
             
         } catch (Exception e) {
             LogHelper.e(TAG, "❌ 寻车功能异常", e);
