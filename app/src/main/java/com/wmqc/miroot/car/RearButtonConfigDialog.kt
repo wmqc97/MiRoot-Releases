@@ -6,7 +6,9 @@ import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.graphics.BitmapFactory
 import android.widget.BaseAdapter
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
@@ -35,6 +37,32 @@ object RearButtonConfigDialog {
         "主驾加热",
         "副驾加热",
     )
+
+    /** 根据功能名获取默认图标资源名（与背屏一致，取"关闭"状态图标） */
+    private fun getIconResourceName(text: String): String = when (text) {
+        "锁车/解锁" -> "ic_car_index_lock"
+        "寻车" -> "ic_car_index_find_car"
+        "点火/熄火" -> "ic_car_index_engine"
+        "空调" -> "ic_ac_unit"
+        "开窗/关窗" -> "ic_car_index_open_window"
+        "透气" -> "ic_car_index_wind"
+        "开后备箱" -> "ic_car_index_trunk"
+        "座椅加热" -> "ic_seat_heating"
+        "主驾加热" -> "ic_seat_heating_driver"
+        "副驾加热" -> "ic_seat_heating_passenger"
+        else -> "ic_car_index_find_car"
+    }
+
+    private val iconCache = mutableMapOf<String, android.graphics.Bitmap?>()
+
+    /** 从 assets 加载按钮图标（带缓存） */
+    private fun loadButtonIcon(context: android.content.Context, text: String): android.graphics.Bitmap? {
+        return iconCache.getOrPut(text) {
+            val name = getIconResourceName(text)
+            val path = CarControlAssets.pngPath(name)
+            CarControlAssets.decodeBitmap(context, path)
+        }
+    }
 
     fun show(
         activity: Activity,
@@ -102,10 +130,13 @@ object RearButtonConfigDialog {
                         )
                     }
                 }
+                val iconView = row.findViewById<ImageView>(android.R.id.icon)
                 val indexText = row.findViewById<TextView>(android.R.id.text1)
                 val nameText = row.findViewById<TextView>(android.R.id.text2)
                 indexText.text = "${position + 1}."
-                nameText.text = selected[position]
+                val funcName = selected[position]
+                iconView.setImageBitmap(loadButtonIcon(activity, funcName))
+                nameText.text = funcName
                 row.setBackgroundColor(if (position % 2 == 0) 0xFFF5F5F5.toInt() else 0xFFFFFFFF.toInt())
                 return row
             }
@@ -165,19 +196,40 @@ object RearButtonConfigDialog {
             override fun getItem(position: Int): Any = available[position]
             override fun getItemId(position: Int): Long = position.toLong()
 
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val tv = if (convertView is TextView) {
+                        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val row = if (convertView is LinearLayout) {
                     convertView
                 } else {
-                    TextView(activity).apply {
-                        setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
-                        setTextColor(0xFF333333.toInt())
-                        setPadding(dp(16), dp(16), dp(16), dp(16))
+                    LinearLayout(activity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        setPadding(dp(16), dp(12), dp(16), dp(12))
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(
+                            ImageView(activity).apply {
+                                id = android.R.id.icon
+                                val iconSize = (24 * density).toInt()
+                                layoutParams = LinearLayout.LayoutParams(iconSize, iconSize).apply {
+                                    rightMargin = dp(10)
+                                }
+                                scaleType = ImageView.ScaleType.FIT_CENTER
+                            },
+                        )
+                        addView(
+                            TextView(activity).apply {
+                                id = android.R.id.text1
+                                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16f)
+                                setTextColor(0xFF333333.toInt())
+                            },
+                        )
                     }
                 }
-                tv.text = "+ ${available[position]}"
-                tv.setBackgroundColor(if (position % 2 == 0) 0xFFF5F5F5.toInt() else 0xFFFFFFFF.toInt())
-                return tv
+                val iconView = row.findViewById<ImageView>(android.R.id.icon)
+                val tv = row.findViewById<TextView>(android.R.id.text1)
+                val funcName = available[position]
+                iconView.setImageBitmap(loadButtonIcon(activity, funcName))
+                tv.text = "+ ${funcName}"
+                row.setBackgroundColor(if (position % 2 == 0) 0xFFF5F5F5.toInt() else 0xFFFFFFFF.toInt())
+                return row
             }
         }
 

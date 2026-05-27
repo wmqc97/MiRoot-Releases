@@ -1,4 +1,4 @@
-﻿package com.wmqc.miroot.car
+package com.wmqc.miroot.car
 import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.Context
@@ -256,6 +256,7 @@ private fun DashboardScreen(
 
     var vehicleUi by remember { mutableStateOf<CarVehicleDisplayUi?>(null) }
     var vehicleLoading by remember { mutableStateOf(true) }
+    var vehicleStatus by remember { mutableStateOf<VehicleStatusService.VehicleStatusInfo?>(null) }
 
     // 车模图片 bitmap
     var carModelBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -306,6 +307,9 @@ private fun DashboardScreen(
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { refreshVehicleStatePrefs(ctx) }
     }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { vehicleStatus = VehicleStatusService.getVehicleStatus(appCtx) }
+    }
 
     // 计算总页数（每页4个按钮，2列2行）
     val totalPages = ((rearButtons.size + 3) / 4).coerceIn(1, 2)
@@ -316,12 +320,14 @@ private fun DashboardScreen(
         isRefreshing = true
         scope.launch(Dispatchers.IO) {
             val ui = CarVehicleDisplayHelper.load(appCtx)
+            var vs: VehicleStatusService.VehicleStatusInfo? = null
             try {
-                val status = VehicleStatusService.getVehicleStatus(appCtx)
+                vs = VehicleStatusService.getVehicleStatus(appCtx)
                 refreshVehicleStatePrefs(ctx)
             } catch (_: Exception) { }
             withContext(Dispatchers.Main) {
                 vehicleUi = ui
+                vehicleStatus = vs
                 vehicleLoading = false
                 isRefreshing = false
             }
@@ -396,9 +402,9 @@ private fun DashboardScreen(
                     .padding(horizontal = scrollPad),
             )
 
-            Spacer(Modifier.size(8.dp))
+                        // -- 更多车辆信息 --
 
-            // -- 车模图片 --
+            // -- // -- 车模图片 --
             CarModelSection(
                 bitmap = carModelBitmap,
                 loading = carModelLoading,
@@ -415,6 +421,9 @@ private fun DashboardScreen(
                 pageIndex = currentPage,
                 onPageChange = { currentPage = it },
                 totalPages = totalPages,
+                vehicleStatus = vehicleStatus,
+                acStatus = acStatus,
+                seatHeatingStatus = seatHeatingStatus,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = scrollPad),
@@ -449,6 +458,16 @@ private fun DashboardScreen(
                     .fillMaxWidth()
                     .padding(horizontal = scrollPad),
             )
+            Spacer(Modifier.size(12.dp))
+
+            VehicleInfoCard(
+                ui = vehicleUi,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad),
+            )
+
+            Spacer(Modifier.size(8.dp))
 Spacer(Modifier.size(24.dp))
         }
     }
@@ -608,6 +627,188 @@ private fun RangeSection(
 
 
 
+
+
+
+// --- VehicleInfoCard ---
+
+/**
+ * 更多车辆信息卡片：展示车牌、VIN、内外温度、车门/车窗/后备箱状态等。
+ * 数据来源于 [CarVehicleDisplayUi] 和 SharedPreferences 中的实时状态。
+ */
+@Composable
+private fun VehicleInfoCard(
+    ui: CarVehicleDisplayUi?,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = LocalContext.current
+    val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
+    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+    val cardColor = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
+    val accentColor = Color(0xFF2196F3)
+    val dash = stringResource(R.string.car_control_vehicle_dash)
+
+    if (ui == null) return
+
+    var expanded by remember { mutableStateOf(false) }
+    val prefs = ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
+
+    // 实时状态
+    val isLocked = prefs.getBoolean("is_locked", false)
+    val isEngineOn = prefs.getBoolean("is_engine_on", false)
+    val isWindowOpen = prefs.getBoolean("is_window_open", false)
+    val isTrunkOpen = prefs.getBoolean("is_trunk_open", false)
+
+    Card(
+        modifier = modifier,
+        cornerRadius = 20.dp,
+        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+        colors = CardColors(color = cardColor, contentColor = onPagePrimary),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 标题行 + 展开/收起
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.car_control_vehicle_section_title),
+                    style = MiuixTheme.textStyles.subtitle,
+                    color = onPagePrimary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = if (expanded) stringResource(R.string.car_control_vehicle_collapse) else stringResource(R.string.car_control_vehicle_expand),
+                    fontSize = 12.sp,
+                    color = accentColor,
+                )
+            }
+
+            // 基础信息（始终显示）
+            VehicleInfoRow(stringResource(R.string.car_control_vehicle_plate), ui.plateNo, onPagePrimary, onPageSecondary)
+            VehicleInfoRow(stringResource(R.string.car_control_vehicle_series_model), ui.seriesModel, onPagePrimary, onPageSecondary)
+
+            // 展开后显示更多
+            if (expanded) {
+                // 分割线
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(0.5.dp)
+                        .background(onPageSecondary.copy(alpha = 0.2f)),
+                )
+
+                VehicleInfoRow(stringResource(R.string.car_control_vehicle_color), ui.colorName, onPagePrimary, onPageSecondary)
+                VehicleInfoRow(stringResource(R.string.car_control_vehicle_vin), ui.vin, onPagePrimary, onPageSecondary)
+                VehicleInfoRow(stringResource(R.string.car_control_vehicle_temp_interior_fmt).replace("%1${'$'}s", ui.interiorTempText.replace(Regex("[^\\d.-]"), "").ifEmpty { dash }), dash, onPagePrimary, onPageSecondary)
+                VehicleInfoRow(stringResource(R.string.car_control_vehicle_temp_exterior_fmt).replace("%1${'$'}s", ui.exteriorTempText.replace(Regex("[^\\d.-]"), "").ifEmpty { dash }), dash, onPagePrimary, onPageSecondary)
+
+                // 分割线
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(0.5.dp)
+                        .background(onPageSecondary.copy(alpha = 0.2f)),
+                )
+
+                // 实时状态
+                Text(
+                    text = stringResource(R.string.car_control_vehicle_subsection_status),
+                    style = MiuixTheme.textStyles.body2,
+                    fontWeight = FontWeight.Medium,
+                    color = onPagePrimary,
+                )
+                VehicleStatusRow("车门", if (isLocked) "已锁" else "未锁", isLocked, onPagePrimary, onPageSecondary)
+                VehicleStatusRow("发动机", if (isEngineOn) "运行中" else "已熄火", isEngineOn, onPagePrimary, onPageSecondary)
+                VehicleStatusRow("车窗", if (isWindowOpen) "已开" else "已关", isWindowOpen, onPagePrimary, onPageSecondary)
+                VehicleStatusRow("后备箱", if (isTrunkOpen) "已开" else "已关", isTrunkOpen, onPagePrimary, onPageSecondary)
+
+                // 里程能源信息
+                if (ui.mileageEnergyRows.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(0.5.dp)
+                            .background(onPageSecondary.copy(alpha = 0.2f)),
+                    )
+                    Text(
+                        text = stringResource(R.string.car_control_vehicle_subsection_mileage),
+                        style = MiuixTheme.textStyles.body2,
+                        fontWeight = FontWeight.Medium,
+                        color = onPagePrimary,
+                    )
+                    ui.mileageEnergyRows.forEach { row ->
+                        VehicleInfoRow(row.label, row.value, onPagePrimary, onPageSecondary)
+                    }
+                }
+
+                // 车辆状态详情
+                if (ui.vehicleStatusRows.isNotEmpty()) {
+                    ui.vehicleStatusRows.forEach { row ->
+                        VehicleInfoRow(row.label, row.value, onPagePrimary, onPageSecondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VehicleInfoRow(
+    label: String,
+    value: String,
+    primaryColor: Color,
+    secondaryColor: Color,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            color = secondaryColor,
+            modifier = Modifier.width(80.dp),
+        )
+        Text(
+            text = value,
+            fontSize = 13.sp,
+            color = primaryColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun VehicleStatusRow(
+    label: String,
+    statusText: String,
+    isActive: Boolean,
+    primaryColor: Color,
+    secondaryColor: Color,
+) {
+    val activeColor = Color(0xFF2196F3)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            fontSize = 13.sp,
+            color = secondaryColor,
+            modifier = Modifier.width(80.dp),
+        )
+        Text(
+            text = statusText,
+            fontSize = 13.sp,
+            fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal,
+            color = if (isActive) activeColor else primaryColor,
+        )
+    }
+}
 
 
 // ─── AcControlCard ──────────────────────────────────────────────────────────────
@@ -895,6 +1096,9 @@ private fun RearButtonGrid(
     pageIndex: Int,
     onPageChange: (Int) -> Unit,
     totalPages: Int,
+    vehicleStatus: VehicleStatusService.VehicleStatusInfo?,
+    acStatus: Boolean,
+    seatHeatingStatus: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -956,6 +1160,9 @@ private fun RearButtonGrid(
                 pageButtons.forEach { func ->
                     RearButtonCell(
                         text = func,
+                        vehicleStatus = vehicleStatus,
+                        acStatus = acStatus,
+                        seatHeatingStatus = seatHeatingStatus,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -997,13 +1204,16 @@ private fun RearButtonGrid(
 @Composable
 private fun RearButtonCell(
     text: String,
+    vehicleStatus: VehicleStatusService.VehicleStatusInfo?,
+    acStatus: Boolean,
+    seatHeatingStatus: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val isDark = isSystemInDarkTheme()
-    val displayText = resolveDisplayText(ctx, text)
-    val isAlert = isButtonAlertState(ctx, text)
+    val displayText = resolveDisplayTextV2(text, vehicleStatus, acStatus, seatHeatingStatus)
+    val isAlert = isButtonAlertStateV2(text, vehicleStatus, acStatus, seatHeatingStatus)
 
     val bg = if (isAlert) {
         if (isDark) Color(0xFF5A5A5A) else Color(0xFF81D4FA)
@@ -1023,8 +1233,9 @@ private fun RearButtonCell(
 
     var iconBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
-    LaunchedEffect(text) {
-        iconBitmap = withContext(Dispatchers.IO) { loadCarControlIcon(ctx, text) }
+    // Reload icon when display text changes (resolved from vehicle status)
+    LaunchedEffect(displayText, vehicleStatus) {
+        iconBitmap = withContext(Dispatchers.IO) { loadCarControlIcon(ctx, displayText, vehicleStatus) }
     }
 
     Column(
@@ -1073,38 +1284,65 @@ private fun RearButtonCell(
  * 根据车辆状态解析按钮当前可执行的单个状态标题（如"解锁"或"锁车"），
  * 不再显示组合的"锁车/解锁"。
  */
-private fun resolveDisplayText(context: Context, text: String): String {
-    val prefs = context.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
+/**
+ * 根据车辆状态解析按钮显示的标题（如"解锁"或"锁车"）。
+ * 使用 VehicleStatusInfo 直接判断，与背屏按钮同步逻辑一致。
+ */
+private fun resolveDisplayTextV2(
+    text: String,
+    vehicleStatus: VehicleStatusService.VehicleStatusInfo?,
+    acStatus: Boolean,
+    seatHeatingStatus: Boolean,
+): String {
     return when (text) {
-        "锁车/解锁" -> if (prefs.getBoolean("is_locked", false)) "解锁" else "锁车"
-        "点火/熄火" -> if (prefs.getBoolean("is_engine_on", false)) "熄火" else "点火"
-        "开窗/关窗" -> if (prefs.getBoolean("is_window_open", false)) "关窗" else "开窗"
+        "锁车/解锁" -> if (vehicleStatus?.let { "已锁" == VehicleStatusService.translateDoorLockStatus(it.doorLockStatusDriver) } == true) "解锁" else "锁车"
+        "点火/熄火" -> if (vehicleStatus?.let { "运行中" == VehicleStatusService.translateEngineStatus(it.engineStatus) } == true) "熄火" else "点火"
+        "开窗/关窗" -> if (vehicleStatus?.let { "已开" == it.winStatusDriver } == true) "关窗" else "开窗"
+        "空调" -> if (acStatus) "关闭空调" else "打开空调"
+        "透气" -> "透气"
+        "开后备箱" -> if (vehicleStatus?.let { "已开" == VehicleStatusService.translateTrunkStatus(it.trunkOpenStatus) } == true) "关后备箱" else "开后备箱"
+        "座椅加热" -> if (seatHeatingStatus) "关闭座椅加热" else "打开座椅加热"
+        "主驾加热" -> if (seatHeatingStatus) "关闭主驾加热" else "主驾加热"
+        "副驾加热" -> if (seatHeatingStatus) "关闭副驾加热" else "副驾加热"
+        "寻车" -> "寻车"
         else -> text
     }
 }
 
 /**
- * 判断按钮是否应显示为"可操作"状态（蓝色底）。
- * 蓝色表示可执行的操作（与当前车辆状态相反），浅灰表示当前状态/不可操作。
- * 逻辑与 [RearScreenCarControlActivity.isCarControlAlertSecondaryState] 一致。
- * 从 SharedPreferences 读取车辆各功能状态（背屏通过 WebSocket 实时更新这些状态）。
+ * 根据车辆状态判断按钮是否应显示为"可操作"状态。
+ * 与 CarButtonStateManager.extractStateFromStatus 逻辑一致。
  */
-private fun isButtonAlertState(context: Context, text: String): Boolean {
-    val prefs = context.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
+private fun isButtonAlertStateV2(
+    text: String,
+    vehicleStatus: VehicleStatusService.VehicleStatusInfo?,
+    acStatus: Boolean,
+    seatHeatingStatus: Boolean,
+): Boolean {
+    if (vehicleStatus == null) {
+        // Fallback to local state when vehicle status unavailable
+        return when (text) {
+            "空调" -> acStatus
+            "座椅加热", "主驾加热", "副驾加热" -> seatHeatingStatus
+            else -> false
+        }
+    }
     return when (text) {
         "寻车" -> false
-        "锁车/解锁" -> prefs.getBoolean("is_locked", false)  // 已锁->蓝色(可解锁)
-        "点火/熄火" -> prefs.getBoolean("is_engine_on", false)  // 运行中->蓝色(可熄火)
-        "开窗/关窗" -> prefs.getBoolean("is_window_open", false)  // 已开->蓝色(可关窗)
-        "空调" -> !prefs.getBoolean("ac_status", false)
-        "座椅加热" -> !prefs.getBoolean("seat_heating_status", false)
-        "主驾加热" -> !prefs.getBoolean("seat_heating_status", false)
-        "副驾加热" -> !prefs.getBoolean("seat_heating_status", false)
-        "开后备箱" -> !prefs.getBoolean("is_trunk_open", false)
-        "透气" -> !prefs.getBoolean("is_vent_mode", false)
+        "锁车/解锁" -> "已锁" != VehicleStatusService.translateDoorLockStatus(vehicleStatus.doorLockStatusDriver)
+        "点火/熄火" -> "运行中" == VehicleStatusService.translateEngineStatus(vehicleStatus.engineStatus)
+        "开窗/关窗" -> "已开" == vehicleStatus.winStatusDriver
+        "空调" -> acStatus
+        "透气" -> {
+            val pos = vehicleStatus.winPosDriver
+            pos != null && pos != "未知" && try { val v = pos.toInt(); v > 0 && v <= 50 } catch (_: Exception) { false }
+        }
+        "开后备箱" -> "已开" == VehicleStatusService.translateTrunkStatus(vehicleStatus.trunkOpenStatus)
+        "座椅加热", "主驾加热", "副驾加热" -> seatHeatingStatus
         else -> false
     }
 }
+
 
 // ─── Settings Sub-Screen（二级设置页） ─────────────────────────────────────────
 
@@ -1408,23 +1646,42 @@ private fun normalizeValidRearButtons(buttons: List<String>): List<String> {
 // ─── Button Icon Helpers (same mapping as RearScreenCarControlActivity) ─────────
 
 /** 根据按钮功能文本获取 assets 图标资源名，与 [RearScreenCarControlActivity.getIconResourceName] 一致。 */
-private fun getCarControlIconName(text: String): String = when (text) {
-    "锁车/解锁" -> "ic_car_index_lock"
-    "寻车" -> "ic_car_index_find_car"
-    "点火/熄火" -> "ic_car_index_engine"
-    "空调" -> "ic_ac_unit"
-    "开窗/关窗" -> "ic_car_index_open_window"
-    "透气" -> "ic_car_index_wind"
-    "开后备箱" -> "ic_car_index_trunk"
-    "座椅加热" -> "ic_seat_heating"
-    "主驾加热" -> "ic_seat_heating_driver"
-    "副驾加热" -> "ic_seat_heating_passenger"
-    else -> "ic_car_index_find_car"
+private fun getCarControlIconName(
+    displayText: String,
+    vehicleStatus: VehicleStatusService.VehicleStatusInfo? = null,
+): String {
+    return when (displayText) {
+        "解锁" -> "ic_car_index_lock"
+        "锁车" -> "ic_car_index_lock_on"
+        "寻车" -> "ic_car_index_find_car"
+        "点火" -> "ic_car_index_engine"
+        "熄火" -> "ic_car_index_engine_on"
+        "打开空调" -> "ic_ac_unit"
+        "关闭空调" -> "ic_ac_unit_on"
+        "开窗" -> "ic_car_index_open_window"
+        "关窗" -> "ic_car_index_open_window_on"
+        "透气" -> {
+            val pos = vehicleStatus?.winPosDriver
+            val isWindowOpen = pos != null && pos != "未知" && try { val v = pos.toInt(); v > 0 && v <= 50 } catch (_: Exception) { false }
+            if (isWindowOpen) "ic_car_index_wind_on" else "ic_car_index_wind"
+        }
+        "开后备箱" -> "ic_car_index_trunk"
+        "关后备箱" -> "ic_car_index_trunk_on"
+        "打开座椅加热" -> "ic_seat_heating"
+        "关闭座椅加热" -> "ic_seat_heating_on"
+        "主驾加热" -> "ic_seat_heating_driver"
+        "关闭主驾加热" -> "ic_seat_heating_driver_on"
+        "副驾加热" -> "ic_seat_heating_passenger"
+        "关闭副驾加热" -> "ic_seat_heating_passenger_on"
+        else -> "ic_car_index_find_car"
+    }
 }
-
 /** 从 assets 加载按钮图标位图，与背屏使用的资源一致。 */
-private fun loadCarControlIcon(context: Context, text: String): Bitmap? {
-    val name = getCarControlIconName(text)
+private fun loadCarControlIcon(
+    context: Context, displayText: String,
+    vehicleStatus: VehicleStatusService.VehicleStatusInfo? = null,
+): Bitmap? {
+    val name = getCarControlIconName(displayText, vehicleStatus)
     val path = CarControlAssets.pngPath(name)
     return CarControlAssets.decodeBitmap(context, path)
 }
