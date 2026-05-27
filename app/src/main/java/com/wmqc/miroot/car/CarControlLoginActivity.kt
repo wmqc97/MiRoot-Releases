@@ -5,23 +5,38 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -35,18 +50,23 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -78,11 +98,18 @@ class CarControlLoginActivity : ComponentActivity() {
             finish()
             return
         }
+
+        // 自动跳过：若已有有效 token 直接进入设置页
+        if (!LoginService.isLoginExpired(this) && !LoginService.isLoginMarkedInvalid(this)) {
+            startActivity(android.content.Intent(this, CarControlSettingsActivity::class.java))
+            finish()
+            return
+        }
+
         enableEdgeToEdge()
         setContent {
             val dark = isSystemInDarkTheme()
             MiuixTheme(colors = if (dark) darkColorScheme() else lightColorScheme()) {
-                // Material3 输入框读取 MaterialTheme；仅 MiuixTheme 时默认浅色 scheme，深色模式下文字会与深色卡片同色。
                 CarControlLoginScreen(
                     onSuccess = {
                         startActivity(android.content.Intent(this, CarControlSettingsActivity::class.java))
@@ -149,6 +176,7 @@ private fun CarControlLoginScreenContent(
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var saveCredentials by remember { mutableStateOf(true) }
+    var passwordVisible by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var statusError by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
@@ -157,8 +185,10 @@ private fun CarControlLoginScreenContent(
     LaunchedEffect(Unit) {
         val p = ctx.getSharedPreferences("LoginPrefs", android.content.Context.MODE_PRIVATE)
         username = p.getString("username", "").orEmpty()
-        password = p.getString("password", "").orEmpty()
         saveCredentials = p.getBoolean("saveCredentials", true)
+        if (saveCredentials) {
+            password = p.getString("password", "").orEmpty()
+        }
     }
 
     Box(
@@ -174,8 +204,29 @@ private fun CarControlLoginScreenContent(
                     .windowInsetsPadding(WindowInsets.navigationBars)
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = scrollPad, vertical = scrollPad),
+                horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(scrollPad),
             ) {
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Logo 区域
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(brandPrimary.copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_car_login_logo),
+                        contentDescription = null,
+                        modifier = Modifier.size(40.dp),
+                        tint = brandPrimary,
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(4.dp))
+
                 Text(
                     text = stringResource(R.string.car_control_login_title),
                     fontSize = pageTitleTextUnit(),
@@ -186,7 +237,13 @@ private fun CarControlLoginScreenContent(
                     text = stringResource(R.string.car_control_login_subtitle),
                     style = MiuixTheme.textStyles.body2,
                     color = onPageSecondary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // 登录表单卡片
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     cornerRadius = 20.dp,
@@ -195,7 +252,7 @@ private fun CarControlLoginScreenContent(
                 ) {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
                         OutlinedTextField(
                             value = username,
@@ -205,6 +262,7 @@ private fun CarControlLoginScreenContent(
                             singleLine = true,
                             enabled = !loading,
                             colors = fieldColors,
+                            shape = RoundedCornerShape(12.dp),
                         )
                         OutlinedTextField(
                             value = password,
@@ -213,11 +271,23 @@ private fun CarControlLoginScreenContent(
                             label = { androidx.compose.material3.Text(stringResource(R.string.car_control_password)) },
                             singleLine = true,
                             enabled = !loading,
-                            visualTransformation = PasswordVisualTransformation(),
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             colors = fieldColors,
+                            shape = RoundedCornerShape(12.dp),
+                            trailingIcon = {
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(
+                                        imageVector = if (passwordVisible) Icons.Filled.Visibility else Icons.Filled.VisibilityOff,
+                                        contentDescription = if (passwordVisible) "隐藏密码" else "显示密码",
+                                        tint = onPageSecondary,
+                                    )
+                                }
+                            },
                         )
-                        androidx.compose.foundation.layout.Row(
+
+                        // 记住账号密码
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
@@ -235,7 +305,17 @@ private fun CarControlLoginScreenContent(
                             }
                             Switch(
                                 checked = saveCredentials,
-                                onCheckedChange = { saveCredentials = it },
+                                onCheckedChange = { checked ->
+                                    saveCredentials = checked
+                                    if (!checked) {
+                                        password = ""
+                                        ctx.getSharedPreferences("LoginPrefs", android.content.Context.MODE_PRIVATE)
+                                            .edit().remove("password").apply()
+                                    } else {
+                                        val p = ctx.getSharedPreferences("LoginPrefs", android.content.Context.MODE_PRIVATE)
+                                        password = p.getString("password", "").orEmpty()
+                                    }
+                                },
                                 enabled = !loading,
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = brandPrimary,
@@ -243,13 +323,32 @@ private fun CarControlLoginScreenContent(
                                 ),
                             )
                         }
-                        if (status.isNotEmpty()) {
-                            Text(
-                                text = status,
-                                style = MiuixTheme.textStyles.footnote1,
-                                color = if (statusError) Color(0xFFFF5722) else Color(0xFF4CAF50),
-                            )
+
+                        // 状态消息
+                        AnimatedVisibility(
+                            visible = status.isNotEmpty(),
+                            enter = fadeIn(),
+                            exit = fadeOut(),
+                        ) {
+                            val bgColor = if (statusError) Color(0xFFFF5722).copy(alpha = 0.1f) else Color(0xFF4CAF50).copy(alpha = 0.1f)
+                            val textColor = if (statusError) Color(0xFFFF5722) else Color(0xFF4CAF50)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(bgColor)
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                            ) {
+                                Text(
+                                    text = status,
+                                    style = MiuixTheme.textStyles.footnote1,
+                                    color = textColor,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
                         }
+
+                        // 登录按钮
                         Button(
                             onClick = {
                                 val u = username.trim()
@@ -305,6 +404,8 @@ private fun CarControlLoginScreenContent(
                         }
                     }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
         if (loading) {
