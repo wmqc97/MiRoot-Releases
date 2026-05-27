@@ -10,6 +10,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.wmqc.miroot.R
 import com.wmqc.miroot.lyrics.JiebaTokenizerEngine
+import com.wmqc.miroot.capability.PermissionSnapshot
 import com.wmqc.miroot.databinding.FragmentMoreBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -32,6 +33,9 @@ class MoreFragment : Fragment(R.layout.fragment_more) {
         binding.buttonImportLyricsDict.setOnClickListener {
             pickLyricsDictLauncher.launch(arrayOf("text/plain", "text/*", "*/*"))
         }
+    }
+
+    private fun render(snap: PermissionSnapshot) {
     }
 
     override fun onDestroyView() {

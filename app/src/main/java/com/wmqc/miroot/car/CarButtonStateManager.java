@@ -146,6 +146,8 @@ public class CarButtonStateManager {
                         LogHelper.d(TAG, "  [" + i + "] = " + info.key + " (" + func + ")");
                     }
                 }
+                // 恢复上次确认的 remoteOn 状态（避免异步 API 返回前按钮显示错误状态）
+                restoreRemoteOnStates(prefs);
                 return;
             } catch (Exception e) {
                 LogHelper.e(TAG, "解析按钮JSON失败", e);

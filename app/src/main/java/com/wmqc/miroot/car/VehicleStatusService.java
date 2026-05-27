@@ -117,7 +117,10 @@ public class VehicleStatusService {
         public String winStatusDriver = "未知";
         public String airCleanSts = "未知";
         public String preClimateActive = "未知";
-        
+        public String ventilateStatus = "未知";
+        public String drvHeatSts = "未知";
+        public String passHeatingSts = "未知";
+
         // 防盗相关
         public String theftActivated = "未知";
     }
@@ -352,6 +355,11 @@ public class VehicleStatusService {
                             boolean preClimate = climateStatus.optBoolean("preClimateActive", false);
                             status.preClimateActive = preClimate ? "true" : "false";
                         }
+                        // ventilateStatus 通风状态
+                        status.ventilateStatus = extractField(climateStatus, "ventilateStatus");
+                        // 座椅加热状态
+                        status.drvHeatSts = extractField(climateStatus, "drvHeatSts");
+                        status.passHeatingSts = extractField(climateStatus, "passHeatingSts");
                     }
                     
                     // 3.5 安全状态：additionalVehicleStatus.drivingSafetyStatus
@@ -931,7 +939,10 @@ public class VehicleStatusService {
         putMileageEnergyField(mileageEnergy, "油量", status.fuelLevel, "L");
         putMileageEnergyField(mileageEnergy, "油量%", status.fuelLevelStatus, "%");
         putMileageEnergyField(mileageEnergy, "电瓶", status.voltage, "V");
-        putMileageEnergyField(mileageEnergy, "油耗", status.aveFuelConsumption, "L/100km");
+        putMileageEnergyField(mileageEnergy, "平均油耗", status.aveFuelConsumption, "L/100km");
+        putMileageEnergyField(mileageEnergy, "剩余保养里程", status.distanceToService, "km");
+        putMileageEnergyField(mileageEnergy, "平均时速", status.avgSpeed, "km/h");
+        putMileageEnergyField(mileageEnergy, "冷却液温度", status.engineCoolantTemperature, "℃");
         root.put("mileageEnergy", mileageEnergy);
 
         JSONArray mileageEnergyItems = new JSONArray();
@@ -940,7 +951,10 @@ public class VehicleStatusService {
         addNamedMetricItem(mileageEnergyItems, "油量", status.fuelLevel, "L");
         addNamedMetricItem(mileageEnergyItems, "油量%", status.fuelLevelStatus, "%");
         addNamedMetricItem(mileageEnergyItems, "电瓶", status.voltage, "V");
-        addNamedMetricItem(mileageEnergyItems, "油耗", status.aveFuelConsumption, "L/100km");
+        addNamedMetricItem(mileageEnergyItems, "平均油耗", status.aveFuelConsumption, "L/100km");
+        addNamedMetricItem(mileageEnergyItems, "剩余保养里程", status.distanceToService, "km");
+        addNamedMetricItem(mileageEnergyItems, "平均时速", status.avgSpeed, "km/h");
+        addNamedMetricItem(mileageEnergyItems, "冷却液温度", status.engineCoolantTemperature, "℃");
         root.put("mileageEnergyItems", mileageEnergyItems);
 
         StringBuilder vsLine = new StringBuilder("【车辆状态】");
@@ -958,7 +972,10 @@ public class VehicleStatusService {
         appendCompactValueWithUnitLikeSettings(meLine, "油量", status.fuelLevel, "L");
         appendCompactValueWithUnitLikeSettings(meLine, "油量%", status.fuelLevelStatus, "%");
         appendCompactValueWithUnitLikeSettings(meLine, "电瓶", status.voltage, "V");
-        appendCompactValueWithUnitLikeSettings(meLine, "油耗", status.aveFuelConsumption, "L/100km");
+        appendCompactValueWithUnitLikeSettings(meLine, "平均油耗", status.aveFuelConsumption, "L/100km");
+        appendCompactValueWithUnitLikeSettings(meLine, "剩余保养里程", status.distanceToService, "km");
+        appendCompactValueWithUnitLikeSettings(meLine, "平均时速", status.avgSpeed, "km/h");
+        appendCompactValueWithUnitLikeSettings(meLine, "冷却液温度", status.engineCoolantTemperature, "℃");
         root.put("mileageEnergyText", meLine.toString());
 
         return root;

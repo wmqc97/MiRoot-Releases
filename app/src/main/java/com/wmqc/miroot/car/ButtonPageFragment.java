@@ -56,7 +56,7 @@ public class ButtonPageFragment extends Fragment {
         LinearLayout rootLayout = new LinearLayout(getContext());
         rootLayout.setOrientation(LinearLayout.HORIZONTAL);
         rootLayout.setGravity(Gravity.CENTER);
-        rootLayout.setPadding(0, 0, 0, 20);
+        rootLayout.setPadding(0, 0, 0, (int)(10 * getResources().getDisplayMetrics().density));
         
         if (buttonFunctions != null && activity != null) {
             LogHelper.d(TAG, "📄 创建第" + pageIndex + "页，buttonFunctions长度=" + buttonFunctions.length);

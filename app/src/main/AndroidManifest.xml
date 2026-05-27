@@ -64,6 +64,20 @@
             android:name="miui.rear.policy"
             android:value="1"/>
 
+        <!-- SuperLyric API 接入声明 -->
+        <meta-data
+            android:name="superlyricapi"
+            android:value="true"
+            tools:replace="android:value" />
+        <meta-data
+            android:name="superlyricapi_version_name"
+            android:value="${superlyricApiVersionName}"
+            tools:replace="android:value" />
+        <meta-data
+            android:name="superlyricapi_version_code"
+            android:value="${superlyricApiVersionCode}"
+            tools:replace="android:value" />
+
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

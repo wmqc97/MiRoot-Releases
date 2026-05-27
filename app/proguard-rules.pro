@@ -67,6 +67,25 @@
     int mKuwoWordHintCharEnd;
     long mKuwoWordHintTimestamp;
 }
+
+# EnhancedLRCParser data models — public fields accessed directly by ModernLyricsView
+-keep class com.wmqc.miroot.lyrics.EnhancedLRCParser { *; }
+-keepclassmembers class com.wmqc.miroot.lyrics.EnhancedLRCParser$EnhancedLyricLine {
+    public long time;
+    public java.lang.String text;
+    public java.lang.String translation;
+    public java.util.List wordTimestamps;
+    public boolean moduleWordTimeline;
+    public boolean isTranslationLine;
+}
+-keepclassmembers class com.wmqc.miroot.lyrics.EnhancedLRCParser$WordTimestamp {
+    public java.lang.String word;
+    public long startTime;
+    public long endTime;
+}
+-keepclassmembers class com.wmqc.miroot.lyrics.EnhancedLRCParser$LyricMetadata {
+    *;
+}
 -keepclassmembers class com.wmqc.miroot.car.RearScreenCarControlActivity {
     private static com.wmqc.miroot.car.RearScreenCarControlActivity currentInstance;
     private android.widget.RelativeLayout mainLayout;

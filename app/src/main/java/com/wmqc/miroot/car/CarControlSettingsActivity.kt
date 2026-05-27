@@ -1,4 +1,4 @@
-package com.wmqc.miroot.car
+﻿package com.wmqc.miroot.car
 import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.Context
@@ -301,6 +301,10 @@ private fun DashboardScreen(
         seatHeatingDuration = p.getInt(KEY_SEAT_HEATING_DURATION, 10)
         seatHeatingLevel = p.getInt(KEY_SEAT_HEATING_LEVEL, 1)
     }
+    // 初始加载时同步车辆状态到 SharedPreferences
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { refreshVehicleStatePrefs(ctx) }
+    }
 
     // 计算总页数（每页4个按钮，2列2行）
     val totalPages = ((rearButtons.size + 3) / 4).coerceIn(1, 2)
@@ -313,11 +317,7 @@ private fun DashboardScreen(
             val ui = CarVehicleDisplayHelper.load(appCtx)
             try {
                 val status = VehicleStatusService.getVehicleStatus(appCtx)
-                ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
-                    .putBoolean("is_locked", "已锁" == VehicleStatusService.translateDoorLockStatus(status.doorLockStatusDriver))
-                    .putBoolean("is_engine_on", "运行中" == VehicleStatusService.translateEngineStatus(status.engineStatus))
-                    .putBoolean("is_window_open", "已开" == status.winStatusDriver)
-                    .apply()
+                refreshVehicleStatePrefs(ctx)
             } catch (_: Exception) { }
             withContext(Dispatchers.Main) {
                 vehicleUi = ui
@@ -1141,17 +1141,23 @@ private fun RearButtonCell(
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val isDark = isSystemInDarkTheme()
+    val displayText = resolveDisplayText(ctx, text)
     val isAlert = isButtonAlertState(ctx, text)
 
     val bg = if (isAlert) {
         if (isDark) Color(0xFF5A5A5A) else Color(0xFF81D4FA)
     } else {
-        if (isDark) Color(0xFF2E2E2E) else Color(0xFFE8EEF1)
+        if (isDark) Color(0xFF2E2E2E) else Color(0xFFE8E8E8)
+    }
+    val iconColor = if (isAlert) {
+        if (isDark) Color.White else Color(0xFF0D47A1)
+    } else {
+        if (isDark) Color.LightGray else Color.White
     }
     val textColor = if (isAlert) {
         if (isDark) Color.White else Color(0xFF0D47A1)
     } else {
-        if (isDark) Color.LightGray else Color(0xFF666666)
+        if (isDark) Color.LightGray else Color.Black
     }
 
     var iconBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -1185,7 +1191,7 @@ private fun RearButtonCell(
                     painter = BitmapPainter(iconBitmap!!.asImageBitmap()),
                     contentDescription = text,
                     modifier = Modifier.size(32.dp),
-                    colorFilter = ColorFilter.tint(textColor),
+                    colorFilter = ColorFilter.tint(iconColor),
                 )
             }
         }
@@ -1193,12 +1199,25 @@ private fun RearButtonCell(
         Spacer(Modifier.height(6.dp))
 
         Text(
-            text = text,
+            text = displayText,
             fontSize = 12.sp,
             color = textColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+
+/**
+ * 根据车辆状态解析按钮当前可执行的单个状态标题（如"解锁"或"锁车"），
+ * 不再显示组合的"锁车/解锁"。
+ */
+private fun resolveDisplayText(context: Context, text: String): String {
+    val prefs = context.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
+    return when (text) {
+        "锁车/解锁" -> if (prefs.getBoolean("is_locked", false)) "解锁" else "锁车"
+        "点火/熄火" -> if (prefs.getBoolean("is_engine_on", false)) "熄火" else "点火"
+        "开窗/关窗" -> if (prefs.getBoolean("is_window_open", false)) "关窗" else "开窗"
+        else -> text
     }
 }
 
@@ -1212,9 +1231,9 @@ private fun isButtonAlertState(context: Context, text: String): Boolean {
     val prefs = context.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
     return when (text) {
         "寻车" -> false
-        "锁车/解锁" -> !prefs.getBoolean("is_locked", false)
-        "点火/熄火" -> !prefs.getBoolean("is_engine_on", false)
-        "开窗/关窗" -> !prefs.getBoolean("is_window_open", false)
+        "锁车/解锁" -> prefs.getBoolean("is_locked", false)  // 已锁→蓝色（可解锁）
+        "点火/熄火" -> prefs.getBoolean("is_engine_on", false)  // 运行中→蓝色（可熄火）
+        "开窗/关窗" -> prefs.getBoolean("is_window_open", false)  // 已开→蓝色（可关窗）
         "空调" -> !prefs.getBoolean("ac_status", false)
         "座椅加热" -> !prefs.getBoolean("seat_heating_status", false)
         "主驾加热" -> !prefs.getBoolean("seat_heating_status", false)
@@ -1621,4 +1640,30 @@ private fun executeByText(context: Context, text: String) {
     } catch (e: Exception) {
         MainDisplayUi.showToast(context, e.message ?: "执行失败", Toast.LENGTH_SHORT)
     }
+}
+
+/**
+ * 同步车辆状态到 SharedPreferences（车门锁、发动机、车窗、后备箱、透气等）
+ */
+private fun refreshVehicleStatePrefs(context: Context) {
+    val appCtx = context.applicationContext
+    try {
+        val status = VehicleStatusService.getVehicleStatus(appCtx)
+        context.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putBoolean("is_locked", "已锁" == VehicleStatusService.translateDoorLockStatus(status.doorLockStatusDriver))
+            .putBoolean("is_engine_on", "运行中" == VehicleStatusService.translateEngineStatus(status.engineStatus))
+            .putBoolean("is_window_open", "已开" == status.winStatusDriver)
+            .putBoolean("is_trunk_open", "已开" == VehicleStatusService.translateTrunkStatus(status.trunkOpenStatus))
+            .putBoolean("is_vent_mode", isVentPosition(status.winPosDriver))
+            .apply()
+    } catch (_: Exception) { }
+}
+
+/** 判断车窗位置值是否处于透气模式（一条缝）：0=关闭，1~50=透气，>50=全开 */
+private fun isVentPosition(winPosDriver: String?): Boolean {
+    if (winPosDriver.isNullOrEmpty() || winPosDriver == "未知") return false
+    return try {
+        val pos = winPosDriver.toInt()
+        pos > 0 && pos <= 50
+    } catch (_: NumberFormatException) { false }
 }

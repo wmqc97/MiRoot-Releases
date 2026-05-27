@@ -122,6 +122,9 @@ android {
         versionCode = 27
         versionName = "1.9.3"
 
+        manifestPlaceholders["superlyricApiVersionName"] = "3.4"
+        manifestPlaceholders["superlyricApiVersionCode"] = "34"
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {

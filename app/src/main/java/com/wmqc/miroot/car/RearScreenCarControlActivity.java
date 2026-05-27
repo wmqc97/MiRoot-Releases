@@ -67,6 +67,7 @@ import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.view.animation.LinearInterpolator;
 import android.widget.Button;
@@ -223,7 +224,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
 
     /** 车控圆形按钮底色 / 图标色（随 {@link #syncCarControlThemeColors()} 与系统深浅色变化） */
     private int carBtnBgPrimary = 0xFFB3E5FC;
-    private int carBtnBgSecondary = 0xFFFFFFFF;
+    private int carBtnBgSecondary = 0xFFE8E8E8;
     private int carBtnIconPrimaryIdle = 0xFF0D47A1;
     private int carBtnIconPrimaryActive = 0xFF00838F;
     private int carBtnIconSecondary = 0xFF000000;
@@ -1212,10 +1213,10 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             colorCarUpdateTime = 0xFF424242;
             colorCarFuelBlue = 0xFF1565C0;
             carBtnBgPrimary = 0xFF81D4FA;
-            carBtnBgSecondary = 0xFFE8EEF1;
+            carBtnBgSecondary = 0xFFE8E8E8;
             carBtnIconPrimaryIdle = 0xFF0D47A1;
             carBtnIconPrimaryActive = 0xFF006064;
-            carBtnIconSecondary = 0xFF37474F;
+            carBtnIconSecondary = 0xFF000000;
         }
     }
 
@@ -1667,6 +1668,13 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         // 恢复上次确认的后备箱/透气状态，避免异步 API 返回前按钮颜色闪烁
         isTrunkOpen = carPrefs.getBoolean(KEY_IS_TRUNK_OPEN, false);
         isVentMode = carPrefs.getBoolean(KEY_IS_VENT_MODE, false);
+
+        // 从恢复的 remoteOn 状态同步 buttonFunctions（避免异步 API 返回前按钮显示错误文本）
+        for (int i = 0; i < controlButtons.length && i < buttonFunctions.length; i++) {
+            if (carButtonStateManager.get(i) != null) {
+                buttonFunctions[i] = carButtonStateManager.getDisplayText(i);
+            }
+        }
         carButtonStateManager.setCallback(new CarButtonStateManager.Callback() {
             @Override
             public void onButtonStateChanged(int slotIndex) {
@@ -1937,23 +1945,27 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         if (text == null) {
             return false;
         }
-        // 蓝底：未锁、窗开、空调开、加热开、尾箱开等（车辆处于"活跃"状态）
-        if ("锁车".equals(text) || "关窗".equals(text) || "关闭空调".equals(text) || "关闭座椅加热".equals(text)
-                || "熄火".equals(text) || "关闭主驾加热".equals(text) || "关闭副驾加热".equals(text)) {
+
+        // 浅灰底（Secondary）：已锁、窗关、空调关、加热关等（车辆处于"闲置/关闭"状态）
+        // 按钮文本为解锁/开窗/打开…/点火/主副驾加热（即按下后会执行的动作）
+        if ("解锁".equals(text) || "开窗".equals(text) || "打开空调".equals(text) || "打开座椅加热".equals(text)
+                || "点火".equals(text) || "主驾加热".equals(text) || "副驾加热".equals(text)) {
             return true;
         }
-        // 寻车为单次操作，按下去时蓝底
+        // 寻车为单次操作，始终浅灰底
         if ("寻车".equals(text)) {
             return true;
         }
-        // 尾箱开启时蓝底（与 isOpenState 一致）
+        // 尾箱关闭时浅灰底，开启时蓝底
         if ("尾箱".equals(text) || "后备箱".equals(text) || "开后备箱".equals(text)) {
-            return isTrunkOpen;
+            return !isTrunkOpen;
         }
-        // 透气按钮：仅车窗位置在透气范围（一条缝）时蓝底，全开或关闭时白底
+        // 透气按钮：非透气模式时浅灰底，透气模式（一条缝）时蓝底
         if ("透气".equals(text)) {
-            return isVentMode;
+            return !isVentMode;
         }
+        // 蓝底（Primary）：未锁、窗开、空调开、加热开等（车辆处于"活跃"状态）
+        // 按钮文本为锁车/关窗/关闭…/熄火/关加热
         return false;
     }
 
@@ -2084,12 +2096,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                 android.graphics.drawable.Drawable icon = loadControlButtonIcon(text, iconSize);
                 android.graphics.drawable.Drawable[] layers;
                 if (icon != null) {
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                        android.graphics.drawable.Drawable insetIcon = new android.graphics.drawable.InsetDrawable(icon, iconInset, iconInset, iconInset, iconInset);
-                        layers = new android.graphics.drawable.Drawable[]{bgDrawable, insetIcon};
-                    } else {
-                        layers = new android.graphics.drawable.Drawable[]{bgDrawable, icon};
-                    }
+                    layers = new android.graphics.drawable.Drawable[]{bgDrawable, icon};
                 } else {
                     layers = new android.graphics.drawable.Drawable[]{bgDrawable};
                 }
@@ -2118,12 +2125,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         android.graphics.drawable.Drawable icon = loadControlButtonIcon(text, iconSize);
         android.graphics.drawable.Drawable[] layers;
         if (icon != null) {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                android.graphics.drawable.Drawable insetIcon = new android.graphics.drawable.InsetDrawable(icon, iconInset, iconInset, iconInset, iconInset);
-                layers = new android.graphics.drawable.Drawable[]{bgDrawable, insetIcon};
-            } else {
-                layers = new android.graphics.drawable.Drawable[]{bgDrawable, icon};
-            }
+            layers = new android.graphics.drawable.Drawable[]{bgDrawable, icon};
             LogHelper.d(TAG, "✅ 图标已设置: " + text + ", 尺寸: " + iconSize + "px, inset: " + iconInset + "px");
         } else {
             LogHelper.w(TAG, "⚠️ 未找到图标资源: " + text);
@@ -2131,6 +2133,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         }
         
         android.graphics.drawable.LayerDrawable layerDrawable = new android.graphics.drawable.LayerDrawable(layers);
+        if (icon != null) layerDrawable.setLayerInset(1, iconInset, iconInset, iconInset, iconInset);
         button.setBackground(layerDrawable);
         
         button.setMinWidth(buttonSize);
@@ -2568,6 +2571,15 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         // 按钮区域不再支持滑动切换，仅保留车模图片的滑动切换功能
         
         LogHelper.d(TAG, "✅ ViewPager2设置完成");
+        // 显式设置 ViewPager2 高度（WRAP_CONTENT 在 ViewPager2 中测量不准，会导致按钮图标被裁切）
+        float density = getResources().getDisplayMetrics().density;
+        int totalButtonHeight = (int)(50 * density);
+        ViewGroup.LayoutParams vpParams = buttonPageContainer.getLayoutParams();
+        if (vpParams != null) {
+            vpParams.height = totalButtonHeight;
+            buttonPageContainer.setLayoutParams(vpParams);
+        }
+        LogHelper.d(TAG, "\uD83D\uDCCF 按钮容器高度已设置: " + totalButtonHeight + "px (40dp + 20px padding)");
     }
     
     /**
@@ -3075,12 +3087,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             android.graphics.drawable.Drawable icon = loadControlButtonIcon(newText, iconSize);
             android.graphics.drawable.Drawable[] layers;
             if (icon != null) {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                    android.graphics.drawable.Drawable insetIcon = new android.graphics.drawable.InsetDrawable(icon, iconInset, iconInset, iconInset, iconInset);
-                    layers = new android.graphics.drawable.Drawable[]{bgDrawable, insetIcon};
-                } else {
-                    layers = new android.graphics.drawable.Drawable[]{bgDrawable, icon};
-                }
+                layers = new android.graphics.drawable.Drawable[]{bgDrawable, icon};
                 LogHelper.d(TAG, "✅ 更新图标成功: " + newText);
             } else {
                 layers = new android.graphics.drawable.Drawable[]{bgDrawable};
@@ -3088,6 +3095,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
             }
             
             android.graphics.drawable.LayerDrawable layerDrawable = new android.graphics.drawable.LayerDrawable(layers);
+            if (icon != null) layerDrawable.setLayerInset(1, iconInset, iconInset, iconInset, iconInset);
             button.setBackground(layerDrawable);
             
             LogHelper.d(TAG, "✅ 按钮[" + buttonIndex + "]图标已更新为: " + newText);
