@@ -91,6 +91,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
+import kotlin.math.roundToInt
 
 /**
  * 车控设置（界面风格 [Miuix](https://github.com/compose-miuix-ui/miuix)）。
@@ -274,6 +275,11 @@ private fun DashboardScreen(
     var seatHeatingDuration by remember { mutableStateOf(10) }
     var seatHeatingLevel by remember { mutableStateOf(1) }
 
+    // 车辆位置（高德地图）
+    var vehicleLng by remember { mutableStateOf(Double.NaN) }
+    var vehicleLat by remember { mutableStateOf(Double.NaN) }
+    var mapRefreshKey by remember { mutableIntStateOf(0) }
+
     // 加载车辆数据
     LaunchedEffect(Unit) {
         vehicleUi = withContext(Dispatchers.IO) { CarVehicleDisplayHelper.load(appCtx) }
@@ -309,6 +315,14 @@ private fun DashboardScreen(
     }
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) { vehicleStatus = VehicleStatusService.getVehicleStatus(appCtx) }
+    }
+    // 加载车辆位置
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            loadVehiclePosition(appCtx) { lng, lat ->
+                vehicleLng = lng; vehicleLat = lat
+            }
+        }
     }
 
     // 计算总页数（每页4个按钮，2列2行）
@@ -392,26 +406,31 @@ private fun DashboardScreen(
                 onMenuClick = onNavigateToSettings,
             )
 
-                        // -- 续航/电量 --
-            RangeSection(
-                ui = vehicleUi,
-                loading = vehicleLoading,
-                onRefresh = { refreshVehicleData() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = scrollPad),
-            )
-
-                        // -- 更多车辆信息 --
-
-            // -- // -- 车模图片 --
-            CarModelSection(
-                bitmap = carModelBitmap,
+            // ── 现代化车控仪表盘 ──
+            // 燃油表弧 + 车模 + 续航（合并版）
+            CarImageAndGaugesSection(
+                vehicleUi = vehicleUi,
+                carModelBitmap = carModelBitmap,
                 loading = carModelLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = scrollPad),
             )
+
+            Spacer(Modifier.size(8.dp))
+
+            // 车速 / 车外温度 / 电瓶 状态芯片
+            TempBatteryRow(
+                vehicleUi = vehicleUi,
+                vehicleStatus = vehicleStatus,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad),
+            )
+
+            Spacer(Modifier.size(12.dp))
+
+            // 快捷控制按钮（4x2 网格 + 页面指示器）
 
             Spacer(Modifier.size(12.dp))
 
@@ -460,15 +479,49 @@ private fun DashboardScreen(
             )
             Spacer(Modifier.size(12.dp))
 
-            VehicleInfoCard(
-                ui = vehicleUi,
+            // 车辆状态摘要
+            VehicleStatusSummary(
+                vehicleUi = vehicleUi,
+                vehicleStatus = vehicleStatus,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = scrollPad),
             )
 
-            Spacer(Modifier.size(8.dp))
-Spacer(Modifier.size(24.dp))
+            Spacer(Modifier.size(12.dp))
+
+            // 胎压监测（有数据才显示）
+            TirePressureSection(
+                vehicleStatus = vehicleStatus,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad),
+            )
+
+            Spacer(Modifier.size(12.dp))
+
+            // 里程能耗（有数据才显示）
+            MileageEnergySection(
+                vehicleUi = vehicleUi,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad),
+            )
+
+            // 高德车辆位置地图
+            if (!vehicleLng.isNaN() && !vehicleLat.isNaN()) {
+                Spacer(Modifier.size(12.dp))
+                MapSection(
+                    lng = vehicleLng,
+                    lat = vehicleLat,
+                    refreshKey = mapRefreshKey,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = scrollPad),
+                )
+            }
+
+            Spacer(Modifier.size(24.dp))
         }
     }
 }
@@ -507,308 +560,6 @@ private fun TopBar(
     }
 }
 
-// ─── CarModelSection ───────────────────────────────────────────────────────────
-
-/**
- * 车模展示区域：大图居中展示。
- */
-@Composable
-private fun CarModelSection(
-    bitmap: Bitmap?,
-    loading: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    if (loading) {
-        Box(
-            modifier = modifier.fillMaxWidth(),
-            contentAlignment = Alignment.Center,
-        ) {
-            CircularProgressIndicator(modifier = Modifier.size(32.dp))
-        }
-    } else {
-        val painter = if (bitmap != null) {
-            BitmapPainter(bitmap.asImageBitmap())
-        } else {
-            painterResource(R.drawable.ic_car_control_refresh)
-        }
-        Box(
-            modifier = modifier.fillMaxWidth(),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter = painter,
-                contentDescription = "车模",
-                modifier = Modifier.fillMaxWidth(0.78f),
-                contentScale = ContentScale.Fit,
-            )
-        }
-    }
-}
-
-// --- RangeSection ---
-/**
- * Range and battery status section.
- */
-@Composable
-private fun RangeSection(
-    ui: CarVehicleDisplayUi?,
-    loading: Boolean,
-    onRefresh: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val ctx = LocalContext.current
-    val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
-    val LightGray = Color(0xFF999999)
-    if (loading || ui == null) return
-
-    val rangeKm = ui.rangeKmText
-    val fuelPct = ui.fuelPercent.coerceIn(0, 100)
-    val progress = (fuelPct.toFloat() / 100f).coerceIn(0f, 1f)
-    val Blue = Color(0xFF1976D2)
-    val fuelVolRow = ui.mileageEnergyRows.find { it.label == "油量" }
-    val fuelVolText = fuelVolRow?.value ?: "--"
-    val updateTime = ui.updateTimeShort.ifEmpty { "--" }
-
-    Column(modifier = modifier) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = rangeKm.replace(Regex("[a-zA-Z]"), "").trim(),
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Bold,
-                color = onPagePrimary,
-                maxLines = 1,
-            )
-            Spacer(Modifier.width(2.dp))
-            Text(
-                text = "km",
-                fontSize = 14.sp,
-                color = onPagePrimary,
-                maxLines = 1,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = "$fuelPct%",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = Blue,
-                maxLines = 1,
-            )
-        }
-        Spacer(Modifier.size(4.dp))
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier
-                .width(120.dp)
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp)),
-            color = Blue,
-            trackColor = Color(0xFFE0E0E0),
-        )
-        Spacer(Modifier.size(3.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = updateTime,
-                fontSize = 10.sp,
-                color = LightGray,
-                maxLines = 1,
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = fuelVolText,
-                fontSize = 10.sp,
-                color = LightGray,
-                maxLines = 1,
-            )
-        }
-    }
-}
-
-
-
-
-
-
-
-
-// --- VehicleInfoCard ---
-
-/**
- * 更多车辆信息卡片：展示车牌、VIN、内外温度、车门/车窗/后备箱状态等。
- * 数据来源于 [CarVehicleDisplayUi] 和 SharedPreferences 中的实时状态。
- */
-@Composable
-private fun VehicleInfoCard(
-    ui: CarVehicleDisplayUi?,
-    modifier: Modifier = Modifier,
-) {
-    val ctx = LocalContext.current
-    val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
-    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
-    val cardColor = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
-    val accentColor = Color(0xFF2196F3)
-    val dash = stringResource(R.string.car_control_vehicle_dash)
-
-    if (ui == null) return
-
-    var expanded by remember { mutableStateOf(false) }
-    val prefs = ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
-
-    // 实时状态
-    val isLocked = prefs.getBoolean("is_locked", false)
-    val isEngineOn = prefs.getBoolean("is_engine_on", false)
-    val isWindowOpen = prefs.getBoolean("is_window_open", false)
-    val isTrunkOpen = prefs.getBoolean("is_trunk_open", false)
-
-    Card(
-        modifier = modifier,
-        cornerRadius = 20.dp,
-        insideMargin = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
-        colors = CardColors(color = cardColor, contentColor = onPagePrimary),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // 标题行 + 展开/收起
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.car_control_vehicle_section_title),
-                    style = MiuixTheme.textStyles.subtitle,
-                    color = onPagePrimary,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = if (expanded) stringResource(R.string.car_control_vehicle_collapse) else stringResource(R.string.car_control_vehicle_expand),
-                    fontSize = 12.sp,
-                    color = accentColor,
-                )
-            }
-
-            // 基础信息（始终显示）
-            VehicleInfoRow(stringResource(R.string.car_control_vehicle_plate), ui.plateNo, onPagePrimary, onPageSecondary)
-            VehicleInfoRow(stringResource(R.string.car_control_vehicle_series_model), ui.seriesModel, onPagePrimary, onPageSecondary)
-
-            // 展开后显示更多
-            if (expanded) {
-                // 分割线
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(0.5.dp)
-                        .background(onPageSecondary.copy(alpha = 0.2f)),
-                )
-
-                VehicleInfoRow(stringResource(R.string.car_control_vehicle_color), ui.colorName, onPagePrimary, onPageSecondary)
-                VehicleInfoRow(stringResource(R.string.car_control_vehicle_vin), ui.vin, onPagePrimary, onPageSecondary)
-                VehicleInfoRow(stringResource(R.string.car_control_vehicle_temp_interior_fmt).replace("%1${'$'}s", ui.interiorTempText.replace(Regex("[^\\d.-]"), "").ifEmpty { dash }), dash, onPagePrimary, onPageSecondary)
-                VehicleInfoRow(stringResource(R.string.car_control_vehicle_temp_exterior_fmt).replace("%1${'$'}s", ui.exteriorTempText.replace(Regex("[^\\d.-]"), "").ifEmpty { dash }), dash, onPagePrimary, onPageSecondary)
-
-                // 分割线
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(0.5.dp)
-                        .background(onPageSecondary.copy(alpha = 0.2f)),
-                )
-
-                // 实时状态
-                Text(
-                    text = stringResource(R.string.car_control_vehicle_subsection_status),
-                    style = MiuixTheme.textStyles.body2,
-                    fontWeight = FontWeight.Medium,
-                    color = onPagePrimary,
-                )
-                VehicleStatusRow("车门", if (isLocked) "已锁" else "未锁", isLocked, onPagePrimary, onPageSecondary)
-                VehicleStatusRow("发动机", if (isEngineOn) "运行中" else "已熄火", isEngineOn, onPagePrimary, onPageSecondary)
-                VehicleStatusRow("车窗", if (isWindowOpen) "已开" else "已关", isWindowOpen, onPagePrimary, onPageSecondary)
-                VehicleStatusRow("后备箱", if (isTrunkOpen) "已开" else "已关", isTrunkOpen, onPagePrimary, onPageSecondary)
-
-                // 里程能源信息
-                if (ui.mileageEnergyRows.isNotEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(0.5.dp)
-                            .background(onPageSecondary.copy(alpha = 0.2f)),
-                    )
-                    Text(
-                        text = stringResource(R.string.car_control_vehicle_subsection_mileage),
-                        style = MiuixTheme.textStyles.body2,
-                        fontWeight = FontWeight.Medium,
-                        color = onPagePrimary,
-                    )
-                    ui.mileageEnergyRows.forEach { row ->
-                        VehicleInfoRow(row.label, row.value, onPagePrimary, onPageSecondary)
-                    }
-                }
-
-                // 车辆状态详情
-                if (ui.vehicleStatusRows.isNotEmpty()) {
-                    ui.vehicleStatusRows.forEach { row ->
-                        VehicleInfoRow(row.label, row.value, onPagePrimary, onPageSecondary)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun VehicleInfoRow(
-    label: String,
-    value: String,
-    primaryColor: Color,
-    secondaryColor: Color,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            fontSize = 13.sp,
-            color = secondaryColor,
-            modifier = Modifier.width(80.dp),
-        )
-        Text(
-            text = value,
-            fontSize = 13.sp,
-            color = primaryColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun VehicleStatusRow(
-    label: String,
-    statusText: String,
-    isActive: Boolean,
-    primaryColor: Color,
-    secondaryColor: Color,
-) {
-    val activeColor = Color(0xFF2196F3)
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            fontSize = 13.sp,
-            color = secondaryColor,
-            modifier = Modifier.width(80.dp),
-        )
-        Text(
-            text = statusText,
-            fontSize = 13.sp,
-            fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal,
-            color = if (isActive) activeColor else primaryColor,
-        )
-    }
-}
 
 
 // ─── AcControlCard ──────────────────────────────────────────────────────────────
