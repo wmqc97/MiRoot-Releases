@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -381,24 +382,12 @@ private fun DashboardScreen(
         ) {
             // ── 顶部栏 ──
             TopBar(
-                title = stringResource(R.string.car_control_settings_title),
-                onSettingsClick = onNavigateToSettings,
+                title = "星瑞",
+                onMenuClick = onNavigateToSettings,
             )
 
-            // ── 车模图片区域 ──
-            CarModelSection(
-                bitmap = carModelBitmap,
-                loading = carModelLoading,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = scrollPad)
-                    .padding(top = 8.dp),
-            )
-
-            Spacer(Modifier.size(16.dp))
-
-            // ── 车辆信息 ──
-            VehicleInfoSection(
+                        // -- 续航/电量 --
+            RangeSection(
                 ui = vehicleUi,
                 loading = vehicleLoading,
                 onRefresh = { refreshVehicleData() },
@@ -407,9 +396,20 @@ private fun DashboardScreen(
                     .padding(horizontal = scrollPad),
             )
 
+            Spacer(Modifier.size(8.dp))
+
+            // -- 车模图片 --
+            CarModelSection(
+                bitmap = carModelBitmap,
+                loading = carModelLoading,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad),
+            )
+
             Spacer(Modifier.size(12.dp))
 
-            // ── 底部按钮（2列，分页） ──
+            // -- 页面指示器 --
             RearButtonGrid(
                 buttons = rearButtons,
                 pageIndex = currentPage,
@@ -422,7 +422,7 @@ private fun DashboardScreen(
 
             Spacer(Modifier.size(12.dp))
 
-            // ── 空调控制 ──
+// ── 空调控制 ──
             AcControlCard(
                 status = acStatus,
                 duration = acDuration,
@@ -449,77 +449,7 @@ private fun DashboardScreen(
                     .fillMaxWidth()
                     .padding(horizontal = scrollPad),
             )
-
-            Spacer(Modifier.size(12.dp))
-
-            // ── 车辆状态信息（胎压等，可折叠） ──
-            if (vehicleUi != null) {
-                val rows = vehicleUi!!.vehicleStatusRows + vehicleUi!!.mileageEnergyRows
-                if (rows.isNotEmpty()) {
-                    var expanded by remember { mutableStateOf(false) }
-
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = scrollPad),
-                        cornerRadius = 20.dp,
-                        insideMargin = PaddingValues(horizontal = scrollPad, vertical = 12.dp),
-                        colors = CardColors(
-                            color = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface)),
-                            contentColor = onPagePrimary,
-                        ),
-                    ) {
-                        Column {
-                            // 可折叠标题行
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { expanded = !expanded },
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = "更多车辆信息",
-                                    style = MiuixTheme.textStyles.body2,
-                                    fontWeight = FontWeight.Medium,
-                                    color = onPagePrimary,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Text(
-                                    text = if (expanded) "▼" else "▶",
-                                    fontSize = 12.sp,
-                                    color = onPageSecondary,
-                                )
-                            }
-
-                            // 折叠内容
-                            if (expanded) {
-                                Spacer(Modifier.height(8.dp))
-                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    rows.forEach { row ->
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                        ) {
-                                            Text(
-                                                text = row.label,
-                                                style = MiuixTheme.textStyles.body2,
-                                                color = onPageSecondary,
-                                            )
-                                            Text(
-                                                text = row.value,
-                                                style = MiuixTheme.textStyles.body2,
-                                                color = onPagePrimary,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(Modifier.size(24.dp))
+Spacer(Modifier.size(24.dp))
         }
     }
 }
@@ -529,12 +459,11 @@ private fun DashboardScreen(
 @Composable
 private fun TopBar(
     title: String,
-    onSettingsClick: () -> Unit,
+    onMenuClick: () -> Unit,
 ) {
     val scrollPad = dimensionResource(R.dimen.mi_page_scroll_padding)
     val ctx = LocalContext.current
     val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -543,16 +472,16 @@ private fun TopBar(
     ) {
         Text(
             text = title,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
             color = onPagePrimary,
             modifier = Modifier.weight(1f),
         )
-        // 设置齿轮图标 → 二级设置页
-        IconButton(onClick = onSettingsClick) {
+        IconButton(onClick = onMenuClick) {
             Text(
-                text = "⚙",
-                fontSize = 22.sp,
+                text = "≡",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
                 color = onPagePrimary,
             )
         }
@@ -597,13 +526,12 @@ private fun CarModelSection(
     }
 }
 
-// ─── VehicleInfoSection ─────────────────────────────────────────────────────
-
+// --- RangeSection ---
 /**
- * 车辆信息卡片（位于车模图片下方）：续航、油量进度条、温度、更新时间。
+ * Range and battery status section.
  */
 @Composable
-private fun VehicleInfoSection(
+private fun RangeSection(
     ui: CarVehicleDisplayUi?,
     loading: Boolean,
     onRefresh: () -> Unit,
@@ -611,136 +539,76 @@ private fun VehicleInfoSection(
 ) {
     val ctx = LocalContext.current
     val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
-    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
-    val cardColor = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
+    val LightGray = Color(0xFF999999)
+    if (loading || ui == null) return
 
-    if (ui == null) return
+    val rangeKm = ui.rangeKmText
+    val fuelPct = ui.fuelPercent.coerceIn(0, 100)
+    val progress = (fuelPct.toFloat() / 100f).coerceIn(0f, 1f)
+    val Blue = Color(0xFF1976D2)
+    val fuelVolRow = ui.mileageEnergyRows.find { it.label == "油量" }
+    val fuelVolText = fuelVolRow?.value ?: "--"
+    val updateTime = ui.updateTimeShort.ifEmpty { "--" }
 
-    Card(
-        modifier = modifier,
-        cornerRadius = 20.dp,
-        insideMargin = PaddingValues(16.dp),
-        colors = CardColors(color = cardColor, contentColor = onPagePrimary),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            // 续航 + 油量
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = ui.rangeKmText,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = onPagePrimary,
-                        maxLines = 1,
-                    )
-                    Text(
-                        text = stringResource(R.string.car_control_vehicle_range),
-                        fontSize = 12.sp,
-                        color = onPageSecondary,
-                        maxLines = 1,
-                    )
-                }
-                Column(
-                    modifier = Modifier.weight(1f),
-                    horizontalAlignment = Alignment.End,
-                ) {
-                    Text(
-                        text = ui.fuelPercentText,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = fuelPercentInfoColor(ui.fuelPercent),
-                        maxLines = 1,
-                    )
-                    Text(
-                        text = stringResource(R.string.car_control_vehicle_fuel_pct),
-                        fontSize = 12.sp,
-                        color = onPageSecondary,
-                        maxLines = 1,
-                    )
-                }
-            }
-
-            // 油量进度条
-            val fuelProgress = (ui.fuelPercent.toFloat() / 100f).coerceIn(0f, 1f)
-            val fuelBarColor = when {
-                ui.fuelPercent < 0 -> onPageSecondary
-                ui.fuelPercent < 10 -> Color(0xFFFF0000)
-                ui.fuelPercent < 30 -> Color(0xFF2196F3)
-                else -> Color(0xFFFF9800)
-            }
-            LinearProgressIndicator(
-                progress = { fuelProgress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(6.dp)
-                    .clip(RoundedCornerShape(3.dp)),
-                color = fuelBarColor,
-                trackColor = onPageSecondary.copy(alpha = 0.15f),
+    Column(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = rangeKm.replace(Regex("[a-zA-Z]"), "").trim(),
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = onPagePrimary,
+                maxLines = 1,
             )
-
-            // 温度 + 更新时间 + 刷新
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = ui.interiorTempText,
-                    fontSize = 14.sp,
-                    color = onPagePrimary,
-                    maxLines = 1,
-                )
-                Text(
-                    text = " / ",
-                    fontSize = 14.sp,
-                    color = onPageSecondary.copy(alpha = 0.5f),
-                )
-                Text(
-                    text = ui.exteriorTempText,
-                    fontSize = 14.sp,
-                    color = onPagePrimary,
-                    maxLines = 1,
-                )
-
-                Spacer(Modifier.weight(1f))
-
-                Text(
-                    text = ui.updateTimeShort,
-                    fontSize = 11.sp,
-                    color = onPageSecondary.copy(alpha = 0.6f),
-                    maxLines = 1,
-                )
-
-                if (loading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp).padding(start = 6.dp),
-                        strokeWidth = 2.dp,
-                        color = onPagePrimary,
-                    )
-                } else {
-                    Text(
-                        text = stringResource(R.string.car_control_vehicle_refresh),
-                        fontSize = 11.sp,
-                        color = Color(0xFF2196F3),
-                        modifier = Modifier
-                            .clickable { onRefresh() }
-                            .padding(start = 8.dp),
-                        maxLines = 1,
-                    )
-                }
-            }
+            Spacer(Modifier.width(2.dp))
+            Text(
+                text = "km",
+                fontSize = 14.sp,
+                color = onPagePrimary,
+                maxLines = 1,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "$fuelPct%",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Blue,
+                maxLines = 1,
+            )
+        }
+        Spacer(Modifier.size(4.dp))
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier
+                .width(120.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp)),
+            color = Blue,
+            trackColor = Color(0xFFE0E0E0),
+        )
+        Spacer(Modifier.size(3.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = updateTime,
+                fontSize = 10.sp,
+                color = LightGray,
+                maxLines = 1,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = fuelVolText,
+                fontSize = 10.sp,
+                color = LightGray,
+                maxLines = 1,
+            )
         }
     }
 }
 
-private fun fuelPercentInfoColor(fuelPercent: Int): Color = when {
-    fuelPercent < 0 -> Color.White
-    fuelPercent < 10 -> Color(0xFFFF0000)
-    fuelPercent < 30 -> Color(0xFF2196F3)
-    else -> Color(0xFFFF9800)
-}
+
+
+
+
+
 
 // ─── AcControlCard ──────────────────────────────────────────────────────────────
 
@@ -1032,7 +900,6 @@ private fun RearButtonGrid(
     val ctx = LocalContext.current
     val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
     val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
-    val cardColor = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
 
     if (buttons.isEmpty()) {
         Text(
@@ -1074,60 +941,54 @@ private fun RearButtonGrid(
                 )
             },
     ) {
-        Card(
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            cornerRadius = 20.dp,
-            insideMargin = PaddingValues(12.dp),
-            colors = CardColors(color = cardColor, contentColor = onPagePrimary),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // 当前页：一行4个大圆按钮
-                val startIndex = pageIndex * 4
-                val pageButtons = buttons.drop(startIndex).take(4)
+            // current page: 4 buttons in a row
+            val startIndex = pageIndex * 4
+            val pageButtons = buttons.drop(startIndex).take(4)
 
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                pageButtons.forEach { func ->
+                    RearButtonCell(
+                        text = func,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                for (i in pageButtons.size until 4) {
+                    Spacer(Modifier.weight(1f))
+                }
+            }
+
+            // page indicator dots
+            if (totalPages > 1) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = Arrangement.Center,
                 ) {
-                    pageButtons.forEach { func ->
-                        RearButtonCell(
-                            text = func,
-                            modifier = Modifier.weight(1f),
+                    for (i in 0 until totalPages) {
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 4.dp)
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (i == pageIndex) onPagePrimary
+                                    else onPageSecondary.copy(alpha = 0.35f)
+                                )
+                                .clickable { onPageChange(i) },
                         )
-                    }
-                    for (i in pageButtons.size until 4) {
-                        Spacer(Modifier.weight(1f))
-                    }
-                }
-
-                // 统一页面圆点指示器
-                if (totalPages > 1) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        for (i in 0 until totalPages) {
-                            Box(
-                                modifier = Modifier
-                                    .padding(horizontal = 4.dp)
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (i == pageIndex) onPagePrimary
-                                        else onPageSecondary.copy(alpha = 0.35f)
-                                    )
-                                    .clickable { onPageChange(i) },
-                            )
-                        }
                     }
                 }
             }
         }
     }
 }
+
 
 /**
  * 大圆按钮：图标（与背屏一致）+ 下方标题。
@@ -1152,12 +1013,12 @@ private fun RearButtonCell(
     val iconColor = if (isAlert) {
         if (isDark) Color.White else Color(0xFF0D47A1)
     } else {
-        if (isDark) Color.LightGray else Color.White
+        if (isDark) Color.White else Color.Black
     }
     val textColor = if (isAlert) {
         if (isDark) Color.White else Color(0xFF0D47A1)
     } else {
-        if (isDark) Color.LightGray else Color.Black
+        if (isDark) Color.White else Color.Black
     }
 
     var iconBitmap by remember { mutableStateOf<Bitmap?>(null) }
