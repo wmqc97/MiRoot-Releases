@@ -105,9 +105,6 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         binding.textSectionRuntimeAuth.setOnClickListener {
             showSectionHelp(R.string.runtime_auth_section, R.string.help_runtime_auth)
         }
-        binding.textSectionSysInfo.setOnClickListener {
-            showSectionHelp(R.string.sys_info_section, R.string.help_sys_info)
-        }
 
         binding.rowCoolapk.setOnClickListener {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coolapk.com/u/570778"))
@@ -118,7 +115,7 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
             }
         }
 
-        binding.rowSponsorIfdian.setOnClickListener {
+        binding.rowSponsor.setOnClickListener {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.ifdian.net/a/MiRoot"))
             try {
                 startActivity(intent)
@@ -457,7 +454,7 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
 
     private fun bindOsVersion() {
         val incremental = EnvironmentProbe.miOsVersionIncremental()
-        binding.valueOsVersion.text = incremental
+        binding.textOsVersion.text = incremental
             ?: getString(
                 R.string.sys_os_value_fmt,
                 Build.VERSION.RELEASE,
@@ -503,7 +500,7 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
     }
 
     private fun bindSubscreenVersion() {
-        binding.valueAppVersion.text = readSubscreenVersion()
+        binding.textSubscreenVersion.text = readSubscreenVersion()
     }
 
     /** 背屏（com.xiaomi.subscreencenter）版本号。 */
@@ -730,7 +727,7 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         val red = ContextCompat.getColor(ctx, R.color.perm_red)
         val muted = ContextCompat.getColor(ctx, R.color.mi_text_secondary)
         val miRootVer = readMiRootVersion()
-        binding.valueAppVersion.text = readSubscreenVersion()
+        binding.textSubscreenVersion.text = readSubscreenVersion()
 
         if (snap.privileged) {
             binding.cardPermissionStatus.setCardBackgroundColor(

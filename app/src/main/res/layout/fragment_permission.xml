@@ -77,11 +77,36 @@
                             android:paddingStart="4dp"
                             android:paddingTop="6dp"
                             android:paddingEnd="4dp"
-                            android:paddingBottom="6dp"
+                            android:paddingBottom="2dp"
                             android:textAppearance="@style/TextAppearance.MiRoot.Body"
                             android:textSize="14sp"
                             android:contentDescription="@string/settings_version_cd_readme"
                             tools:text="v1.3" />
+
+                        <TextView
+                            android:id="@+id/text_os_version"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="4dp"
+                            android:paddingTop="2dp"
+                            android:paddingEnd="4dp"
+                            android:textAppearance="@style/TextAppearance.MiRoot.Body"
+                            android:textColor="@color/mi_text_secondary"
+                            android:textSize="12sp"
+                            tools:text="Android 16 · API 36" />
+
+                        <TextView
+                            android:id="@+id/text_subscreen_version"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="4dp"
+                            android:paddingTop="2dp"
+                            android:paddingEnd="4dp"
+                            android:paddingBottom="4dp"
+                            android:textAppearance="@style/TextAppearance.MiRoot.Body"
+                            android:textColor="@color/mi_text_secondary"
+                            android:textSize="12sp"
+                            tools:text="背屏 v2.1.0" />
                     </LinearLayout>
 
                     <ImageView
@@ -400,9 +425,9 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- 系统信息 -->
+        <!-- 酷安 / 爱发电 / 关于 -->
         <com.google.android.material.card.MaterialCardView
-            android:id="@+id/card_system_info"
+            android:id="@+id/card_more"
             style="@style/Widget.MiRoot.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -411,213 +436,132 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp">
+                android:orientation="vertical">
 
-                <TextView
-                    android:id="@+id/text_section_sys_info"
+                <LinearLayout
+                    android:id="@+id/row_coolapk"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:contentDescription="@string/settings_coolapk_cd"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:minHeight="56dp"
+                    android:orientation="horizontal"
+                    android:padding="16dp">
+
+                    <ImageView
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="14dp"
+                        android:contentDescription="@null"
+                        android:importantForAccessibility="no"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/kuan" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_coolapk_title"
+                        android:textAppearance="?attr/textAppearanceBodyMedium"
+                        android:textColor="@color/mi_text_primary" />
+
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:contentDescription="@null"
+                        android:importantForAccessibility="no"
+                        app:srcCompat="@drawable/ic_chevron_right"
+                        app:tint="@color/mi_text_secondary" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/mi_divider" />
+
+                <LinearLayout
+                    android:id="@+id/row_sponsor"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:contentDescription="@string/settings_sponsor_cd"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:minHeight="56dp"
+                    android:orientation="horizontal"
+                    android:padding="16dp">
+
+                    <ImageView
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="14dp"
+                        android:contentDescription="@null"
+                        android:importantForAccessibility="no"
+                        android:scaleType="fitCenter"
+                        app:srcCompat="@drawable/ic_sponsor_ifdian" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/settings_sponsor_title"
+                        android:textAppearance="?attr/textAppearanceBodyMedium"
+                        android:textColor="@color/mi_text_primary" />
+
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:contentDescription="@null"
+                        android:importantForAccessibility="no"
+                        app:srcCompat="@drawable/ic_chevron_right"
+                        app:tint="@color/mi_text_secondary" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/mi_divider" />
+
+                <LinearLayout
+                    android:id="@+id/row_about"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:background="?attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true"
-                    android:text="@string/sys_info_section"
-                    android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+                    android:gravity="center_vertical"
+                    android:minHeight="56dp"
+                    android:orientation="horizontal"
+                    android:padding="16dp">
 
-                <TextView
-                    android:id="@+id/label_os_version"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="@string/sys_info_os_title"
-                    android:textAppearance="@style/TextAppearance.MiRoot.BodyStrong"
-                    android:textSize="14sp" />
-
-                <TextView
-                    android:id="@+id/value_os_version"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:gravity="start"
-                    android:textAppearance="@style/TextAppearance.MiRoot.Body"
-                    android:textSize="14sp"
-                    tools:text="Android 16 (API 36)" />
-
-                <TextView
-                    android:id="@+id/label_app_version"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="@string/sys_info_app_title"
-                    android:textAppearance="@style/TextAppearance.MiRoot.BodyStrong"
-                    android:textSize="14sp" />
-
-                <TextView
-                    android:id="@+id/value_app_version"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:gravity="start"
-                    android:textAppearance="@style/TextAppearance.MiRoot.Body"
-                    android:textSize="14sp"
-                    tools:text="1.3" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/card_coolapk"
-            style="@style/Widget.MiRoot.Card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/mi_page_scroll_padding">
-
-            <LinearLayout
-                android:id="@+id/row_coolapk"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="?attr/selectableItemBackground"
-                android:clickable="true"
-                android:contentDescription="@string/settings_coolapk_cd"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:minHeight="56dp"
-                android:orientation="horizontal"
-                android:padding="16dp">
-
-                <ImageView
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:layout_marginEnd="14dp"
-                    android:contentDescription="@null"
-                    android:importantForAccessibility="no"
-                    android:scaleType="fitCenter"
-                    android:src="@drawable/kuan" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
+                    <ImageView
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="14dp"
+                        android:contentDescription="@null"
+                        android:importantForAccessibility="no"
+                        android:scaleType="fitCenter"
+                        android:src="@mipmap/ic_launcher" />
 
                     <TextView
-                        android:layout_width="match_parent"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:text="@string/settings_coolapk_title"
-                        android:textAppearance="?attr/textAppearanceBodyLarge"
-                        android:textColor="@color/mi_text_primary" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/settings_coolapk_subtitle"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
-                        android:textColor="@color/mi_text_secondary" />
-                </LinearLayout>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/card_sponsor_ifdian"
-            style="@style/Widget.MiRoot.Card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/mi_page_scroll_padding">
-
-            <LinearLayout
-                android:id="@+id/row_sponsor_ifdian"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="?attr/selectableItemBackground"
-                android:clickable="true"
-                android:contentDescription="@string/settings_sponsor_cd"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:minHeight="56dp"
-                android:orientation="horizontal"
-                android:padding="16dp">
-
-                <ImageView
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:layout_marginEnd="14dp"
-                    android:contentDescription="@null"
-                    android:importantForAccessibility="no"
-                    android:scaleType="fitCenter"
-                    app:srcCompat="@drawable/ic_sponsor_ifdian" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="@string/settings_sponsor_title"
-                        android:textAppearance="?attr/textAppearanceBodyLarge"
-                        android:textColor="@color/mi_text_primary" />
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/settings_sponsor_subtitle"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
-                        android:textColor="@color/mi_text_secondary" />
-                </LinearLayout>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <com.google.android.material.card.MaterialCardView
-            android:id="@+id/card_about"
-            style="@style/Widget.MiRoot.Card"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/mi_page_scroll_padding">
-
-            <LinearLayout
-                android:id="@+id/row_about"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="?attr/selectableItemBackground"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:minHeight="56dp"
-                android:orientation="horizontal"
-                android:padding="16dp">
-
-                <ImageView
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:layout_marginEnd="14dp"
-                    android:contentDescription="@null"
-                    android:importantForAccessibility="no"
-                    android:scaleType="fitCenter"
-                    android:src="@mipmap/ic_launcher" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
                         android:text="@string/settings_about"
-                        android:textAppearance="?attr/textAppearanceBodyLarge"
+                        android:textAppearance="?attr/textAppearanceBodyMedium"
                         android:textColor="@color/mi_text_primary" />
 
-                    <TextView
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="2dp"
-                        android:text="@string/settings_about_row_subtitle"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
-                        android:textColor="@color/mi_text_secondary" />
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:contentDescription="@null"
+                        android:importantForAccessibility="no"
+                        app:srcCompat="@drawable/ic_chevron_right"
+                        app:tint="@color/mi_text_secondary" />
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
