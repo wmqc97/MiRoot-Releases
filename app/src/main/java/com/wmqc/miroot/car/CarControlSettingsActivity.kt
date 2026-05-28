@@ -42,6 +42,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -124,7 +126,6 @@ class CarControlSettingsActivity : ComponentActivity() {
                         )
                         finish()
                     },
-                    onStartProjection = { startCarControlProjection() },
                     onPickCarModel = {
                         try {
                             pickCarModel.launch(Intent(Intent.ACTION_PICK).setType("image/*"))
@@ -212,44 +213,30 @@ class CarControlSettingsActivity : ComponentActivity() {
     }
 }
 
-/** 屏幕状态 */
-private enum class Screen { DASHBOARD, SETTINGS }
 
 @Composable
 private fun CarControlSettingsScreen(
     onReLogin: () -> Unit,
-    onStartProjection: () -> Unit,
     onPickCarModel: () -> Unit,
     onResetCarModel: () -> Unit,
     onLogout: () -> Unit,
 ) {
-    var currentScreen by remember { mutableStateOf(Screen.DASHBOARD) }
-
-    when (currentScreen) {
-        Screen.DASHBOARD -> DashboardScreen(
-            onNavigateToSettings = { currentScreen = Screen.SETTINGS },
-            onReLogin = onReLogin,
-            onPickCarModel = onPickCarModel,
-            onResetCarModel = onResetCarModel,
-        )
-        Screen.SETTINGS -> SettingsSubScreen(
-            onBack = { currentScreen = Screen.DASHBOARD },
-            onStartProjection = onStartProjection,
-            onPickCarModel = onPickCarModel,
-            onResetCarModel = onResetCarModel,
-            onLogout = onLogout,
-        )
-    }
+    DashboardScreen(
+        onReLogin = onReLogin,
+        onPickCarModel = onPickCarModel,
+        onResetCarModel = onResetCarModel,
+        onLogout = onLogout,
+    )
 }
 
 // ─── Dashboard ─────────────────────────────────────────────────────────────────
 
 @Composable
 private fun DashboardScreen(
-    onNavigateToSettings: () -> Unit,
     onReLogin: () -> Unit,
     onPickCarModel: () -> Unit,
     onResetCarModel: () -> Unit,
+    onLogout: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val appCtx = ctx.applicationContext
@@ -407,7 +394,7 @@ private fun DashboardScreen(
             // ── 顶部栏 ──
             TopBar(
                 title = "星瑞",
-                onMenuClick = onNavigateToSettings,
+                onLogout = onLogout,
                 onLongPressTitle = onReLogin,
             )
 
@@ -692,13 +679,14 @@ private fun ButtonEditDialog(
 @Composable
 private fun TopBar(
     title: String,
-    onMenuClick: () -> Unit,
+    onLogout: () -> Unit,
     onLongPressTitle: (() -> Unit)? = null,
 ) {
     val scrollPad = dimensionResource(R.dimen.mi_page_scroll_padding)
     val ctx = LocalContext.current
     val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
-    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+    var expanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -721,13 +709,27 @@ private fun TopBar(
                     )
                 },
         )
-        IconButton(onClick = onMenuClick) {
-            Text(
-                text = "≡",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = onPagePrimary,
-            )
+        Box {
+            IconButton(onClick = { expanded = true }) {
+                Text(
+                    text = "≡",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = onPagePrimary,
+                )
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("注销登录") },
+                    onClick = {
+                        expanded = false
+                        onLogout()
+                    },
+                )
+            }
         }
     }
 }
@@ -1300,239 +1302,6 @@ private fun isButtonAlertStateV2(
 }
 
 
-// ─── Settings Sub-Screen（二级设置页） ─────────────────────────────────────────
-
-@Composable
-private fun SettingsSubScreen(
-    onBack: () -> Unit,
-    onStartProjection: () -> Unit,
-    onPickCarModel: () -> Unit,
-    onResetCarModel: () -> Unit,
-    onLogout: () -> Unit,
-) {
-    val ctx = LocalContext.current
-    val scrollPad = dimensionResource(R.dimen.mi_page_scroll_padding)
-    val pageBg = Color(ContextCompat.getColor(ctx, R.color.mi_page_bg))
-    val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
-    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
-    val cardColors = CardColors(
-        color = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface)),
-        contentColor = onPagePrimary,
-    )
-
-    var acDuration by remember { mutableStateOf(10) }
-    var acTemp by remember { mutableStateOf(22) }
-    var seatHeatingDuration by remember { mutableStateOf(10) }
-    var seatHeatingLevel by remember { mutableStateOf(1) }
-    var rearButtons by remember { mutableStateOf(defaultRearButtonsForFirstInstall()) }
-    var rearButtonsSummary by remember { mutableStateOf("") }
-
-    LaunchedEffect(Unit) {
-        val p = ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
-        acDuration = p.getInt(KEY_AC_DURATION, 10)
-        acTemp = p.getInt(KEY_AC_TEMPERATURE, 22)
-        seatHeatingDuration = p.getInt(KEY_SEAT_HEATING_DURATION, 10)
-        seatHeatingLevel = p.getInt(KEY_SEAT_HEATING_LEVEL, 1)
-        val saved = loadRearButtonsForDashboard(p.getString(KEY_DASHBOARD_REAR_BUTTONS, null))
-        rearButtons = saved
-        rearButtonsSummary = saved.joinToString("、")
-    }
-
-    fun persistAcConfig(duration: Int, temp: Int) {
-        ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
-            .putInt(KEY_AC_DURATION, duration)
-            .putInt(KEY_AC_TEMPERATURE, temp)
-            .apply()
-        acDuration = duration
-        acTemp = temp
-    }
-
-    fun persistSeatHeatingConfig(duration: Int, level: Int) {
-        ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
-            .putInt(KEY_SEAT_HEATING_DURATION, duration)
-            .putInt(KEY_SEAT_HEATING_LEVEL, level)
-            .apply()
-        seatHeatingDuration = duration
-        seatHeatingLevel = level
-    }
-
-    fun persistRearButtons(buttons: List<String>) {
-        val normalized = normalizeValidRearButtons(buttons)
-        ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
-            .putString(KEY_DASHBOARD_REAR_BUTTONS, encodeRearButtons(normalized))
-            .apply()
-        rearButtons = normalized
-        rearButtonsSummary = normalized.joinToString("、")
-    }
-
-    Box(modifier = Modifier.fillMaxSize().background(pageBg)) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.statusBars)
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = scrollPad, vertical = scrollPad),
-            verticalArrangement = Arrangement.spacedBy(scrollPad),
-        ) {
-            // 标题行 + 返回按钮
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "←",
-                    fontSize = 22.sp,
-                    color = onPagePrimary,
-                    modifier = Modifier
-                        .clickable { onBack() }
-                        .padding(end = 12.dp),
-                )
-                Text(
-                    text = stringResource(R.string.car_control_settings_title),
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = onPagePrimary,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            // ── 空调设置 ──
-            ControlGroupCard(
-                title = stringResource(R.string.car_control_ac_title),
-                cardColors = cardColors,
-                onPageSecondary = onPageSecondary,
-            ) {
-                Text(
-                    text = "${stringResource(R.string.car_control_ac_duration)}：${acDuration}分钟    ${stringResource(R.string.car_control_ac_temp)}：${acTemp}℃",
-                    style = MiuixTheme.textStyles.body2,
-                    color = onPageSecondary,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Button(onClick = { persistAcConfig((acDuration - 1).coerceAtLeast(3), acTemp) }, modifier = Modifier.weight(1f)) { Text("时长-") }
-                    Button(onClick = { persistAcConfig((acDuration + 1).coerceAtMost(10), acTemp) }, modifier = Modifier.weight(1f)) { Text("时长+") }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Button(onClick = { persistAcConfig(acDuration, (acTemp - 1).coerceAtLeast(17)) }, modifier = Modifier.weight(1f)) { Text("温度-") }
-                    Button(onClick = { persistAcConfig(acDuration, (acTemp + 1).coerceAtMost(32)) }, modifier = Modifier.weight(1f)) { Text("温度+") }
-                }
-            }
-
-            // ── 座椅加热设置 ──
-            ControlGroupCard(
-                title = stringResource(R.string.car_control_seat_heating_title),
-                cardColors = cardColors,
-                onPageSecondary = onPageSecondary,
-            ) {
-                Text(
-                    text = "${stringResource(R.string.car_control_seat_heating_duration)}：${seatHeatingDuration}分钟    ${stringResource(R.string.car_control_seat_heating_level)}：${seatHeatingLevel}级",
-                    style = MiuixTheme.textStyles.body2,
-                    color = onPageSecondary,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Button(onClick = { persistSeatHeatingConfig((seatHeatingDuration - 1).coerceAtLeast(3), seatHeatingLevel) }, modifier = Modifier.weight(1f)) { Text("时长-") }
-                    Button(onClick = { persistSeatHeatingConfig((seatHeatingDuration + 1).coerceAtMost(10), seatHeatingLevel) }, modifier = Modifier.weight(1f)) { Text("时长+") }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    Button(onClick = { persistSeatHeatingConfig(seatHeatingDuration, 1) }, modifier = Modifier.weight(1f)) { Text("1级") }
-                    Button(onClick = { persistSeatHeatingConfig(seatHeatingDuration, 2) }, modifier = Modifier.weight(1f)) { Text("2级") }
-                }
-            }
-
-            // ── 背屏按钮配置 ──
-            ControlGroupCard(
-                title = stringResource(R.string.car_control_rear_buttons_title),
-                cardColors = cardColors,
-                onPageSecondary = onPageSecondary,
-            ) {
-                Text(
-                    text = stringResource(R.string.car_control_rear_buttons_desc),
-                    style = MiuixTheme.textStyles.body2,
-                    color = onPageSecondary,
-                )
-                Text(
-                    text = rearButtonsSummary,
-                    style = MiuixTheme.textStyles.footnote1,
-                    color = onPagePrimary,
-                )
-                Spacer(Modifier.size(6.dp))
-                Button(
-                    onClick = {
-                        val act = ctx as? android.app.Activity ?: return@Button
-                        RearButtonConfigDialog.show(act, rearButtons) { newList ->
-                            persistRearButtons(newList)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColorsPrimary(),
-                ) { Text(stringResource(R.string.car_control_rear_buttons_edit)) }
-            }
-
-            // ── 启动投屏和车模设置 ──
-            ControlGroupCard(
-                title = "启动投屏和车模设置",
-                cardColors = cardColors,
-                onPageSecondary = onPageSecondary,
-            ) {
-                Button(
-                    onClick = onStartProjection,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColorsPrimary(),
-                ) { Text(stringResource(R.string.car_control_start_projection)) }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Button(
-                        onClick = onPickCarModel,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(),
-                    ) { Text(stringResource(R.string.car_control_pick_car_model), fontSize = 13.sp) }
-                    Button(
-                        onClick = onResetCarModel,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(),
-                    ) { Text(stringResource(R.string.car_control_reset_car_model), fontSize = 13.sp) }
-                }
-            }
-
-            // ── 退出登录 ──
-            Button(
-                onClick = onLogout,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(),
-            ) { Text(stringResource(R.string.car_control_logout)) }
-
-            Spacer(Modifier.size(24.dp))
-        }
-    }
-}
-
-// ─── Reusable Components ───────────────────────────────────────────────────────
-
-@Composable
-private fun ControlGroupCard(
-    title: String,
-    cardColors: CardColors,
-    onPageSecondary: Color = Color.Unspecified,
-    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        cornerRadius = 20.dp,
-        insideMargin = PaddingValues(dimensionResource(R.dimen.mi_page_scroll_padding)),
-        colors = cardColors,
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(text = title, style = MiuixTheme.textStyles.subtitle)
-            content()
-        }
-    }
-}
 
 // ─── Car Model Image Loading (ported from RearScreenCarControlActivity) ────────
 
