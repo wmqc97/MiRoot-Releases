@@ -1175,6 +1175,22 @@ private fun RearButtonCell(
     var iconBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var showDialog by remember { mutableStateOf(false) }
 
+    // 读取空调/座椅加热参数用于弹窗展示
+    val prefs = ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
+    val acDurationPref = prefs.getInt(KEY_AC_DURATION, 10)
+    val acTempPref = prefs.getInt(KEY_AC_TEMPERATURE, 22)
+    val seatDurationPref = prefs.getInt(KEY_SEAT_HEATING_DURATION, 10)
+    val seatLevelPref = prefs.getInt(KEY_SEAT_HEATING_LEVEL, 1)
+
+    // 构建参数描述
+    val paramDesc = when (text) {
+        "空调" -> "温度${acTempPref}℃，时长${acDurationPref}分钟"
+        "座椅加热" -> "等级${seatLevelPref}，时长${seatDurationPref}分钟"
+        "主驾加热" -> "等级${seatLevelPref}，时长${seatDurationPref}分钟"
+        "副驾加热" -> "等级${seatLevelPref}，时长${seatDurationPref}分钟"
+        else -> null
+    }
+
     // Reload icon when display text changes (resolved from vehicle status)
     LaunchedEffect(displayText, vehicleStatus) {
         iconBitmap = withContext(Dispatchers.IO) { loadCarControlIcon(ctx, displayText, vehicleStatus) }
@@ -1189,7 +1205,19 @@ private fun RearButtonCell(
             AlertDialog(
                 onDismissRequest = { showDialog = false },
                 title = { Text(text = "确认操作") },
-                text = { Text(text = "确认执行「${displayText}」？") },
+                text = {
+                    Column {
+                        Text(text = "确认执行「${displayText}」？")
+                        if (paramDesc != null) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = paramDesc,
+                                fontSize = 13.sp,
+                                color = carColors().textSecondary,
+                            )
+                        }
+                    }
+                },
                 confirmButton = {
                     TextButton(onClick = {
                         showDialog = false
