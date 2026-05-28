@@ -15,8 +15,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -63,7 +61,6 @@ import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -619,24 +616,10 @@ private fun AcControlCard(
     ) {
         var showAcConfirm by remember { mutableStateOf(false) }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            // 标题行 + 参数（长按 1000ms 开启/关闭）
+            // 标题行 + 参数
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .pointerInput(Unit) {
-                        awaitEachGesture {
-                            awaitFirstDown()
-                            try {
-                                withTimeout(CAR_CONTROL_HOLD_TO_EXECUTE_MS) {
-                                    do {
-                                        val event = awaitPointerEvent(PointerEventPass.Main)
-                                    } while (event.changes.any { it.pressed })
-                                }
-                            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-                                scope.launch { onToggle() }
-                            }
-                        }
-                    },
+                    .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -744,24 +727,10 @@ private fun SeatHeatingControlCard(
     ) {
         var showHeatConfirm by remember { mutableStateOf(false) }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            // 标题行 + 参数（长按 1000ms 开启/关闭）
+            // 标题行 + 参数
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .pointerInput(Unit) {
-                        awaitEachGesture {
-                            awaitFirstDown()
-                            try {
-                                withTimeout(CAR_CONTROL_HOLD_TO_EXECUTE_MS) {
-                                    do {
-                                        val event = awaitPointerEvent(PointerEventPass.Main)
-                                    } while (event.changes.any { it.pressed })
-                                }
-                            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-                                scope.launch { onToggle() }
-                            }
-                        }
-                    },
+                    .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -1522,7 +1491,6 @@ private fun loadCarControlIcon(
     return CarControlAssets.decodeBitmap(context, path)
 }
 
-private const val CAR_CONTROL_HOLD_TO_EXECUTE_MS = 1000L
 
 /**
  * 根据按钮文本执行对应的车控指令，逻辑与 [CarButtonStateManager.executeCommand] 一致。
