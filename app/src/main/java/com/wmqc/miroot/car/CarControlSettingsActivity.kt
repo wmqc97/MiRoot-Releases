@@ -569,7 +569,10 @@ private fun TopBar(
                 .weight(1f)
                 .pointerInput(Unit) {
                     detectTapGestures(
-                        onLongPress = { onLongPressTitle?.invoke() },
+                        onLongPress = {
+                            android.widget.Toast.makeText(ctx, "正在退出登录...", android.widget.Toast.LENGTH_SHORT).show()
+                            onLongPressTitle?.invoke()
+                        },
                     )
                 },
         )
