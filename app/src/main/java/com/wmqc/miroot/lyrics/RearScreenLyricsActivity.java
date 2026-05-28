@@ -2274,8 +2274,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private boolean isOfficialGestureDisabled = false; // 标记是否已屏蔽官方手势服务
 
     /** 屏底窄条内左右滑结束投屏：统一手势处理器 */
-    private final BottomSwipeExitHelper.Handler bottomSwipeHandler =
-        new BottomSwipeExitHelper.Handler(this, () -> finishProjectionFromUser("bottom-swipe-exit"));
+    private BottomSwipeExitHelper.Handler bottomSwipeHandler = null;
     private boolean lyricsBackPressedCallbackRegistered;
 
     // TaskService连接回调
@@ -7253,8 +7252,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         if (albumArtBackgroundView != null) {
             if (!useAlbumArtBackground) {
                 setVisibilityIfChanged(albumArtBackgroundView, View.GONE);
-                albumArtBackgroundView.setImageDrawable(null);
-                currentAlbumArtBitmap = null;
+                clearAlbumArtBitmap();
                 clearAlbumArtBlurEffect();
             }
         }
@@ -7264,26 +7262,62 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         if (albumArtBackgroundView == null) return;
         if (powerSavingModeEnabled || !albumArtBackgroundEnabled || abyssalMirrorEnabled) {
             setVisibilityIfChanged(albumArtBackgroundView, View.GONE);
-            albumArtBackgroundView.setImageDrawable(null);
-            currentAlbumArtBitmap = null;
+            clearAlbumArtBitmap();
             clearAlbumArtBlurEffect();
             return;
         }
-        Bitmap bitmap = extractAlbumArtBitmap(metadata);
-        if (bitmap == null) {
+        Bitmap raw = extractAlbumArtBitmap(metadata);
+        if (raw == null) {
             // 切歌中 metadata 短暂无封面时，始终保留旧图，避免底图黑闪。
             return;
         }
-        if (bitmap == currentAlbumArtBitmap) {
+        if (raw == currentAlbumArtBitmap) {
             if (albumArtBackgroundView.getVisibility() != View.VISIBLE) {
                 setVisibilityIfChanged(albumArtBackgroundView, View.VISIBLE);
             }
             return;
         }
-        currentAlbumArtBitmap = bitmap;
-        albumArtBackgroundView.setImageBitmap(bitmap);
+        // 下采样至 ImageView 显示尺寸，减少原生堆内存峰值
+        Bitmap sampled = downsampleAlbumArt(raw);
+        if (sampled != raw) {
+            // raw 来自 metadata.getBitmap() — 由 MediaMetadata 持有，不 recycle
+        }
+        if (currentAlbumArtBitmap != null && currentAlbumArtBitmap != sampled) {
+            currentAlbumArtBitmap.recycle();
+        }
+        currentAlbumArtBitmap = sampled;
+        albumArtBackgroundView.setImageBitmap(sampled);
         applyAlbumArtBlurEffectIfSupported();
         setVisibilityIfChanged(albumArtBackgroundView, View.VISIBLE);
+    }
+
+    /** 将专辑图下采样至不超过屏幕宽度的高度，减少原生堆内存占用。 */
+    private Bitmap downsampleAlbumArt(Bitmap src) {
+        if (src == null || src.isRecycled()) return src;
+        int maxW = dp(360); // 背屏 720px 宽，半屏足矣
+        int maxH = dp(480);
+        int w = src.getWidth();
+        int h = src.getHeight();
+        if (w <= maxW && h <= maxH) return src;
+        float scale = Math.min((float) maxW / w, (float) maxH / h);
+        int sw = Math.round(w * scale);
+        int sh = Math.round(h * scale);
+        try {
+            return Bitmap.createScaledBitmap(src, sw, sh, true);
+        } catch (Exception e) {
+            LogHelper.w(TAG, "downsampleAlbumArt failed: " + e.getMessage());
+            return src;
+        }
+    }
+
+    private void clearAlbumArtBitmap() {
+        if (albumArtBackgroundView != null) {
+            albumArtBackgroundView.setImageDrawable(null);
+        }
+        if (currentAlbumArtBitmap != null && !currentAlbumArtBitmap.isRecycled()) {
+            currentAlbumArtBitmap.recycle();
+        }
+        currentAlbumArtBitmap = null;
     }
 
     private Bitmap extractAlbumArtBitmap(MediaMetadata metadata) {
@@ -8287,6 +8321,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         if (getDisplayIdSafe() == 1) {
+            if (bottomSwipeHandler == null) {
+                bottomSwipeHandler = new BottomSwipeExitHelper.Handler(
+                    this, () -> finishProjectionFromUser("bottom-swipe-exit"));
+            }
             bottomSwipeHandler.handleTouchEvent(ev);
         }
         return super.dispatchTouchEvent(ev);
@@ -8511,6 +8549,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             prevButton = null;
             playPauseButton = null;
             nextButton = null;
+            albumArtBackgroundView = null;
+            clearAlbumArtBitmap();
+            contentRootLayout = null;
+            mainFrameLayout = null;
             enhancedLyricLines.clear();
             if (lyricsView != null) {
                 try {
@@ -8556,6 +8598,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
         try {
             lyricsParseExecutor.shutdownNow();
+        } catch (Exception ignored) {
+        }
+        try {
+            superLyricWordFusionExecutor.shutdownNow();
         } catch (Exception ignored) {
         }
         performProjectionResourceCleanup(!finishRequestedByMiRoot);

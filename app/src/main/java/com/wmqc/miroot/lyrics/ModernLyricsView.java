@@ -3402,7 +3402,6 @@ public class ModernLyricsView extends View {
         clearTokenizationCache();
         notifyShuffleDebugInfo();
         postInvalidateOnAnimation();
-        invalidate();
     }
 
     /**
@@ -3411,7 +3410,6 @@ public class ModernLyricsView extends View {
     public void refreshCurrentLine() {
         if (lyricLines.isEmpty()) {
             postInvalidateOnAnimation();
-            invalidate();
             return;
         }
         pinSingleLineScrollIfNeeded();
@@ -3444,7 +3442,6 @@ public class ModernLyricsView extends View {
         // 重置逐字节流，确保新的 word 时间轴立即驱动高亮进度。
         lastLyricProgressInvalidateTime = 0L;
         postInvalidateOnAnimation();
-        invalidate();
     }
 
     /**
@@ -3453,7 +3450,6 @@ public class ModernLyricsView extends View {
     public void notifyWordTimestampsChanged(int lineIndex) {
         if (lyricLines.isEmpty()) {
             postInvalidateOnAnimation();
-            invalidate();
             return;
         }
         pinSingleLineScrollIfNeeded();
@@ -3464,8 +3460,9 @@ public class ModernLyricsView extends View {
             lastWordProgressLineKey = wordProgressLineKey(line);
         }
         lastLyricProgressInvalidateTime = 0L;
+        // 仅用 postInvalidateOnAnimation 通知下一帧重绘，避免同步 invalidate 导致
+        // 同一帧内先后以「无逐字进度」和「有逐字进度」两次 onDraw 造成屏闪。
         postInvalidateOnAnimation();
-        invalidate();
     }
 
     /**
@@ -3891,19 +3888,23 @@ public class ModernLyricsView extends View {
     }
 
     public void setEnableWordByWord(boolean enable) {
+        if (this.enableWordByWord == enable) {
+            // 值未变时跳过重算行索引和 invalidation，避免切句时重复对齐导致瞬间重绘
+            return;
+        }
         boolean oldValue = this.enableWordByWord;
         this.enableWordByWord = enable;
         LogHelper.d(TAG, "🔄 逐字显示已" + (enable ? "启用" : "禁用") + " (从 " + oldValue + " 改为 " + enable + ")");
         if (!randomColorSwitchEnabled) {
             applyReadableStaticColor();
         }
-        
+
         // 如果当前有歌词，重新计算当前行（因为逐字模式会影响行切换逻辑）
         if (!lyricLines.isEmpty() && currentPosition > 0) {
             int oldIndex = currentLineIndex;
             int newIndex = findCurrentLineIndex(currentPosition);
             LogHelper.d(TAG, "📊 逐字显示改变后重新计算当前行: 位置=" + currentPosition + "ms, 旧索引=" + oldIndex + ", 新索引=" + newIndex);
-            
+
             // 无论索引是否改变，都强制更新，因为绘制方式已经改变
             if (newIndex != currentLineIndex) {
                 currentLineIndex = newIndex;
@@ -3915,9 +3916,9 @@ public class ModernLyricsView extends View {
                 LogHelper.d(TAG, "🔄 当前行索引未变，但绘制方式已改变，强制重绘");
             }
         }
-        
-        // 使用一次 postInvalidate 即可，避免同一帧重复请求重绘导致背屏渲染抖动
-        postInvalidate();
+
+        // 使用 postInvalidateOnAnimation 对齐 vsync，避免同一帧多次 onDraw
+        postInvalidateOnAnimation();
     }
 
     public void setShowProgress(boolean show) {

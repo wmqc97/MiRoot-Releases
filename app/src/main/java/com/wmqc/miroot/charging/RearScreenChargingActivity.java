@@ -935,6 +935,11 @@ public class RearScreenChargingActivity extends ComponentActivity {
             RearChargingAnimationCoordinator.AnimationType.CHARGING);
         currentInstance = null;
 
+        // 充电动画已结束，通知 ChargingService 停止常亮唤醒循环
+        Intent stopWakeup = new Intent(ChargingIntents.ACTION_STOP_CHARGING_WAKEUP);
+        stopWakeup.setPackage(getPackageName());
+        sendBroadcast(stopWakeup);
+
         if (!shouldRestore) {
             LogHelper.d(TAG, "充电动画被打断，跳过恢复背屏");
             return;

@@ -275,9 +275,8 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     // 双击手势检测器
     private GestureDetector gestureDetector;
 
-    /** 屏底窄条内左右滑结束投屏：统一手势处理器 */
-    private final BottomSwipeExitHelper.Handler bottomSwipeHandler =
-        new BottomSwipeExitHelper.Handler(this, () -> finishProjectionFromUser("bottom-swipe"));
+    /** 屏底窄条内左右滑结束投屏：统一手势处理器（延迟初始化，避免构造函数中调用 getResources()） */
+    private BottomSwipeExitHelper.Handler bottomSwipeHandler = null;
 
     // 屏幕关闭监听（防止双击息屏）
     private android.content.BroadcastReceiver screenReceiver;
@@ -1796,6 +1795,10 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         if (getDisplayIdSafe() == 1 && !isCleaningUp) {
+            if (bottomSwipeHandler == null) {
+                bottomSwipeHandler = new BottomSwipeExitHelper.Handler(
+                    this, () -> finishProjectionFromUser("bottom-swipe"));
+            }
             bottomSwipeHandler.handleTouchEvent(ev);
         }
         return super.dispatchTouchEvent(ev);

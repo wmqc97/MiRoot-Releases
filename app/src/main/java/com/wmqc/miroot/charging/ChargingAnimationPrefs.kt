@@ -25,7 +25,7 @@ object ChargingAnimationPrefs {
 
     /** 背屏充电信息栏显示项配置（逗号分隔的 item ID 列表，按显示顺序）。 */
     const val KEY_INFO_ITEMS: String = "charging_info_items"
-    const val DEFAULT_INFO_ITEMS: String = "power,charging_type,time,temperature"
+    const val DEFAULT_INFO_ITEMS: String = "power,time,temperature"
 
     /** 所有可用的充电信息项定义（id → 显示名称）。 */
     @JvmStatic

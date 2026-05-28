@@ -88,7 +88,9 @@ class RearScreenDesktopActivity : ComponentActivity() {
         const val REAR_DISPLAY_ID = 1
     }
 
-    private val bottomSwipeHandler = BottomSwipeExitHelper.Handler(this) {
+    private var bottomSwipeHandler: BottomSwipeExitHelper.Handler? = null
+
+    private val bottomSwipeExitCallback: () -> Unit = {
         if (BuildConfig.DEBUG) {
             LogHelper.d(TAG, "bottom swipe exit")
         }
@@ -540,7 +542,10 @@ class RearScreenDesktopActivity : ComponentActivity() {
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (getCurrentDisplayIdSafe() == REAR_DISPLAY_ID) {
-            bottomSwipeHandler.handleTouchEvent(ev)
+            if (bottomSwipeHandler == null) {
+                bottomSwipeHandler = BottomSwipeExitHelper.Handler(this, bottomSwipeExitCallback)
+            }
+            bottomSwipeHandler!!.handleTouchEvent(ev)
         }
         return super.dispatchTouchEvent(ev)
     }

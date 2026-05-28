@@ -32,6 +32,10 @@ public final class ChargingIntents {
     public static final String ACTION_NOTIFY_CHARGING_TASK_MOVED_TO_REAR =
         "com.wmqc.miroot.charging.NOTIFY_CHARGING_TASK_MOVED_TO_REAR";
 
+    /** 充电动画结束（用户划走/超时/拔电）时通知 ChargingService 停止常亮唤醒循环。 */
+    public static final String ACTION_STOP_CHARGING_WAKEUP =
+        "com.wmqc.miroot.charging.STOP_CHARGING_WAKEUP";
+
     private ChargingIntents() {
     }
 }

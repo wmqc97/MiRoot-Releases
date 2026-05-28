@@ -153,6 +153,17 @@ public class ChargingService extends Service {
         }
     };
 
+    private final BroadcastReceiver stopWakeupReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!ChargingIntents.ACTION_STOP_CHARGING_WAKEUP.equals(intent.getAction())) {
+                return;
+            }
+            LogHelper.d(TAG, "收到停止常亮唤醒广播");
+            stopWakeupLoop();
+        }
+    };
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -184,6 +195,13 @@ public class ChargingService extends Service {
             registerReceiver(resumeChargingReceiver, resumeFilter);
         }
 
+        IntentFilter stopWakeupFilter = new IntentFilter(ChargingIntents.ACTION_STOP_CHARGING_WAKEUP);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(stopWakeupReceiver, stopWakeupFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(stopWakeupReceiver, stopWakeupFilter);
+        }
+
         startForeground(NOTIF_ID, RearSwitchKeeperService.createServiceNotification(this));
         LogHelper.d(TAG, "ChargingService created");
     }
@@ -205,6 +223,11 @@ public class ChargingService extends Service {
             unregisterReceiver(resumeChargingReceiver);
         } catch (Exception e) {
             LogHelper.w(TAG, "unregisterReceiver resume: " + e.getMessage());
+        }
+        try {
+            unregisterReceiver(stopWakeupReceiver);
+        } catch (Exception e) {
+            LogHelper.w(TAG, "unregisterReceiver stopWakeup: " + e.getMessage());
         }
         try {
             unbindService(taskServiceConnection);
