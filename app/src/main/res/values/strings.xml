@@ -89,9 +89,9 @@
     <string name="apps_projection_dialog_official_switch">迁屏时禁用官方背屏手势服务</string>
     <string name="apps_projection_dialog_official_hint_scope_selected">仅在全局策略为「仅选定应用」时，对「应用列表」直开背屏的第三方应用生效；磁贴迁屏等不受此弹窗项约束。</string>
     <string name="apps_official_gesture_master_hint">「全部 / 仅选定」仅影响应用列表将第三方应用直开背屏；磁贴迁屏、充电动画、背屏桌面、音乐与车控投屏默认禁用官方背屏服务。</string>
-    <string name="apps_official_gesture_scope_title">应用列表直开背屏时，是否禁用官方背屏手势</string>
-    <string name="apps_official_gesture_scope_all">全部第三方应用（应用列表路径）</string>
-    <string name="apps_official_gesture_scope_selected">仅对在投屏参数中开启的应用禁用</string>
+    <string name="apps_official_gesture_scope_title">直开背屏时禁用官方手势</string>
+    <string name="apps_official_gesture_scope_all">全部应用</string>
+    <string name="apps_official_gesture_scope_selected">仅指定应用</string>
     <string name="apps_official_gesture_selected_hint">返回应用列表，点击应用打开「投屏参数」，在弹窗内开启「迁屏时禁用官方背屏手势服务」。仅在选择「仅选定应用」全局策略时，应用列表直开背屏会按此项执行。</string>
     <string name="apps_official_gesture_pill_short">禁用官方手势</string>
 
