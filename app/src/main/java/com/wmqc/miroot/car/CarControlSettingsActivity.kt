@@ -1061,9 +1061,9 @@ private fun RearButtonCell(
                 .size(56.dp)
                 .clip(CircleShape)
                 .background(bg)
-                .clickable { showDialog = true }
-                .pointerInput(Unit) {
+                .pointerInput(text) {
                     detectTapGestures(
+                        onTap = { showDialog = true },
                         onLongPress = { onEditButtons?.invoke() },
                     )
                 },
