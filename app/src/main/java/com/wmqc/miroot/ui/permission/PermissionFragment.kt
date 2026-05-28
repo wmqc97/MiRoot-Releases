@@ -91,6 +91,7 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         binding.buttonRefresh.setOnClickListener {
             bindOsVersion()
             bindSubscreenVersion()
+            
             refreshStatusPage()
         }
 
@@ -301,6 +302,7 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
 
         bindOsVersion()
         bindSubscreenVersion()
+        
         bindRuntimeAuthRows()
 
         requireActivity().lifecycle.addObserver(activityResumeRefreshObserver)
@@ -453,13 +455,12 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         }
 
     private fun bindOsVersion() {
-        val incremental = EnvironmentProbe.miOsVersionIncremental()
-        binding.textOsVersion.text = incremental
-            ?: getString(
-                R.string.sys_os_value_fmt,
-                Build.VERSION.RELEASE,
-                Build.VERSION.SDK_INT,
-            )
+        binding.textOsVersion.text = EnvironmentProbe.miOsVersionIncremental()
+            ?: getString(R.string.sys_os_value_fmt, Build.VERSION.RELEASE, Build.VERSION.SDK_INT)
+    }
+
+    private fun bindSubscreenVersion() {
+        binding.textSubscreenVersion.text = readSubscreenVersion()
     }
 
     private fun openShizukuApp() {
@@ -497,10 +498,6 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
                 if (ok) Toast.LENGTH_SHORT else Toast.LENGTH_LONG,
             )
         }
-    }
-
-    private fun bindSubscreenVersion() {
-        binding.textSubscreenVersion.text = readSubscreenVersion()
     }
 
     /** 背屏（com.xiaomi.subscreencenter）版本号。 */
@@ -727,7 +724,6 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         val red = ContextCompat.getColor(ctx, R.color.perm_red)
         val muted = ContextCompat.getColor(ctx, R.color.mi_text_secondary)
         val miRootVer = readMiRootVersion()
-        binding.textSubscreenVersion.text = readSubscreenVersion()
 
         if (snap.privileged) {
             binding.cardPermissionStatus.setCardBackgroundColor(
@@ -740,18 +736,20 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
                 getString(R.string.perm_title_work_shizuku)
             }
             binding.textPermTitle.setTextColor(ContextCompat.getColor(ctx, R.color.mi_text_primary))
-            binding.textPermVersion.text = getString(R.string.perm_version_fmt, miRootVer)
-            binding.textPermVersion.setTextColor(muted)
         } else {
             binding.cardPermissionStatus.setCardBackgroundColor(
                 ContextCompat.getColor(ctx, R.color.perm_red_container),
             )
             binding.imagePermState.setImageResource(R.drawable.ic_perm_status_cross_large)
-            binding.textPermTitle.text = getString(R.string.perm_title_channels)
+            binding.textPermTitle.text = when {
+                snap.shizukuRunning && !snap.shizukuGranted -> "Shizuku 未授权"
+                !snap.shizukuRunning && !snap.root -> "Root / Shizuku 未就绪"
+                else -> getString(R.string.perm_title_channels)
+            }
             binding.textPermTitle.setTextColor(red)
-            binding.textPermVersion.text = getString(R.string.perm_version_fmt, miRootVer)
-            binding.textPermVersion.setTextColor(muted)
         }
+        binding.textPermVersion.text = getString(R.string.perm_version_fmt, miRootVer)
+        binding.textPermVersion.setTextColor(muted)
 
         binding.textActionRoot.setTextColor(if (snap.root) green else red)
 
