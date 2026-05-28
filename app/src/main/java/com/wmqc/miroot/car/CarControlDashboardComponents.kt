@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.wmqc.miroot.R
 import com.wmqc.miroot.car.VehicleStatusService.VehicleStatusInfo
@@ -556,8 +557,9 @@ fun MileageEnergySection(
 }
 
 // ====================================================================
-//  7. Map Section - AMap Static Map + Reverse Geocoding
+//  7. Map Section - AMap WebView (使用 amap_map.html)
 // ====================================================================
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun MapSection(
     lng: Double, lat: Double, refreshKey: Int,
@@ -567,40 +569,9 @@ fun MapSection(
     val ctx = LocalContext.current
     val hasCoords = !lng.isNaN() && !lat.isNaN()
 
-    var mapBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var loading by remember { mutableStateOf(true) }
     var addressText by remember { mutableStateOf("") }
     var addressLoading by remember { mutableStateOf(true) }
-
-    // Build AMap static map URL via AmapApiService
-    val mapUrl = remember(lng, lat, refreshKey) {
-        if (hasCoords) AmapApiService.staticMapUrl(lng, lat, 600, 300, 15) else null
-    }
-
-    LaunchedEffect(mapUrl) {
-        if (mapUrl == null) { loading = false; return@LaunchedEffect }
-        loading = true
-        withContext(Dispatchers.IO) {
-            try {
-                val url = URL(mapUrl)
-                val conn = url.openConnection() as HttpURLConnection
-                conn.connectTimeout = 15000
-                conn.readTimeout = 15000
-                conn.doInput = true
-                conn.connect()
-                val input = conn.inputStream
-                val bitmap = BitmapFactory.decodeStream(input)
-                input.close()
-                conn.disconnect()
-                withContext(Dispatchers.Main) {
-                    mapBitmap = bitmap
-                    loading = false
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { loading = false }
-            }
-        }
-    }
+    var webView by remember { mutableStateOf<android.webkit.WebView?>(null) }
 
     // Reverse geocoding for address
     LaunchedEffect(lng, lat) {
@@ -615,14 +586,34 @@ fun MapSection(
         }
     }
 
-    // Navigation fallback: open Amap via web URL (works in browser, prompts to open app)
+    // Update WebView position when coords change
+    LaunchedEffect(lng, lat, refreshKey) {
+        if (!hasCoords || webView == null) return@LaunchedEffect
+        val js = "updatePosition($lng, $lat)"
+        webView?.evaluateJavascript(js, null)
+    }
+
+    // Navigation: try Amap app first, fall back to web URL
     val openNavigation = {
         try {
             if (hasCoords) {
-                val navUrl = "https://uri.amap.com/navigation?to=$lng,$lat,车辆位置&mode=car&callnative=1"
-                ctx.startActivity(Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(navUrl)))
+                val uri = android.net.Uri.parse("amapuri://route/plan/?dlon=$lng&dlat=$lat&dname=车辆位置&dev=1&t=2")
+                val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                    setPackage("com.autonavi.minimap")
+                }
+                if (intent.resolveActivity(ctx.packageManager) != null) {
+                    ctx.startActivity(intent)
+                } else {
+                    val navUrl = "https://uri.amap.com/navigation?to=$lng,$lat,车辆位置&mode=car&callnative=1"
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(navUrl)))
+                }
             }
-        } catch (_: Exception) { }
+        } catch (_: Exception) {
+            try {
+                val navUrl = "https://uri.amap.com/navigation?to=$lng,$lat,车辆位置&mode=car&callnative=1"
+                ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(navUrl)))
+            } catch (_: Exception) { }
+        }
     }
 
     Card(
@@ -675,7 +666,7 @@ fun MapSection(
                 }
             }
 
-            // Map image area
+            // Map WebView area
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -686,7 +677,6 @@ fun MapSection(
                 contentAlignment = Alignment.Center
             ) {
                 if (!hasCoords) {
-                    // No GPS data placeholder
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("🗺", fontSize = 36.sp)
                         Spacer(Modifier.height(6.dp))
@@ -703,22 +693,20 @@ fun MapSection(
                             color = CarUiColors.textSecondary
                         )
                     }
-                } else if (loading || mapBitmap == null) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator(
-                            Modifier.size(24.dp),
-                            color = CarUiColors.accentBlue,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text("加载地图...", fontSize = 11.sp, color = CarUiColors.textSecondary)
-                    }
                 } else {
-                    Image(
-                        bitmap = mapBitmap!!.asImageBitmap(),
-                        contentDescription = "车辆位置",
+                    AndroidView(
+                        factory = { c ->
+                            android.webkit.WebView(c).apply {
+                                settings.javaScriptEnabled = true
+                                settings.domStorageEnabled = true
+                                settings.allowFileAccess = false
+                                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                                webView = this
+                                loadUrl("file:///android_asset/car/amap_map.html")
+                            }
+                        },
                         modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
                     )
                 }
             }

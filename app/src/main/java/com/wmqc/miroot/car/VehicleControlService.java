@@ -558,18 +558,33 @@ public class VehicleControlService {
             
             LogHelper.d(TAG, "🚗 寻车功能: 车辆位置 lat=" + latStr + ", lon=" + lonStr);
             
-            // 5. 优先使用高德 URI 中转页（https://uri.amap.com/navigation）
-            //    优点：无需安装高德 APP，浏览器打开后自动唤起 APP 或跳转 web 版
+            // 5. 优先使用 amapuri:// 直接唤起高德 APP
             String navUrl = String.format(
-                "https://uri.amap.com/navigation?to=%s,%s,车辆位置&mode=car&callnative=1",
+                "amapuri://route/plan/?dlon=%s&dlat=%s&dname=车辆位置&dev=1&t=2",
                 lonStr, latStr
             );
             Intent intent = new Intent(Intent.ACTION_VIEW);
             intent.setData(Uri.parse(navUrl));
-            context.startActivity(intent);
-            result.success = true;
-            result.message = "正在打开导航...";
-            LogHelper.d(TAG, "✅ 寻车功能：已启动高德导航中转页");
+            intent.setPackage("com.autonavi.minimap");
+
+            if (intent.resolveActivity(context.getPackageManager()) != null) {
+                context.startActivity(intent);
+                result.success = true;
+                result.message = "正在打开高德导航...";
+                LogHelper.d(TAG, "✅ 寻车功能：已启动高德地图 APP");
+            } else {
+                // 未安装高德 APP，使用中转页（浏览器唤起或网页版地图）
+                navUrl = String.format(
+                    "https://uri.amap.com/navigation?to=%s,%s,车辆位置&mode=car&callnative=1",
+                    lonStr, latStr
+                );
+                intent = new Intent(Intent.ACTION_VIEW);
+                intent.setData(Uri.parse(navUrl));
+                context.startActivity(intent);
+                result.success = true;
+                result.message = "正在打开导航...";
+                LogHelper.d(TAG, "✅ 寻车功能：已启动高德导航中转页");
+            }
             
         } catch (Exception e) {
             LogHelper.e(TAG, "❌ 寻车功能异常", e);
