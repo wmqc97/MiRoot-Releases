@@ -43,6 +43,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -330,6 +332,7 @@ private fun DashboardScreen(
 
     val scope = rememberCoroutineScope()
     var isRefreshing by remember { mutableStateOf(false) }
+    var confirmAction by remember { mutableStateOf<CarConfirmAction?>(null) }
     fun refreshVehicleData() {
         isRefreshing = true
         scope.launch(Dispatchers.IO) {
@@ -521,8 +524,34 @@ private fun DashboardScreen(
 
             Spacer(Modifier.size(24.dp))
         }
+        // 确认弹窗
+        confirmAction?.let { action ->
+            AlertDialog(
+                onDismissRequest = { confirmAction = null },
+                title = { Text(text = action.title) },
+                text = { Text(text = action.message) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        val act = action
+                        confirmAction = null
+                        scope.launch(Dispatchers.IO) { act.onConfirm() }
+                    }) { Text("确认") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { confirmAction = null }) { Text("取消") }
+                },
+            )
+        }
     }
 }
+
+// ─── CarConfirmAction ───────────────────────────────────────────────────────────
+
+private data class CarConfirmAction(
+    val title: String,
+    val message: String,
+    val onConfirm: suspend () -> Unit,
+)
 
 // ─── TopBar ────────────────────────────────────────────────────────────────────
 
@@ -632,6 +661,7 @@ private fun AcControlCard(
                     text = if (status) "● 已开启" else "已关闭",
                     fontSize = 13.sp,
                     color = if (status) accentColor else onPageSecondary,
+                    modifier = Modifier.clickable { onToggle() },
                 )
             }
 
@@ -666,8 +696,6 @@ private fun AcControlCard(
         }
     }
 }
-
-// ─── SeatHeatingControlCard ─────────────────────────────────────────────────────
 
 /**
  * 座椅加热控制卡片：显示加热状态、等级、时长参数，支持直接开关与参数调整。
@@ -739,6 +767,7 @@ private fun SeatHeatingControlCard(
                     text = if (status) "● 已开启" else "已关闭",
                     fontSize = 13.sp,
                     color = if (status) accentColor else onPageSecondary,
+                    modifier = Modifier.clickable { onToggle() },
                 )
             }
 
@@ -967,7 +996,7 @@ private fun RearButtonCell(
     val bg = if (isAlert) {
         if (isDark) Color(0xFF5A5A5A) else Color(0xFF81D4FA)
     } else {
-        if (isDark) Color(0xFF2E2E2E) else Color(0xFFE8E8E8)
+        if (isDark) Color(0xFF2E2E2E) else Color.White
     }
     val iconColor = if (isAlert) {
         if (isDark) Color.White else Color(0xFF0D47A1)
@@ -989,14 +1018,14 @@ private fun RearButtonCell(
 
     Column(
         modifier = modifier
-            .pointerInput(text) {
-                detectTapGestures(
-                    onDoubleTap = {
-                        scope.launch(Dispatchers.IO) {
-                            executeByText(ctx, text)
-                        }
-                    },
-                )
+            .clickable {
+                val acStatusNow = acStatus
+                val seatHeatNow = seatHeatingStatus
+                val dispText = resolveDisplayTextV2(text, vehicleStatus, acStatusNow, seatHeatNow)
+                // Single click → trigger callback for confirmation dialog
+                scope.launch(Dispatchers.IO) {
+                    executeByText(ctx, text)
+                }
             },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
