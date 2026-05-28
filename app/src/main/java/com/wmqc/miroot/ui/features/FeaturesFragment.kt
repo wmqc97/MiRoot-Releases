@@ -564,6 +564,16 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         binding.buttonChargingInfoItems.setOnClickListener {
             showChargingInfoItemsDialog()
         }
+        syncChargingAlwaysOnUiFromPrefs()
+        binding.switchChargingAlwaysOn.setOnCheckedChangeListener { _, checked ->
+            ChargingAnimationPrefs.setAlwaysOn(requireContext(), checked)
+            sendReloadChargingSettingsBroadcast(requireContext())
+        }
+    }
+
+    private fun syncChargingAlwaysOnUiFromPrefs() {
+        binding.switchChargingAlwaysOn.isChecked =
+            ChargingAnimationPrefs.isAlwaysOn(requireContext())
     }
 
     private fun setChargingFillSpeedSectionVisible(enabled: Boolean) {

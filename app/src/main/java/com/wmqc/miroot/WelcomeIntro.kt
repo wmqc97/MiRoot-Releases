@@ -119,6 +119,7 @@ object WelcomeIntro {
     private fun updateLogTitle(ctx: Context): String {
         val vn = BuildConfig.VERSION_NAME
         return when {
+            vn.startsWith("1.9.4") -> ctx.getString(R.string.update_log_v194_title)
             vn.startsWith("1.9.3") -> ctx.getString(R.string.update_log_v193_title)
             vn.startsWith("1.9.2") -> ctx.getString(R.string.update_log_v192_title)
             vn.startsWith("1.9.1") -> ctx.getString(R.string.update_log_v191_title)
@@ -166,6 +167,7 @@ object WelcomeIntro {
     private fun updateLogBody(ctx: Context): String {
         val vn = BuildConfig.VERSION_NAME
         return when {
+            vn.startsWith("1.9.4") -> ctx.getString(R.string.update_log_v194_message)
             vn.startsWith("1.9.3") -> ctx.getString(R.string.update_log_v193_message)
             vn.startsWith("1.9.2") -> ctx.getString(R.string.update_log_v192_message)
             vn.startsWith("1.9.1") -> ctx.getString(R.string.update_log_v191_message)

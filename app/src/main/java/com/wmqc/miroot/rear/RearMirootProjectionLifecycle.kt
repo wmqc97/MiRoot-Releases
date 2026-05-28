@@ -255,7 +255,8 @@ object RearMirootProjectionLifecycle {
 
     /**
      * 占位迁屏结束投屏时，主屏若仍有 MiRoot [MainActivity] 在任务栈，{@code finish}/{@code finishAndRemoveTask}
-     * 后主屏焦点会回到应用主界面（用户感知为「返回却看到 MiRoot 主页」）。先在主屏执行 HOME 回系统桌面。
+     * 后主屏焦点会回到应用主界面（用户感知为「返回却看到 MiRoot 主页」）。
+     * 将 MainActivity 移到后台，但不发送 HOME 避免误关主屏其他应用。
      */
     @JvmStatic
     fun sendMainDisplayHomeBeforeProjectionEnd(taskService: ITaskService?) {
@@ -264,7 +265,7 @@ object RearMirootProjectionLifecycle {
             if (now - lastMainHomeSentElapsedMs < MAIN_HOME_DEDUP_WINDOW_MS) {
                 LogHelper.d(
                     TAG,
-                    "main HOME skipped (dedup ${now - lastMainHomeSentElapsedMs}ms < ${MAIN_HOME_DEDUP_WINDOW_MS}ms)",
+                    "moveTaskToBack skipped (dedup ${now - lastMainHomeSentElapsedMs}ms < ${MAIN_HOME_DEDUP_WINDOW_MS}ms)",
                 )
                 return
             }
@@ -275,6 +276,7 @@ object RearMirootProjectionLifecycle {
             val back = Runnable {
                 try {
                     main.moveTaskToBack(true)
+                    LogHelper.d(TAG, "MainActivity moved to back")
                 } catch (e: Exception) {
                     LogHelper.w(TAG, "moveTaskToBack MainActivity: ${e.message}")
                 }
@@ -287,25 +289,6 @@ object RearMirootProjectionLifecycle {
                 }
             } catch (e: Exception) {
                 LogHelper.w(TAG, "schedule moveTaskToBack: ${e.message}")
-            }
-        }
-        val ts = taskService ?: RootTaskServiceConnector.getIfConnected()
-        val cmds =
-            arrayOf(
-                "input -d $MAIN_DISPLAY_ID keyevent KEYCODE_HOME",
-                "am start -d $MAIN_DISPLAY_ID -a android.intent.action.MAIN -c android.intent.category.HOME",
-            )
-        for (cmd in cmds) {
-            try {
-                if (ts != null) {
-                    ts.executeShellCommand(cmd)
-                    LogHelper.d(TAG, "main HOME before proj end: $cmd")
-                } else {
-                    PrivilegedShell.execCmd(cmd)
-                    LogHelper.d(TAG, "main HOME before proj end (privileged): $cmd")
-                }
-            } catch (e: Exception) {
-                LogHelper.w(TAG, "main HOME failed ($cmd): ${e.message}")
             }
         }
     }

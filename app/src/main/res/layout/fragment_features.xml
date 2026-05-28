@@ -533,13 +533,30 @@
                     android:text="@string/features_section_charging_animation"
                     android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
 
-                <com.google.android.material.materialswitch.MaterialSwitch
-                    android:id="@+id/switch_charging_animation"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="@dimen/mi_features_section_gap"
-                    android:text="@string/features_charging_animation_switch"
-                    android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+                    android:baselineAligned="false"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_charging_animation"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/features_charging_animation_switch"
+                        android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/switch_charging_always_on"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="@dimen/mi_features_switch_row_gap"
+                        android:layout_weight="1"
+                        android:text="@string/features_charging_always_on"
+                        android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/text_charging_fill_speed_value"
