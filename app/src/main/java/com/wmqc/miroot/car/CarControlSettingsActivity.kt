@@ -15,6 +15,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -1061,12 +1062,10 @@ private fun RearButtonCell(
                 .size(56.dp)
                 .clip(CircleShape)
                 .background(bg)
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { showDialog = true },
-                        onLongPress = { onEditButtons?.invoke() },
-                    )
-                },
+                .combinedClickable(
+                    onClick = { showDialog = true },
+                    onLongClick = { onEditButtons?.invoke() },
+                ),
             contentAlignment = Alignment.Center,
         ) {
             if (iconBitmap != null) {
