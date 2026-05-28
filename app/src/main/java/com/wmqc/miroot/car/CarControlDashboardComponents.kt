@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -125,6 +127,8 @@ fun CarImageAndGaugesSection(
     vehicleUi: CarVehicleDisplayUi?,
     carModelBitmap: Bitmap?,
     loading: Boolean,
+    onPickCarModel: (() -> Unit)? = null,
+    onResetCarModel: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val CarUiColors = carColors()
@@ -169,8 +173,15 @@ fun CarImageAndGaugesSection(
 
             Spacer(Modifier.width(12.dp))
 
-            // Center: car model image
-            Box(modifier = Modifier.weight(1f).height(80.dp), contentAlignment = Alignment.Center) {
+            // Center: car model image (long press to change)
+            var showModelDialog by remember { mutableStateOf(false) }
+            Box(
+                modifier = Modifier.weight(1f).height(80.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures(onLongPress = { showModelDialog = true })
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
                 if (!loading && carModelBitmap != null) {
                     Image(
                         bitmap = carModelBitmap.asImageBitmap(),
@@ -183,6 +194,27 @@ fun CarImageAndGaugesSection(
                 } else {
                     Text("🚗", fontSize = 48.sp)
                 }
+            }
+
+            // 车模选择弹窗
+            if (showModelDialog) {
+                AlertDialog(
+                    onDismissRequest = { showModelDialog = false },
+                    title = { Text("车模图片", fontWeight = FontWeight.SemiBold) },
+                    text = { Text("选择自定义图片或恢复默认车模") },
+                    confirmButton = {
+                        androidx.compose.material3.TextButton(onClick = {
+                            showModelDialog = false
+                            onPickCarModel?.invoke()
+                        }) { Text("选择图片") }
+                    },
+                    dismissButton = {
+                        androidx.compose.material3.TextButton(onClick = {
+                            showModelDialog = false
+                            onResetCarModel?.invoke()
+                        }) { Text("恢复默认") }
+                    },
+                )
             }
 
             Spacer(Modifier.width(12.dp))

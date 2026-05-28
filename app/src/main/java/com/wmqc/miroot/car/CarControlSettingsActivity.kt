@@ -232,6 +232,8 @@ private fun CarControlSettingsScreen(
         Screen.DASHBOARD -> DashboardScreen(
             onNavigateToSettings = { currentScreen = Screen.SETTINGS },
             onReLogin = onReLogin,
+            onPickCarModel = onPickCarModel,
+            onResetCarModel = onResetCarModel,
         )
         Screen.SETTINGS -> SettingsSubScreen(
             onBack = { currentScreen = Screen.DASHBOARD },
@@ -249,6 +251,8 @@ private fun CarControlSettingsScreen(
 private fun DashboardScreen(
     onNavigateToSettings: () -> Unit,
     onReLogin: () -> Unit,
+    onPickCarModel: () -> Unit,
+    onResetCarModel: () -> Unit,
 ) {
     val ctx = LocalContext.current
     val appCtx = ctx.applicationContext
@@ -406,6 +410,7 @@ private fun DashboardScreen(
             TopBar(
                 title = "星瑞",
                 onMenuClick = onNavigateToSettings,
+                onLongPressTitle = onReLogin,
             )
 
             // ── 现代化车控仪表盘 ──
@@ -414,6 +419,8 @@ private fun DashboardScreen(
                 vehicleUi = vehicleUi,
                 carModelBitmap = carModelBitmap,
                 loading = carModelLoading,
+                onPickCarModel = onPickCarModel,
+                onResetCarModel = onResetCarModel,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = scrollPad),
@@ -445,6 +452,16 @@ private fun DashboardScreen(
                 vehicleStatus = vehicleStatus,
                 acStatus = acStatus,
                 seatHeatingStatus = seatHeatingStatus,
+                onEditButtons = {
+                    val act = ctx as? android.app.Activity ?: return@RearButtonGrid
+                    RearButtonConfigDialog.show(act, rearButtons) { newList ->
+                        val normalized = normalizeValidRearButtons(newList)
+                        ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
+                            .putString(KEY_DASHBOARD_REAR_BUTTONS, encodeRearButtons(normalized))
+                            .apply()
+                        rearButtons = normalized
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = scrollPad),
@@ -534,10 +551,12 @@ private fun DashboardScreen(
 private fun TopBar(
     title: String,
     onMenuClick: () -> Unit,
+    onLongPressTitle: (() -> Unit)? = null,
 ) {
     val scrollPad = dimensionResource(R.dimen.mi_page_scroll_padding)
     val ctx = LocalContext.current
     val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
+    val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -549,7 +568,13 @@ private fun TopBar(
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
             color = onPagePrimary,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = { onLongPressTitle?.invoke() },
+                    )
+                },
         )
         IconButton(onClick = onMenuClick) {
             Text(
@@ -890,6 +915,7 @@ private fun RearButtonGrid(
     vehicleStatus: VehicleStatusService.VehicleStatusInfo?,
     acStatus: Boolean,
     seatHeatingStatus: Boolean,
+    onEditButtons: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -933,6 +959,11 @@ private fun RearButtonGrid(
                     onHorizontalDrag = { _, dragAmount ->
                         dragTotal += dragAmount
                     },
+                )
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onLongPress = { onEditButtons?.invoke() },
                 )
             },
     ) {
