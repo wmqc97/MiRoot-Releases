@@ -100,29 +100,58 @@ public class VehicleStatusService {
         public String tyreStatusPassengerRear = "未知";
         public String tyrePreWarningDriver = "未知";
         public String tyrePreWarningPassenger = "未知";
-        
+        public String tyrePreWarningDriverRear = "未知";
+        public String tyrePreWarningPassengerRear = "未知";
+        public String engineOilPressureWarning = "未知";
+
         // 安全状态
         public String doorLockStatusDriver = "未知";
+        public String doorLockStatusPassenger = "未知";
+        public String doorLockStatusDriverRear = "未知";
+        public String doorLockStatusPassengerRear = "未知";
         public String doorOpenStatusDriver = "未知";
+        public String doorOpenStatusPassenger = "未知";
+        public String doorOpenStatusDriverRear = "未知";
+        public String doorOpenStatusPassengerRear = "未知";
         public String seatBeltStatusDriver = "未知";
+        public String seatBeltStatusPassenger = "未知";
         public String trunkOpenStatus = "未知";
+        public String trunkLockStatus = "未知";
         public String vehicleAlarm = "未知";
         public String electricParkBrakeStatus = "未知";
-        
-        // 空调车窗（原始位置值，需要翻译）
-        public String sunroofPos = "未知";  // 天窗位置：0=关闭，其他=打开
-        public String winPosDriver = "未知";  // 车窗位置：0=关闭，其他=打开
-        // 翻译后的状态（兼容旧代码）
+        public String handBrakeStatus = "未知";
+        public String engineHoodOpenStatus = "未知";
+        public String brakePedalDepressed = "未知";
+
+        // 空调车窗
+        public String sunroofPos = "未知";
         public String sunroofOpenStatus = "未知";
+        public String winPosDriver = "未知";
+        public String winPosPassenger = "未知";
+        public String winPosDriverRear = "未知";
+        public String winPosPassengerRear = "未知";
         public String winStatusDriver = "未知";
+        public String winStatusPassenger = "未知";
+        public String winStatusDriverRear = "未知";
+        public String winStatusPassengerRear = "未知";
+        // 翻译后的状态（兼容旧代码）
         public String airCleanSts = "未知";
         public String preClimateActive = "未知";
         public String ventilateStatus = "未知";
         public String drvHeatSts = "未知";
         public String passHeatingSts = "未知";
+        public String rlHeatingSts = "未知";
+        public String rrHeatingSts = "未知";
 
         // 防盗相关
         public String theftActivated = "未知";
+
+        // 位置与驾驶附加
+        public String altitude = "未知";
+        public String direction = "未知";
+        public String posCanBeTrusted = "未知";
+        public String aveFuelConsumptionInLatestDrivingCycle = "未知";
+        public String winCloseReminder = "未知";
     }
     
     /**
@@ -253,6 +282,9 @@ public class VehicleStatusService {
                 if (basicStatus != null) {
                     status.engineStatus = extractField(basicStatus, "engineStatus");
                     status.speed = extractField(basicStatus, "speed");
+                        status.altitude = extractField(basicStatus, "altitude");
+                        status.direction = extractField(basicStatus, "direction");
+                        status.posCanBeTrusted = extractField(basicStatus, "posCanBeTrusted");
                     status.distanceToEmpty = extractField(basicStatus, "distanceToEmpty");
                     
                     // 位置信息在 basicVehicleStatus.position 中
@@ -310,6 +342,9 @@ public class VehicleStatusService {
                         status.tyreStatusPassengerRear = extractField(maintenanceStatus, "tyreStatusPassengerRear");
                         status.tyrePreWarningDriver = extractField(maintenanceStatus, "tyrePreWarningDriver");
                         status.tyrePreWarningPassenger = extractField(maintenanceStatus, "tyrePreWarningPassenger");
+                        status.tyrePreWarningDriverRear = extractField(maintenanceStatus, "tyrePreWarningDriverRear");
+                        status.tyrePreWarningPassengerRear = extractField(maintenanceStatus, "tyrePreWarningPassengerRear");
+                        status.engineOilPressureWarning = extractField(maintenanceStatus, "engineOilPressureWarning");
                         
                         // 电瓶信息
                         JSONObject mainBatteryStatus = maintenanceStatus.optJSONObject("mainBatteryStatus");
@@ -334,6 +369,7 @@ public class VehicleStatusService {
                         status.fuelLevelStatus = extractField(runningStatus, "fuelLevelStatus");
                         status.avgSpeed = extractField(runningStatus, "avgSpeed");
                         status.aveFuelConsumption = extractField(runningStatus, "aveFuelConsumption");
+                        status.aveFuelConsumptionInLatestDrivingCycle = extractField(runningStatus, "aveFuelConsumptionInLatestDrivingCycle");
                         status.engineCoolantTemperature = extractField(runningStatus, "engineCoolantTemperature");
                     }
                     
@@ -348,6 +384,12 @@ public class VehicleStatusService {
                                 "sunroofOpenStatus", "sunRoofPos", "sunroofStatus");
                         // 翻译状态（兼容旧字段名）
                         status.winStatusDriver = translateWindowStatus(status.winPosDriver);
+                        status.winPosPassenger = pickFirstKnownClimateValue(climateStatus, "winPosPassenger", "winStatusPassenger");
+                        status.winPosDriverRear = pickFirstKnownClimateValue(climateStatus, "winPosDriverRear", "winStatusDriverRear");
+                        status.winPosPassengerRear = pickFirstKnownClimateValue(climateStatus, "winPosPassengerRear", "winStatusPassengerRear");
+                        status.winStatusPassenger = translateWindowStatus(status.winPosPassenger);
+                        status.winStatusDriverRear = translateWindowStatus(status.winPosDriverRear);
+                        status.winStatusPassengerRear = translateWindowStatus(status.winPosPassengerRear);
                         status.sunroofOpenStatus = translateSunroofStatus(status.sunroofPos);
                         status.airCleanSts = extractField(climateStatus, "airCleanSts");
                         // preClimateActive 是布尔值
@@ -360,6 +402,9 @@ public class VehicleStatusService {
                         // 座椅加热状态
                         status.drvHeatSts = extractField(climateStatus, "drvHeatSts");
                         status.passHeatingSts = extractField(climateStatus, "passHeatingSts");
+                        status.rlHeatingSts = extractField(climateStatus, "rlHeatingSts");
+                        status.rrHeatingSts = extractField(climateStatus, "rrHeatingSts");
+                        status.winCloseReminder = extractField(climateStatus, "winCloseReminder");
                     }
                     
                     // 3.5 安全状态：additionalVehicleStatus.drivingSafetyStatus
@@ -375,6 +420,20 @@ public class VehicleStatusService {
                         status.trunkOpenStatus = extractField(drivingSafety, "trunkOpenStatus");
                         status.vehicleAlarm = extractField(drivingSafety, "vehicleAlarm");
                         status.electricParkBrakeStatus = extractField(drivingSafety, "electricParkBrakeStatus");
+                        status.handBrakeStatus = extractField(drivingSafety, "handBrakeStatus");
+                        status.engineHoodOpenStatus = extractField(drivingSafety, "engineHoodOpenStatus");
+                        status.brakePedalDepressed = extractField(drivingSafety, "brakePedalDepressed");
+                        status.doorLockStatusPassenger = extractField(drivingSafety, "doorLockStatusPassenger");
+                        status.doorLockStatusDriverRear = extractField(drivingSafety, "doorLockStatusDriverRear");
+                        status.doorLockStatusPassengerRear = extractField(drivingSafety, "doorLockStatusPassengerRear");
+                        status.doorOpenStatusPassenger = extractField(drivingSafety, "doorOpenStatusPassenger");
+                        status.doorOpenStatusDriverRear = extractField(drivingSafety, "doorOpenStatusDriverRear");
+                        status.doorOpenStatusPassengerRear = extractField(drivingSafety, "doorOpenStatusPassengerRear");
+                        if (drivingSafety.has("seatBeltStatusPassenger")) {
+                            boolean seatBeltP = drivingSafety.optBoolean("seatBeltStatusPassenger", false);
+                            status.seatBeltStatusPassenger = seatBeltP ? "true" : "false";
+                        }
+                        status.trunkLockStatus = extractField(drivingSafety, "trunkLockStatus");
                     }
                 }
                 

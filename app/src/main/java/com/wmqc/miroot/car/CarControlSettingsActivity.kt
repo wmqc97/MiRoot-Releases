@@ -497,6 +497,16 @@ private fun DashboardScreen(
                     .padding(horizontal = scrollPad),
             )
 
+            Spacer(Modifier.size(12.dp))
+
+            // 车辆详细数据（折叠式，默认收起）
+            VehicleDetailCard(
+                vehicleStatus = vehicleStatus,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = scrollPad),
+            )
+
             Spacer(Modifier.size(24.dp))
         }
         // 按钮排列编辑弹窗
