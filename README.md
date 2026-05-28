@@ -2,7 +2,7 @@
   <img src="assets/MiRoot.png" alt="MiRoot" width="192"/>
 </p>
 
-<h1 align="center">MiRoot V1.9.3</h1>
+<h1 align="center">MiRoot V1.9.6</h1>
 
 <p align="center">
   <strong>小米 17 Pro 系列手机背屏增强工具</strong><br>
@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.9.3-blue" alt="version"/>
+  <img src="https://img.shields.io/badge/version-1.9.6-blue" alt="version"/>
   <img src="https://img.shields.io/badge/API-28%2B-brightgreen" alt="API"/>
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="license"/>
 </p>
@@ -103,9 +103,9 @@ MiRoot 是一个面向具备背屏（副屏）小米手机的 Android 辅助工�
 
 ### 下载
 
-最新 Release APK 从公开仓库获取：
+最新 Release APK 从 Releases 页面获取：
 
-**[https://github.com/wmqc97/MiRoot-Releases/releases/latest](https://github.com/wmqc97/MiRoot-Releases/releases/latest)**
+**[https://github.com/wmqc97/MiRoot/releases/latest](https://github.com/wmqc97/MiRoot/releases/latest)**
 
 ### 构建
 
