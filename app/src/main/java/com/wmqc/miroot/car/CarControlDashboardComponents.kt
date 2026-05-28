@@ -757,8 +757,67 @@ fun resolveDisplayText(
 }
 
 // ====================================================================
-//  8. Vehicle Detail Card — 折叠式全量车辆数据
+//  8. Vehicle Detail Card — 折叠式全量车辆数据（两列布局 + 值翻译）
 // ====================================================================
+
+/** 将原始数值/布尔字符串翻译为中文。 */
+private fun translateValue(raw: String?): String {
+    if (raw == null || raw == "未知" || raw.isEmpty()) return "—"
+    return when (raw) {
+        "0" -> "关闭"
+        "1" -> "开启"
+        "2" -> "已激活"
+        "true", "True" -> "开启"
+        "false", "False" -> "关闭"
+        else -> raw
+    }
+}
+
+/** 翻译门锁值 */
+private fun translateLock(raw: String?): String = when (raw) {
+    "0" -> "已锁"
+    "1" -> "未锁"
+    "2" -> "部分"
+    else -> translateValue(raw)
+}
+
+/** 翻译门开关值 */
+private fun translateDoorOpen(raw: String?): String = when (raw) {
+    "0" -> "关"
+    "1" -> "开"
+    else -> translateValue(raw)
+}
+
+/** 翻译手刹值 */
+private fun translateBrake(raw: String?): String = when (raw) {
+    "0" -> "释放"
+    "1" -> "拉起"
+    else -> translateValue(raw)
+}
+
+/** 翻译安全带值 */
+private fun translateSeatbelt(raw: String?): String = when (raw) {
+    "true", "True" -> "已系"
+    "false", "False" -> "未系"
+    else -> translateValue(raw)
+}
+
+/** 翻译防盗值 */
+private fun translateTheft(raw: String?): String = when (raw) {
+    "0" -> "未激活"
+    "1" -> "已激活"
+    "2" -> "已开启"
+    else -> translateValue(raw)
+}
+
+/** 颜色判定：异常/警告=橙，正常=绿，其他=灰 */
+private fun statusColor(value: String, colors: CarColorPalette): Color = when {
+    value.contains("开") && !value.contains("关") -> colors.accentOrange
+    value.contains("已锁") || value.contains("关") || value.contains("正常") || value.contains("释放") || value.contains("已系") || value.contains("未激活") -> colors.accentGreen
+    value.contains("未锁") || value.contains("警告") || value.contains("拉起") || value.contains("激活") || value.contains("未系") || value.contains("报警") -> colors.accentOrange
+    else -> colors.textPrimary
+}
+
 @Composable
 fun VehicleDetailCard(
     vehicleStatus: VehicleStatusInfo?,
@@ -775,12 +834,11 @@ fun VehicleDetailCard(
         colors = CardDefaults.cardColors(containerColor = CarUiColors.bgCard)
     ) {
         Column(Modifier.fillMaxWidth()) {
-            // 标题行（点击展开/收起）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { expanded = !expanded }
-                    .padding(14.dp),
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("📋 车辆详细数据", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = CarUiColors.textPrimary)
@@ -792,66 +850,67 @@ fun VehicleDetailCard(
                 )
             }
 
-            // 折叠内容
             if (expanded) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(0.5.dp)
-                        .background(CarUiColors.divider)
-                )
+                Box(Modifier.fillMaxWidth().height(0.5.dp).background(CarUiColors.divider))
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    DetailSection("🔒 门锁状态") {
-                        DetailRow("主驾", vehicleStatus.doorLockStatusDriver, vehicleStatus.doorOpenStatusDriver, CarUiColors)
-                        DetailRow("副驾", vehicleStatus.doorLockStatusPassenger, vehicleStatus.doorOpenStatusPassenger, CarUiColors)
-                        DetailRow("左后", vehicleStatus.doorLockStatusDriverRear, vehicleStatus.doorOpenStatusDriverRear, CarUiColors)
-                        DetailRow("右后", vehicleStatus.doorLockStatusPassengerRear, vehicleStatus.doorOpenStatusPassengerRear, CarUiColors)
-                    }
-                    DetailSection("🪟 车窗状态") {
-                        WinRow("主驾", vehicleStatus.winStatusDriver, CarUiColors)
-                        WinRow("副驾", vehicleStatus.winStatusPassenger, CarUiColors)
-                        WinRow("左后", vehicleStatus.winStatusDriverRear, CarUiColors)
-                        WinRow("右后", vehicleStatus.winStatusPassengerRear, CarUiColors)
-                        DetailSingle("天窗", vehicleStatus.sunroofOpenStatus, CarUiColors)
-                    }
-                    DetailSection("🔥 座椅加热") {
-                        DetailSingle("主驾", vehicleStatus.drvHeatSts, CarUiColors)
-                        DetailSingle("副驾", vehicleStatus.passHeatingSts, CarUiColors)
-                        DetailSingle("左后", vehicleStatus.rlHeatingSts, CarUiColors)
-                        DetailSingle("右后", vehicleStatus.rrHeatingSts, CarUiColors)
-                    }
-                    DetailSection("🛡 安全") {
-                        DetailSingle("安全带(主)", vehicleStatus.seatBeltStatusDriver, CarUiColors)
-                        DetailSingle("安全带(副)", vehicleStatus.seatBeltStatusPassenger, CarUiColors)
-                        DetailSingle("电子手刹", vehicleStatus.electricParkBrakeStatus, CarUiColors)
-                        DetailSingle("机械手刹", vehicleStatus.handBrakeStatus, CarUiColors)
-                        DetailSingle("制动踏板", vehicleStatus.brakePedalDepressed, CarUiColors)
-                        DetailSingle("引擎盖", vehicleStatus.engineHoodOpenStatus, CarUiColors)
-                        DetailSingle("后备箱锁", vehicleStatus.trunkLockStatus, CarUiColors)
-                        DetailSingle("防盗状态", vehicleStatus.theftActivated, CarUiColors)
-                        DetailSingle("车辆警报", vehicleStatus.vehicleAlarm, CarUiColors)
-                    }
-                    DetailSection("🚗 驾驶") {
-                        DetailSingle("变速箱档位", vehicleStatus.transimissionGearPostion, CarUiColors)
-                        DetailSingle("定速巡航", vehicleStatus.cruiseControlStatus, CarUiColors)
-                        DetailSingle("机油压力", vehicleStatus.engineOilPressureWarning, CarUiColors)
-                        DetailSingle("车窗未关提醒", vehicleStatus.winCloseReminder, CarUiColors)
-                    }
-                    DetailSection("🌡 空调/空气") {
-                        DetailSingle("空气净化", vehicleStatus.airCleanSts, CarUiColors)
-                        DetailSingle("预约空调", vehicleStatus.preClimateActive, CarUiColors)
-                        DetailSingle("通风状态", vehicleStatus.ventilateStatus, CarUiColors)
-                    }
-                    DetailSection("📍 位置/其他") {
-                        DetailSingleKV("海拔", vehicleStatus.altitude, "m", CarUiColors)
-                        DetailSingleKV("方向", vehicleStatus.direction, "°", CarUiColors)
-                        DetailSingle("定位可信", vehicleStatus.posCanBeTrusted, CarUiColors)
-                    }
+                    // ── 门锁（双列：锁 | 开）──
+                    SectionLabel("🔒 门锁")
+                    TwoColRow(
+                        "主驾", translateLock(vehicleStatus.doorLockStatusDriver), translateDoorOpen(vehicleStatus.doorOpenStatusDriver), CarUiColors,
+                        "副驾", translateLock(vehicleStatus.doorLockStatusPassenger), translateDoorOpen(vehicleStatus.doorOpenStatusPassenger), CarUiColors,
+                    )
+                    TwoColRow(
+                        "左后", translateLock(vehicleStatus.doorLockStatusDriverRear), translateDoorOpen(vehicleStatus.doorOpenStatusDriverRear), CarUiColors,
+                        "右后", translateLock(vehicleStatus.doorLockStatusPassengerRear), translateDoorOpen(vehicleStatus.doorOpenStatusPassengerRear), CarUiColors,
+                    )
+
+                    // ── 车窗（双列）──
+                    SectionLabel("🪟 车窗")
+                    TwoColSimple("主驾", vehicleStatus.winStatusDriver, CarUiColors,
+                        "副驾", vehicleStatus.winStatusPassenger, CarUiColors)
+                    TwoColSimple("左后", vehicleStatus.winStatusDriverRear, CarUiColors,
+                        "右后", vehicleStatus.winStatusPassengerRear, CarUiColors)
+                    TwoColSimple("天窗", vehicleStatus.sunroofOpenStatus, CarUiColors,
+                        "后备箱锁", translateValue(vehicleStatus.trunkLockStatus), CarUiColors)
+
+                    // ── 安全（双列）──
+                    SectionLabel("🛡 安全")
+                    TwoColLabeled("安全带主", translateSeatbelt(vehicleStatus.seatBeltStatusDriver), CarUiColors,
+                        "安全带副", translateSeatbelt(vehicleStatus.seatBeltStatusPassenger), CarUiColors)
+                    TwoColLabeled("电子手刹", translateBrake(vehicleStatus.electricParkBrakeStatus), CarUiColors,
+                        "机械手刹", translateBrake(vehicleStatus.handBrakeStatus), CarUiColors)
+                    TwoColLabeled("制动踏板", translateValue(vehicleStatus.brakePedalDepressed), CarUiColors,
+                        "引擎盖", translateDoorOpen(vehicleStatus.engineHoodOpenStatus), CarUiColors)
+                    TwoColLabeled("防盗状态", translateTheft(vehicleStatus.theftActivated), CarUiColors,
+                        "车辆警报", translateValue(vehicleStatus.vehicleAlarm), CarUiColors)
+
+                    // ── 座椅加热（双列）──
+                    SectionLabel("🔥 座椅加热")
+                    TwoColLabeled("主驾", translateValue(vehicleStatus.drvHeatSts), CarUiColors,
+                        "副驾", translateValue(vehicleStatus.passHeatingSts), CarUiColors)
+                    TwoColLabeled("左后", translateValue(vehicleStatus.rlHeatingSts), CarUiColors,
+                        "右后", translateValue(vehicleStatus.rrHeatingSts), CarUiColors)
+
+                    // ── 驾驶 + 空调（双列混排）──
+                    SectionLabel("🚗 驾驶 · 空调")
+                    TwoColLabeled("变速箱档位", vehicleStatus.transimissionGearPostion, CarUiColors,
+                        "定速巡航", translateValue(vehicleStatus.cruiseControlStatus), CarUiColors)
+                    TwoColLabeled("机油压力", translateValue(vehicleStatus.engineOilPressureWarning), CarUiColors,
+                        "车窗未关提醒", translateValue(vehicleStatus.winCloseReminder), CarUiColors)
+                    TwoColLabeled("空气净化", translateValue(vehicleStatus.airCleanSts), CarUiColors,
+                        "预约空调", translateValue(vehicleStatus.preClimateActive), CarUiColors)
+                    TwoColLabeled("通风状态", translateValue(vehicleStatus.ventilateStatus), CarUiColors,
+                        "", "", CarUiColors)
+
+                    // ── 位置 ──
+                    SectionLabel("📍 位置")
+                    TwoColLabeled("海拔", fmtNum(vehicleStatus.altitude, "m"), CarUiColors,
+                        "方向", fmtNum(vehicleStatus.direction, "°"), CarUiColors)
+                    TwoColLabeled("定位可信", translateValue(vehicleStatus.posCanBeTrusted), CarUiColors,
+                        "", "", CarUiColors)
                 }
                 Spacer(Modifier.height(8.dp))
             }
@@ -859,61 +918,73 @@ fun VehicleDetailCard(
     }
 }
 
-// -- 辅助组件 --
+private fun fmtNum(raw: String?, unit: String): String {
+    if (raw == null || raw == "未知" || raw.isEmpty()) return "—"
+    return "$raw$unit"
+}
+
+// -- 紧凑辅助组件 --
 
 @Composable
-private fun DetailSection(title: String, content: @Composable ColumnScope.() -> Unit) {
-    val CarUiColors = carColors()
-    Column(Modifier.fillMaxWidth()) {
-        Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = CarUiColors.accentBlue)
-        Spacer(Modifier.height(2.dp))
-        content()
+private fun SectionLabel(title: String) {
+    val colors = carColors()
+    Text(title, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = colors.accentBlue)
+}
+
+/** 门锁双列：每列显示 [标签] 锁:值 开:值 */
+@Composable
+private fun TwoColRow(
+    l1: String, lock1: String, open1: String, colors: CarColorPalette,
+    l2: String, lock2: String, open2: String, colors2: CarColorPalette,
+) {
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp)) {
+        DoorCell(l1, lock1, open1, colors, Modifier.weight(1f))
+        DoorCell(l2, lock2, open2, colors, Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun DetailRow(label: String, lock: String, open: String, colors: CarColorPalette) {
-    val lockColor = if (lock.contains("已锁")) colors.accentGreen else if (lock == "未知") colors.textSecondary else colors.accentOrange
-    val openColor = if (open.contains("关闭")) colors.accentGreen else if (open == "未知") colors.textSecondary else colors.accentRed
-    Row(Modifier.fillMaxWidth().padding(start = 8.dp)) {
-        Text(label, fontSize = 11.sp, color = colors.textSecondary, modifier = Modifier.width(32.dp))
-        Text("锁:", fontSize = 10.sp, color = colors.textSecondary)
-        Text(lock, fontSize = 11.sp, color = lockColor, modifier = Modifier.width(50.dp))
-        Text("开:", fontSize = 10.sp, color = colors.textSecondary)
-        Text(open, fontSize = 11.sp, color = openColor)
+private fun DoorCell(label: String, lock: String, open: String, colors: CarColorPalette, mod: Modifier) {
+    Row(mod.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 10.sp, color = colors.textSecondary, modifier = Modifier.width(28.dp))
+        Text(lock, fontSize = 11.sp, color = statusColor(lock, colors))
+        Text("/", fontSize = 10.sp, color = colors.textSecondary)
+        Text(open, fontSize = 11.sp, color = statusColor(open, colors))
+    }
+}
+
+/** 简单双列：标签 + 状态值 */
+@Composable
+private fun TwoColSimple(
+    l1: String, v1: String, c: CarColorPalette,
+    l2: String, v2: String, c2: CarColorPalette,
+) {
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp)) {
+        LabeledCell(l1, v1, c, Modifier.weight(1f))
+        LabeledCell(l2, v2, c, Modifier.weight(1f))
+    }
+}
+
+/** 标签:值 双列 */
+@Composable
+private fun TwoColLabeled(
+    l1: String, v1: String, c: CarColorPalette,
+    l2: String, v2: String, c2: CarColorPalette,
+) {
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp)) {
+        LabeledCell(l1, v1, c, Modifier.weight(1f))
+        if (l2.isNotEmpty()) LabeledCell(l2, v2, c, Modifier.weight(1f))
+        else Spacer(Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun WinRow(label: String, status: String, colors: CarColorPalette) {
-    val c = if (status.contains("关闭")) colors.accentGreen else if (status == "未知") colors.textSecondary else colors.accentOrange
-    Row(Modifier.fillMaxWidth().padding(start = 8.dp)) {
-        Text(label, fontSize = 11.sp, color = colors.textSecondary, modifier = Modifier.width(32.dp))
-        Text(status, fontSize = 11.sp, color = c)
-    }
-}
-
-@Composable
-private fun DetailSingle(label: String, value: String, colors: CarColorPalette) {
-    val v = value.let { raw ->
-        when {
-            raw.contains("开启") || raw.contains("已系") || raw.contains("拉起") || raw.contains("已激活") || raw.contains("警告") || raw == "true" -> raw to colors.accentOrange
-            raw.contains("关闭") || raw.contains("未系") || raw.contains("释放") || raw.contains("未激活") || raw.contains("正常") || raw == "false" -> raw to colors.accentGreen
-            else -> raw to colors.textSecondary
-        }
-    }
-    Row(Modifier.fillMaxWidth().padding(start = 8.dp)) {
-        Text(label, fontSize = 11.sp, color = colors.textSecondary, modifier = Modifier.width(72.dp))
-        Text(v.first, fontSize = 11.sp, color = v.second)
-    }
-}
-
-@Composable
-private fun DetailSingleKV(label: String, value: String, unit: String, colors: CarColorPalette) {
-    val display = if (value == "未知" || value.isEmpty()) "—" else "$value$unit"
-    Row(Modifier.fillMaxWidth().padding(start = 8.dp)) {
-        Text(label, fontSize = 11.sp, color = colors.textSecondary, modifier = Modifier.width(72.dp))
-        Text(display, fontSize = 11.sp, color = colors.textPrimary)
+private fun LabeledCell(label: String, value: String, colors: CarColorPalette, mod: Modifier) {
+    val display = if (value.isEmpty() || value == "未知") "—" else value
+    Row(mod.padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 10.sp, color = colors.textSecondary)
+        Spacer(Modifier.width(3.dp))
+        Text(display, fontSize = 11.sp, color = statusColor(display, colors), maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
