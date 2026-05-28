@@ -7,7 +7,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.rememberSplineBasedDecay
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -18,8 +18,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,13 +35,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -51,6 +51,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
@@ -65,11 +67,11 @@ import kotlin.math.sqrt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 private const val HONEYCOMB_DEBUG_TAG = "RearHoneycomb"
 
@@ -258,8 +260,11 @@ fun RearDesktopHoneycombScreen(
                 }
                 iconPx = iconPxMaxForTargetRows
             }
-            val iconDpVisual = with(density) { iconPx.toDp().value }
-            val pkgKeys = appsNonNull.joinToString("|") { it.packageName }
+            val pkgKeys =
+                remember(appsNonNull) {
+                    val h = appsNonNull.fold(0) { acc, e -> acc * 31 + e.packageName.hashCode() }
+                    "k$h|s${appsNonNull.size}"
+                }
             val (gridCells, gridMetrics) =
                 remember(pkgKeys, iconPx, appsNonNull.size) {
                     buildGridCellsAndMetrics(
@@ -363,23 +368,22 @@ fun RearDesktopHoneycombScreen(
                 if (toDecode.isEmpty()) return@LaunchedEffect
                 val decodeSide =
                     (144f * layoutFitScale).roundToInt().coerceIn(MIN_HONEYCOMB_ICON_DECODE_PX, MAX_HONEYCOMB_ICON_DECODE_PX)
-                var fail = 0
-                var ok = 0
                 val tDecode0 = System.currentTimeMillis()
-                for (idx in toDecode) {
-                    if (idx !in list.indices) continue
-                    val bmp =
-                        withContext(Dispatchers.Default) {
-                            runCatching {
-                                val icon =
-                                    list[idx].icon ?: RearDesktopRepository.loadAppIcon(appContext, list[idx].packageName)
-                                icon
-                                    ?: return@runCatching null
-                                icon
-                                    .toBitmap(width = decodeSide, height = decodeSide)
-                                    .asImageBitmap()
-                            }.getOrNull()
-                        }
+                val results: List<Pair<Int, ImageBitmap?>> =
+                    coroutineScope {
+                        toDecode.map { idx ->
+                            async(Dispatchers.Default) {
+                                if (idx !in list.indices) return@async (idx to null)
+                                runCatching {
+                                    val icon = list[idx].icon ?: RearDesktopRepository.loadAppIcon(appContext, list[idx].packageName)
+                                    icon?.toBitmap(width = decodeSide, height = decodeSide)?.asImageBitmap()
+                                }.getOrNull().let { idx to it }
+                            }
+                        }.awaitAll()
+                    }
+                var ok = 0
+                var fail = 0
+                for ((idx, bmp) in results) {
                     if (bmp != null) {
                         iconBitmaps[idx] = bmp
                         ok++
@@ -436,7 +440,7 @@ fun RearDesktopHoneycombScreen(
             val visibleDrawSet = remember(visibleDrawIndices) { visibleDrawIndices.toSet() }
 
             Box(Modifier.fillMaxSize()) {
-                Box(
+                Canvas(
                     Modifier
                         .fillMaxSize()
                         .graphicsLayer {
@@ -445,6 +449,7 @@ fun RearDesktopHoneycombScreen(
                             alpha = entranceAlpha
                         },
                 ) {
+                    val clipPath = Path()
                     drawIndices.forEach { idx ->
                         if (idx !in visibleDrawSet) return@forEach
                         val g = cellOffsets.getOrElse(idx) { Offset.Zero }
@@ -454,7 +459,7 @@ fun RearDesktopHoneycombScreen(
                         val scaleF =
                             viewportStripFocusScale(
                                 iconCenterYViewport = cyScr,
-                                boxH = boxHpx,
+                                boxH = size.height,
                             )
                         val sidePx = iconPx * scaleF
                         val leftPx = sx - sidePx / 2f
@@ -462,20 +467,17 @@ fun RearDesktopHoneycombScreen(
 
                         val bmp = iconBitmaps[idx]
                         if (bmp != null) {
-                            Image(
-                                bitmap = bmp,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier =
-                                    Modifier
-                                        .align(Alignment.TopStart)
-                                        .graphicsLayer {
-                                            translationX = leftPx
-                                            translationY = topPx
-                                        }
-                                        .size((iconDpVisual * scaleF).dp)
-                                        .clip(CircleShape),
+                            clipPath.reset()
+                            clipPath.addOval(
+                                Rect(leftPx, topPx, leftPx + sidePx, topPx + sidePx),
                             )
+                            clipPath(path = clipPath) {
+                                drawImage(
+                                    image = bmp,
+                                    dstOffset = IntOffset(leftPx.roundToInt(), topPx.roundToInt()),
+                                    dstSize = IntSize(sidePx.roundToInt(), sidePx.roundToInt()),
+                                )
+                            }
                         }
                     }
                 }

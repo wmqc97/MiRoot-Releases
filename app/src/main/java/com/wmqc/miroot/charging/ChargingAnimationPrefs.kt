@@ -23,6 +23,48 @@ object ChargingAnimationPrefs {
      */
     const val KEY_FILL_RISE_SPEED_PERCENT: String = "charging_fill_rise_speed_percent"
 
+    /** 背屏充电信息栏显示项配置（逗号分隔的 item ID 列表，按显示顺序）。 */
+    const val KEY_INFO_ITEMS: String = "charging_info_items"
+    const val DEFAULT_INFO_ITEMS: String = "power,charging_type,time,temperature"
+
+    /** 所有可用的充电信息项定义（id → 显示名称）。 */
+    @JvmStatic
+    val ALL_INFO_ITEMS: LinkedHashMap<String, String> = linkedMapOf(
+        "power" to "功率",
+        "charging_type" to "充电类型",
+        "time" to "预估充满时间",
+        "temperature" to "温度",
+        "voltage" to "电压",
+        "current" to "电流",
+        "capacity" to "当前容量",
+    )
+
+    const val MAX_INFO_ITEMS: Int = 4
+
+    @JvmStatic
+    fun getAllInfoItems(): LinkedHashMap<String, String> = ALL_INFO_ITEMS
+
+    private fun parseInfoItems(raw: String): List<String> {
+        val items = raw.split(",").map { it.trim() }.filter { it in ALL_INFO_ITEMS }
+        // 去重并保留顺序
+        val seen = mutableSetOf<String>()
+        return items.filter { seen.add(it) }
+    }
+
+    @JvmStatic
+    fun getInfoItems(context: Context): List<String> {
+        migrateFromCredentialProtectedIfNeeded(context)
+        val raw = prefs(context).getString(KEY_INFO_ITEMS, DEFAULT_INFO_ITEMS) ?: DEFAULT_INFO_ITEMS
+        return parseInfoItems(raw)
+    }
+
+    @JvmStatic
+    fun setInfoItems(context: Context, items: List<String>) {
+        migrateFromCredentialProtectedIfNeeded(context)
+        val filtered = items.filter { it in ALL_INFO_ITEMS }.distinct().take(MAX_INFO_ITEMS)
+        prefs(context).edit().putString(KEY_INFO_ITEMS, filtered.joinToString(",")).apply()
+    }
+
     const val MIN_FILL_RISE_SPEED_PERCENT: Int = 40
     const val MAX_FILL_RISE_SPEED_PERCENT: Int = 80
     private const val DEFAULT_FILL_RISE_SPEED_PERCENT: Int = 50

@@ -557,6 +557,31 @@
                     android:layout_marginTop="@dimen/mi_features_compose_slider_top"
                     android:minHeight="@dimen/mi_features_compose_slider_min_height" />
 
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/features_charging_info_items_title"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionSubtitle" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_charging_info_items"
+                        style="@style/Widget.MiRoot.Button.Text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/features_charging_info_items_configure" />
+                </LinearLayout>
+
                 <!-- 充电动画常亮已移除（3.x） -->
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

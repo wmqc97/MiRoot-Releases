@@ -6,12 +6,11 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
-import android.util.TypedValue
 import android.view.Display
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewConfiguration
 import android.view.WindowManager
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -35,7 +34,6 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.activity.ComponentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
@@ -48,6 +46,7 @@ import com.wmqc.miroot.rear.RearMirootProjectionLifecycle
 import com.wmqc.miroot.rear.RearSwitchKeeperService
 import android.os.Handler
 import android.os.Looper
+import com.wmqc.miroot.BottomSwipeExitHelper
 import com.wmqc.miroot.BuildConfig
 import com.wmqc.miroot.RearDisplayInputHelper
 import com.wmqc.miroot.R
@@ -87,16 +86,26 @@ class RearScreenDesktopActivity : ComponentActivity() {
     private companion object {
         const val TAG = "RearDesktop"
         const val REAR_DISPLAY_ID = 1
-
-        const val BOTTOM_SWIPE_EXIT_ZONE_FRACTION = 0.10f
-        const val BOTTOM_SWIPE_EXIT_MIN_HORIZ_DP = 48f
-        const val BOTTOM_SWIPE_EXIT_HORIZONTAL_DOMINANCE = 1.35f
     }
 
-    private var bottomSwipeExitPointerDownInZone = false
-    private var bottomSwipeExitStartY = 0f
-    private var bottomSwipeExitStartX = 0f
-    private var bottomSwipeExitPending = false
+    private val bottomSwipeHandler = BottomSwipeExitHelper.Handler(this) {
+        if (BuildConfig.DEBUG) {
+            LogHelper.d(TAG, "bottom swipe exit")
+        }
+        window.decorView.post {
+            if (!isFinishing) {
+                try {
+                    window.setBackgroundDrawable(ColorDrawable(0xFF000000.toInt()))
+                    window.setWindowAnimations(0)
+                    window.setFlags(
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                    )
+                } catch (_: Exception) {}
+                finish()
+            }
+        }
+    }
 
     /**
      * 某些 ROM/迁屏瞬间 decor 尺寸会短暂为 0（高度为 0 时 InsetsSource 可能刷屏警告）。
@@ -530,86 +539,10 @@ class RearScreenDesktopActivity : ComponentActivity() {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        tryTrackBottomSwipeExit(ev)
+        if (getCurrentDisplayIdSafe() == REAR_DISPLAY_ID) {
+            bottomSwipeHandler.handleTouchEvent(ev)
+        }
         return super.dispatchTouchEvent(ev)
-    }
-
-    private fun tryTrackBottomSwipeExit(ev: MotionEvent) {
-        if (getCurrentDisplayIdSafe() != REAR_DISPLAY_ID || isFinishing || bottomSwipeExitPending) {
-            return
-        }
-        val decor = window.decorView ?: return
-        val xy = FloatArray(2)
-        if (!com.wmqc.miroot.BottomSwipeExitHelper.decorLocalXY(decor, ev, xy)) {
-            return
-        }
-        val action = ev.actionMasked
-        val h = decor.height.toFloat()
-        val y = xy[1]
-        val x = xy[0]
-
-        if (action == MotionEvent.ACTION_DOWN && ev.pointerCount == 1) {
-            bottomSwipeExitPointerDownInZone = h > 0 && y > h * (1f - BOTTOM_SWIPE_EXIT_ZONE_FRACTION)
-            bottomSwipeExitStartY = y
-            bottomSwipeExitStartX = x
-            return
-        }
-        if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP) {
-            bottomSwipeExitPointerDownInZone = false
-            return
-        }
-        if (action == MotionEvent.ACTION_MOVE) {
-            if (bottomSwipeExitPointerDownInZone && ev.pointerCount == 1) {
-                maybeFireBottomSwipeExit(xy[1], xy[0])
-            }
-            return
-        }
-        if (action == MotionEvent.ACTION_UP) {
-            if (bottomSwipeExitPointerDownInZone && ev.pointerCount == 1) {
-                maybeFireBottomSwipeExit(xy[1], xy[0])
-            }
-            bottomSwipeExitPointerDownInZone = false
-        } else if (action == MotionEvent.ACTION_CANCEL) {
-            bottomSwipeExitPointerDownInZone = false
-        }
-    }
-
-    private fun maybeFireBottomSwipeExit(endY: Float, endX: Float) {
-        val horizDist = kotlin.math.abs(endX - bottomSwipeExitStartX)
-        val vertDist = kotlin.math.abs(endY - bottomSwipeExitStartY)
-        val touchSlop = ViewConfiguration.get(this).scaledTouchSlop.toFloat()
-        var vd = vertDist
-        if (vd < touchSlop * 2.5f) {
-            vd = 0f
-        }
-        val minHoriz =
-            TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP,
-                BOTTOM_SWIPE_EXIT_MIN_HORIZ_DP,
-                resources.displayMetrics,
-            )
-        if (horizDist < minHoriz || horizDist < vd * BOTTOM_SWIPE_EXIT_HORIZONTAL_DOMINANCE) {
-            return
-        }
-        if (BuildConfig.DEBUG) {
-            LogHelper.d(TAG, "bottom swipe exit (horizDist=$horizDist)")
-        }
-        bottomSwipeExitPointerDownInZone = false
-        bottomSwipeExitPending = true
-        window.decorView.post {
-            if (!isFinishing) {
-                try {
-                    window.setBackgroundDrawable(ColorDrawable(0xFF000000.toInt()))
-                    window.setWindowAnimations(0)
-                    window.setFlags(
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
-                    )
-                } catch (_: Exception) {
-                }
-                finish()
-            }
-        }
     }
 
     private fun getCurrentDisplayIdSafe(): Int {

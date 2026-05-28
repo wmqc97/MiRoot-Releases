@@ -561,6 +561,9 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
             ChargingServiceSync.sync(requireContext(), viewModel.snapshot.value?.privileged == true)
             setChargingFillSpeedSectionVisible(checked)
         }
+        binding.buttonChargingInfoItems.setOnClickListener {
+            showChargingInfoItemsDialog()
+        }
     }
 
     private fun setChargingFillSpeedSectionVisible(enabled: Boolean) {
@@ -637,6 +640,164 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         ctx.applicationContext.sendBroadcast(
             Intent(ChargingIntents.ACTION_RELOAD_CHARGING_SETTINGS).setPackage(ctx.packageName),
         )
+    }
+
+    /** 弹出背屏充电信息项设置对话框。 */
+    private fun showChargingInfoItemsDialog() {
+        val ctx = requireContext()
+        val density = ctx.resources.displayMetrics.density
+        val currentItems = ChargingAnimationPrefs.getInfoItems(ctx)
+
+        // data class for each item row
+        data class ItemRow(
+            val id: String,
+            val label: String,
+            val cb: android.widget.CheckBox,
+            val upBtn: android.widget.Button,
+            val downBtn: android.widget.Button,
+            val row: android.widget.LinearLayout,
+        )
+
+        val btnSize = (36 * density).toInt()
+        val allRows = ChargingAnimationPrefs.getAllInfoItems().map { (id, label) ->
+            val cb = android.widget.CheckBox(ctx).apply {
+                text = label
+                isChecked = currentItems.contains(id)
+                setTextColor(0xFF000000.toInt())
+            }
+            val upBtn = android.widget.Button(ctx, null, android.R.attr.borderlessButtonStyle).apply {
+                text = "▲"
+                textSize = 10f
+            }
+            val downBtn = android.widget.Button(ctx, null, android.R.attr.borderlessButtonStyle).apply {
+                text = "▼"
+                textSize = 10f
+            }
+            val row = android.widget.LinearLayout(ctx).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, (4 * density).toInt(), 0, (4 * density).toInt())
+                addView(cb, android.widget.LinearLayout.LayoutParams(
+                    0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(upBtn, android.widget.LinearLayout.LayoutParams(btnSize, btnSize))
+                addView(downBtn, android.widget.LinearLayout.LayoutParams(btnSize, btnSize))
+            }
+            ItemRow(id, label, cb, upBtn, downBtn, row)
+        }
+
+        val dialogLayout = android.widget.LinearLayout(ctx).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding((24 * density).toInt(), (8 * density).toInt(), (24 * density).toInt(), 0)
+            for (itemRow in allRows) addView(itemRow.row)
+        }
+
+        val hintView = android.widget.TextView(ctx).apply {
+            gravity = android.view.Gravity.CENTER
+            setTextColor(0xFF666666.toInt())
+            textSize = 13f
+            setPadding(0, (8 * density).toInt(), 0, 0)
+        }
+        dialogLayout.addView(hintView)
+
+        /** 刷新：勾选的排前面，不勾选的排后面，保持各自内部顺序。 */
+        fun reorderRows() {
+            val checked = allRows.filter { it.cb.isChecked }
+            val unchecked = allRows.filter { !it.cb.isChecked }
+            val ordered = checked + unchecked
+            dialogLayout.removeAllViews()
+            for (item in ordered) dialogLayout.addView(item.row)
+            dialogLayout.addView(hintView)
+            val c = checked.size
+            hintView.text = "已选择 $c/${ChargingAnimationPrefs.MAX_INFO_ITEMS}，最多选择 ${ChargingAnimationPrefs.MAX_INFO_ITEMS} 项"
+        }
+
+        /** 交换 dialogLayout 中两个 row 的位置。 */
+        fun swapRows(fromIdx: Int, toIdx: Int) {
+            if (fromIdx < 0 || toIdx < 0 || fromIdx >= allRows.size || toIdx >= allRows.size) return
+            val rowsInLayout = allRows.sortedBy { dialogLayout.indexOfChild(it.row) }
+            val fromRow = rowsInLayout[fromIdx]
+            val toRow = rowsInLayout[toIdx]
+            val fromPos = dialogLayout.indexOfChild(fromRow.row)
+            val toPos = dialogLayout.indexOfChild(toRow.row)
+            if (fromPos < 0 || toPos < 0) return
+            // Swap by removing and re-adding
+            dialogLayout.removeView(fromRow.row)
+            dialogLayout.removeView(toRow.row)
+            // The positions shifted after first removal
+            if (fromPos < toPos) {
+                dialogLayout.addView(toRow.row, fromPos)
+                dialogLayout.addView(fromRow.row, toPos)
+            } else {
+                dialogLayout.addView(toRow.row, fromPos)
+                dialogLayout.addView(fromRow.row, toPos)
+            }
+            // Move hintView back to end
+            dialogLayout.removeView(hintView)
+            dialogLayout.addView(hintView)
+        }
+
+        // 设置点击事件
+        for (i in allRows.indices) {
+            val idx = i
+            allRows[i].upBtn.setOnClickListener {
+                val layoutRows = allRows.sortedBy { dialogLayout.indexOfChild(it.row) }
+                val curIdx = layoutRows.indexOf(allRows[idx])
+                if (curIdx > 0) {
+                    swapLayoutChildren(dialogLayout, curIdx, curIdx - 1)
+                    // Move hintView back to end
+                    dialogLayout.removeView(hintView)
+                    dialogLayout.addView(hintView)
+                }
+            }
+            allRows[i].downBtn.setOnClickListener {
+                val layoutRows = allRows.sortedBy { dialogLayout.indexOfChild(it.row) }
+                val curIdx = layoutRows.indexOf(allRows[idx])
+                if (curIdx < layoutRows.size - 1) {
+                    swapLayoutChildren(dialogLayout, curIdx, curIdx + 1)
+                    dialogLayout.removeView(hintView)
+                    dialogLayout.addView(hintView)
+                }
+            }
+            allRows[i].cb.setOnCheckedChangeListener { btn, isChecked ->
+                if (isChecked) {
+                    val c = allRows.count { it.cb.isChecked }
+                    if (c > ChargingAnimationPrefs.MAX_INFO_ITEMS) {
+                        btn.isChecked = false
+                        return@setOnCheckedChangeListener
+                    }
+                }
+                reorderRows()
+            }
+        }
+
+        reorderRows()
+
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle("背屏信息显示设置")
+            .setView(dialogLayout)
+            .setPositiveButton("确定") { _, _ ->
+                val selected = allRows.filter { it.cb.isChecked }.map { it.id }
+                ChargingAnimationPrefs.setInfoItems(ctx, selected)
+                sendReloadChargingSettingsBroadcast(ctx)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    /** 交换 LinearLayout 中两个子 View 的位置。 */
+    private fun swapLayoutChildren(parent: android.widget.LinearLayout, pos1: Int, pos2: Int) {
+        if (pos1 == pos2) return
+        val children = (0 until parent.childCount).map { parent.getChildAt(it) }
+        parent.removeAllViews()
+        for (i in children.indices) {
+            parent.addView(
+                when (i) {
+                    pos1 -> children[pos2]
+                    pos2 -> children[pos1]
+                    else -> children[i]
+                },
+            )
+        }
     }
 
     private fun bindRearAssistSection() {

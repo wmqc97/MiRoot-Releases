@@ -9,6 +9,7 @@ import android.content.res.Configuration;
 import android.graphics.PixelFormat;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -17,11 +18,20 @@ import android.view.Display;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.view.animation.AccelerateDecelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.LinearInterpolator;
+import android.widget.ImageButton;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import android.os.RemoteException;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 import androidx.activity.ComponentActivity;
 import androidx.core.graphics.Insets;
@@ -56,11 +66,11 @@ public class RearScreenChargingActivity extends ComponentActivity {
     // --- MiRoot-3.4 对齐：仅下方 AUTO/PROTECT/resume 时长；涨水仍读 ChargingAnimationPrefs + 线性刻度（非 3.4 液面曲线，勿改回）。除本人强制要求外请勿改动。---
 
     /** 对齐 3.4：背屏 onCreate 后约 8s 自动关闭（非常亮模式）。 */
-    public static final long AUTO_FINISH_MS = 8_000L;
+    public static final long AUTO_FINISH_MS = 10_000L;
     /** 对齐 3.4：主屏占位未安排 auto-finish 时，onResume 补偿 5s 后 finish。 */
     private static final long RESUME_COMPENSATE_FINISH_MS = 5_000L;
-    /** dumpsys / insets 暂未可用时，17 Pro 背屏左摄像头区域保底避让（px）。 */
-    private static final int REAR_CAMERA_FALLBACK_LEFT_PX = 200;
+    /** 背屏左摄像头区域固定避让值（px），不使用系统 DisplayCutout 返回值。 */
+    private static final int REAR_CAMERA_FALLBACK_LEFT_PX = 260;
 
     private static volatile RearScreenChargingActivity currentInstance;
     public static final String EXTRA_BATTERY_LEVEL = "batteryLevel";
@@ -73,6 +83,10 @@ public class RearScreenChargingActivity extends ComponentActivity {
     private int pendingBatteryLevel;
     private GyroWaterRippleView waterView;
     private TextView batteryTextView;
+    private ImageView lightningIcon;
+    private LinearLayout chargingInfoBar;
+    private ValueAnimator lightningPulseAnimator;
+    private final Runnable batteryInfoRunnable = this::queryAndUpdateBatteryInfo;
     private float targetFillLevel;
     private boolean chargingUiInflated;
     /** 防止 setContentView 重入时再次 inflate。 */
@@ -231,7 +245,7 @@ public class RearScreenChargingActivity extends ComponentActivity {
             applyRearDensityBeforeInflateIfPossible();
             setContentView(R.layout.activity_rear_screen_charging);
             bindChargingViews(level);
-            applySafeInsetsToBatteryText();
+            // applySafeInsetsToBatteryText 已不再需要——safe_area_wrapper 统一处理摄像头避让
             hideSystemUi();
             chargingUiInflated = true;
             currentInstance = this;
@@ -470,44 +484,8 @@ public class RearScreenChargingActivity extends ComponentActivity {
     private Insets computeInitialBatterySafeInsets() {
         int left = 0;
         int right = 0;
-        try {
-            DisplayInfoCache cache = DisplayInfoCache.getInstance();
-            if (!cache.isInitialized()) {
-                ITaskService ts = ChargingService.getTaskService();
-                if (ts != null) {
-                    cache.initialize(ts);
-                }
-            }
-            RearDisplayHelper.RearDisplayInfo info = cache.getCachedInfo();
-            if (info != null && info.cutout != null) {
-                left = Math.max(left, info.cutout.left);
-                right = Math.max(right, info.cutout.right);
-            }
-        } catch (Exception e) {
-            LogHelper.w(TAG, "读取缓存 cutout 失败: " + e.getMessage());
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            try {
-                Display display = getDisplay();
-                if (display != null && display.getCutout() != null) {
-                    left = Math.max(left, display.getCutout().getSafeInsetLeft());
-                    right = Math.max(right, display.getCutout().getSafeInsetRight());
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            try {
-                WindowInsets wi = getWindow().getDecorView().getRootWindowInsets();
-                if (wi != null && wi.getDisplayCutout() != null) {
-                    left = Math.max(left, wi.getDisplayCutout().getSafeInsetLeft());
-                    right = Math.max(right, wi.getDisplayCutout().getSafeInsetRight());
-                }
-            } catch (Exception ignored) {
-            }
-        }
-        if (left <= 0 && isOnExpectedRearDisplay() && !DeviceModelHelper.isProMaxModel()) {
-            // 17 Pro 上偶发首帧拿不到 cutout，先给稳定回退值，避免数字贴在摄像头后再跳位。
+        if (isOnExpectedRearDisplay()) {
+            // 不使用系统 DisplayCutout 返回值，统一使用固定避让值。
             left = REAR_CAMERA_FALLBACK_LEFT_PX;
         }
         return Insets.of(left, 0, right, 0);
@@ -521,6 +499,22 @@ public class RearScreenChargingActivity extends ComponentActivity {
         batteryTextView.setTextColor(0xFFFFFFFF);
         waterView.setBatteryPercentForTint(level);
         waterView.setFillLevel(0f);
+
+        lightningIcon = findViewById(R.id.lightning_icon);
+        startLightningPulse();
+
+        // 安全区域包装层统一左避让摄像头，⚡73% 和信息卡在其内居中
+        View safeWrapper = findViewById(R.id.safe_area_wrapper);
+        if (safeWrapper != null) {
+            Insets safe = computeInitialBatterySafeInsets();
+            int rightPx = Math.round(getResources().getDisplayMetrics().density * 10);
+            safeWrapper.setPadding(safe.left, 0, rightPx, 0);
+        }
+
+        chargingInfoBar = findViewById(R.id.charging_info_bar);
+        rebuildInfoBar();
+        // 延迟 1s 等 UI 稳定后开始读取电池信息
+        mainHandler.postDelayed(this::queryAndUpdateBatteryInfo, 1000L);
     }
 
     private void startFillAndBatteryPresentation() {
@@ -608,6 +602,192 @@ public class RearScreenChargingActivity extends ComponentActivity {
         } catch (Exception e) {
             LogHelper.w(TAG, "updateBatteryLevel: " + e.getMessage());
         }
+    }
+
+    /** 闪电图标呼吸脉冲动画：透明度与缩放同步起伏。 */
+    private void startLightningPulse() {
+        if (lightningIcon == null) {
+            return;
+        }
+        if (lightningPulseAnimator != null) {
+            lightningPulseAnimator.cancel();
+        }
+        lightningPulseAnimator = ValueAnimator.ofFloat(0.6f, 1.0f);
+        lightningPulseAnimator.setDuration(1200L);
+        lightningPulseAnimator.setRepeatMode(ValueAnimator.REVERSE);
+        lightningPulseAnimator.setRepeatCount(ValueAnimator.INFINITE);
+        lightningPulseAnimator.setInterpolator(new AccelerateDecelerateInterpolator());
+        lightningPulseAnimator.addUpdateListener(a -> {
+            float v = (float) a.getAnimatedValue();
+            lightningIcon.setAlpha(v);
+            lightningIcon.setScaleX(v * 0.15f + 0.85f);
+            lightningIcon.setScaleY(v * 0.15f + 0.85f);
+        });
+        lightningPulseAnimator.start();
+    }
+
+    /** 根据用户配置重建底部信息卡：清空后按选中项动态添加 TextView。 */
+    private void rebuildInfoBar() {
+        if (chargingInfoBar == null) return;
+        chargingInfoBar.removeAllViews();
+        List<String> items = ChargingAnimationPrefs.getInfoItems(this);
+        if (items.isEmpty()) {
+            chargingInfoBar.setVisibility(View.GONE);
+            return;
+        }
+        int count = items.size();
+        float density = getResources().getDisplayMetrics().density;
+        for (int i = 0; i < count; i++) {
+            if (i > 0) {
+                View divider = new View(this);
+                divider.setLayoutParams(new LinearLayout.LayoutParams(
+                        Math.round(1 * density), Math.round(20 * density)));
+                divider.setBackgroundColor(0x33FFFFFF);
+                chargingInfoBar.addView(divider);
+            }
+            TextView tv = new TextView(this);
+            tv.setLayoutParams(new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            tv.setGravity(android.view.Gravity.CENTER);
+            tv.setTextColor(0xDDFFFFFF);
+            tv.setTextSize(12f);
+            tv.setSingleLine(true);
+            tv.setTag(items.get(i));
+            tv.setText("--");
+            chargingInfoBar.addView(tv);
+        }
+    }
+
+    /** 返回指定信息项的当前显示文本。 */
+    private String getItemDisplayValue(String itemId, int voltage, int temp,
+                                       int plugged, int level, int scale,
+                                       int currentMicroA, int chargeCounterMicroAh,
+                                       float powerW, boolean validPower) {
+        float levelPct = level * 100f / Math.max(scale, 1);
+        switch (itemId) {
+            case "power":
+                return validPower
+                        ? String.format(Locale.US, "%.1fW", powerW) : "--W";
+            case "charging_type": {
+                if (plugged == BatteryManager.BATTERY_PLUGGED_AC)
+                    return validPower && powerW >= 18f ? "快充" : "充电";
+                else if (plugged == BatteryManager.BATTERY_PLUGGED_USB)
+                    return "USB";
+                else if (plugged == BatteryManager.BATTERY_PLUGGED_WIRELESS)
+                    return "无线";
+                return "--";
+            }
+            case "time":
+                return estimatetime(levelPct, currentMicroA, chargeCounterMicroAh);
+            case "temperature":
+                return String.format(Locale.US, "%.1f°C", temp / 10f);
+            case "voltage":
+                return voltage > 0
+                        ? String.format(Locale.US, "%.2fV", voltage / 1000f) : "--";
+            case "current": {
+                float ma = Math.abs(currentMicroA) / 1000f;
+                return ma >= 1000
+                        ? String.format(Locale.US, "%.1fA", ma / 1000f)
+                        : String.format(Locale.US, "%.0fmA", ma);
+            }
+            case "capacity": {
+                if (chargeCounterMicroAh > 0) {
+                    return String.format(Locale.US, "%.0fmAh",
+                            chargeCounterMicroAh / 1000f);
+                }
+                return "--";
+            }
+            default:
+                return "--";
+        }
+    }
+
+    /** 查询 BatteryManager 获取功率/充电类型/预估时间/温度并更新底部信息卡。 */
+    private void queryAndUpdateBatteryInfo() {
+        try {
+            // 电压/温度/充电类型仅 ACTION_BATTERY_CHANGED sticky intent 中有
+            Intent batteryIntent = registerReceiver(null,
+                    new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+            if (batteryIntent == null) {
+                scheduleNextBatteryInfoQuery(3000L);
+                return;
+            }
+            int voltage = batteryIntent.getIntExtra(BatteryManager.EXTRA_VOLTAGE, 0);
+            int temp = batteryIntent.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0);
+            int plugged = batteryIntent.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1);
+            int level = batteryIntent.getIntExtra(BatteryManager.EXTRA_LEVEL, 0);
+            int scale = batteryIntent.getIntExtra(BatteryManager.EXTRA_SCALE, 100);
+
+            // 电流和电荷计数通过 getIntProperty 获取
+            int current = 0;
+            int chargeCounterMicroAh = 0;
+            BatteryManager bm = (BatteryManager) getSystemService(Context.BATTERY_SERVICE);
+            if (bm != null) {
+                current = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
+                chargeCounterMicroAh = bm.getIntProperty(
+                        BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER);
+            }
+
+            // 功率 W = V × A
+            float powerW = (voltage / 1000f) * (Math.abs(current) / 1000000f);
+            boolean validPower = powerW >= 0.1f;
+
+            // 遍历底部信息卡的所有 TextView，根据 tag 更新对应数值
+            if (chargingInfoBar != null) {
+                int childCount = chargingInfoBar.getChildCount();
+                boolean anyUpdated = false;
+                for (int i = 0; i < childCount; i++) {
+                    View child = chargingInfoBar.getChildAt(i);
+                    if (child instanceof TextView) {
+                        String tag = (String) child.getTag();
+                        if (tag != null) {
+                            ((TextView) child).setText(getItemDisplayValue(
+                                    tag, voltage, temp, plugged, level, scale,
+                                    current, chargeCounterMicroAh, powerW, validPower));
+                            anyUpdated = true;
+                        }
+                    }
+                }
+                if (anyUpdated && chargingInfoBar.getVisibility() != View.VISIBLE) {
+                    chargingInfoBar.setAlpha(0f);
+                    chargingInfoBar.setVisibility(View.VISIBLE);
+                    chargingInfoBar.animate().alpha(1f).setDuration(500L).start();
+                }
+            }
+
+            scheduleNextBatteryInfoQuery(3000L);
+        } catch (Exception e) {
+            LogHelper.w(TAG, "queryAndUpdateBatteryInfo: " + e.getMessage());
+            scheduleNextBatteryInfoQuery(5000L);
+        }
+    }
+
+    /** 估算充满剩余时间，格式 "约 N 分钟" 或 "--"。 */
+    private String estimatetime(float levelPct, int currentMicroA,
+                                int chargeCounterMicroAh) {
+        if (levelPct >= 99f) {
+            return "已充满";
+        }
+        if (chargeCounterMicroAh <= 0 || Math.abs(currentMicroA) < 50000) {
+            return "--";
+        }
+        float currentMA = Math.abs(currentMicroA) / 1000f;
+        float totalCapacityMicroAh = chargeCounterMicroAh / (levelPct / 100f);
+        float remainingMicroAh = totalCapacityMicroAh - chargeCounterMicroAh;
+        float hoursRemaining = remainingMicroAh / Math.abs(currentMicroA);
+        int minutes = Math.round(hoursRemaining * 60);
+        if (minutes <= 0) {
+            return "即将充满";
+        }
+        if (minutes >= 180) {
+            return "> 3 小时";
+        }
+        return "约 " + minutes + " 分钟";
+    }
+
+    private void scheduleNextBatteryInfoQuery(long delayMs) {
+        mainHandler.removeCallbacks(batteryInfoRunnable);
+        mainHandler.postDelayed(batteryInfoRunnable, delayMs);
     }
 
     @Override
@@ -718,6 +898,11 @@ public class RearScreenChargingActivity extends ComponentActivity {
             initialFillAnimator.cancel();
             initialFillAnimator = null;
         }
+        if (lightningPulseAnimator != null) {
+            lightningPulseAnimator.cancel();
+            lightningPulseAnimator = null;
+        }
+        mainHandler.removeCallbacks(batteryInfoRunnable);
         initialFillAnimating = false;
         mainHandler.removeCallbacks(rehideSystemUiRunnable);
         mainHandler.removeCallbacks(resumeCompensateFinishRunnable);

@@ -52,8 +52,15 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
     /** 高于此电量百分比用绿色液体，否则橙色 */
     private static final int TINT_GREEN_ABOVE_PERCENT = 20;
 
+    // --- 气泡粒子常量 ---
+    private static final int MAX_BUBBLES = 48;
+    private static final long BUBBLE_SPAWN_INTERVAL_NS = 400_000_000L;
+    private static final float BUBBLE_MIN_RADIUS_DP = 3f;
+    private static final float BUBBLE_MAX_RADIUS_DP = 10f;
+
     private final Paint waterPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint ripplePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint bubblePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path waterPath = new Path();
     private final Random random = new Random();
 
@@ -126,7 +133,20 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         float alpha;
     }
 
+    private static final class Bubble {
+        float x;
+        float y;
+        float radius;
+        float speedY;
+        float speedX;
+        float alpha;
+        float wobblePhase;
+        float wobbleAmp;
+    }
+
     private final List<Ripple> ripples = new ArrayList<>();
+    private final List<Bubble> bubbles = new ArrayList<>();
+    private long lastBubbleSpawnNs;
 
     public GyroWaterRippleView(Context context) {
         super(context);
@@ -153,6 +173,7 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         ripplePaint.setStrokeCap(Paint.Cap.ROUND);
         // 背屏/部分机型上 HARDWARE + Path/Shader 可能整块不合成；软件层更稳
         setLayerType(LAYER_TYPE_SOFTWARE, null);
+        bubblePaint.setStyle(Paint.Style.FILL);
     }
 
     private int dp(float v) {
@@ -208,6 +229,7 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         lastFrameRenderNs = 0L;
         smoothGyroMagForRipples = 0f;
         rippleHighMotionMode = false;
+        bubbles.clear();
         cachedShader = null;
         cachedShaderHeight = 0;
         super.onDetachedFromWindow();
@@ -241,6 +263,7 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         }
         sensorsRegistered = gyroscope != null || accelerometer != null;
         lastRippleNs = System.nanoTime();
+        lastBubbleSpawnNs = System.nanoTime();
     }
 
     private void unregisterSensors() {
@@ -259,6 +282,8 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         choreographerRunning = true;
         lastRippleNs = System.nanoTime();
         lastFrameRenderNs = 0L;
+        // 界面加载后立即冒出一批气泡
+        spawnInitialBubbles();
         Choreographer.getInstance().postFrameCallback(frameCallback);
     }
 
@@ -333,6 +358,10 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
             lastRippleNs = frameTimeNanos;
             spawnAmbientRipple();
         }
+        if (frameTimeNanos - lastBubbleSpawnNs >= BUBBLE_SPAWN_INTERVAL_NS) {
+            lastBubbleSpawnNs = frameTimeNanos;
+            spawnBubble();
+        }
 
         if (w <= 0f || h <= 0f) {
             return;
@@ -355,6 +384,7 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
                 it.remove();
             }
         }
+        updateBubbles(dt, frameScale, w, h);
     }
 
     private void updateGravityTargets(float w, float h) {
@@ -413,6 +443,69 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         r.radius = startRadius;
         r.alpha = alpha;
         ripples.add(r);
+    }
+
+    private void spawnInitialBubbles() {
+        // 布局还未测量时先标记，等 onSizeChanged 或 tick 自动补
+        if (getWidth() <= 0 || getHeight() <= 0) {
+            return;
+        }
+        for (int i = 0; i < 8; i++) {
+            spawnBubble();
+        }
+    }
+
+    private void spawnBubble() {
+        float w = getWidth();
+        float h = getHeight();
+        if (w <= 0f || h <= 0f || bubbles.size() >= MAX_BUBBLES) {
+            return;
+        }
+        float baseSurf = h * (1f - fillLevel);
+        if (baseSurf >= h * 0.96f) {
+            return;
+        }
+        Bubble b = new Bubble();
+        float margin = w * 0.12f;
+        b.x = margin + random.nextFloat() * (w - 2f * margin);
+        b.y = baseSurf + random.nextFloat() * dp(10f) - dp(5f);
+        float radiusDp = BUBBLE_MIN_RADIUS_DP + random.nextFloat()
+                * (BUBBLE_MAX_RADIUS_DP - BUBBLE_MIN_RADIUS_DP);
+        b.radius = dp(radiusDp);
+        b.speedY = dp(12f + radiusDp * 3f);
+        b.speedX = (random.nextFloat() - 0.5f) * dp(5f);
+        b.alpha = 0f;
+        b.wobblePhase = random.nextFloat() * 6.2832f;
+        b.wobbleAmp = dp(2f + random.nextFloat() * 4f);
+        bubbles.add(b);
+    }
+
+    private void updateBubbles(float dt, float frameScale, float w, float h) {
+        if (w <= 0f || h <= 0f || bubbles.isEmpty()) {
+            return;
+        }
+        float topFadeZone = h * 0.25f;
+        float gLen = length3(gravAx, gravAy, gravAz);
+        float gnx = gLen > 0.5f ? gravAx / gLen : 0f;
+        float flowScale = Math.min(w, h) * 0.02f;
+        float driftX = smoothGy * dt * 30f + gnx * dt * flowScale;
+        Iterator<Bubble> it = bubbles.iterator();
+        while (it.hasNext()) {
+            Bubble b = it.next();
+            b.y -= b.speedY * dt;
+            b.x += b.speedX * dt + driftX
+                    + (float) Math.sin(b.wobblePhase) * b.wobbleAmp * dt;
+            b.wobblePhase += dt * (2.0f + random.nextFloat() * 1.5f);
+            if (b.alpha < 1f) {
+                b.alpha = Math.min(1f, b.alpha + dt * 2.5f);
+            }
+            if (b.y < topFadeZone) {
+                b.alpha = Math.max(0f, b.alpha - dt * 1.5f);
+            }
+            if (b.y < -b.radius * 2f || b.alpha <= 0.01f) {
+                it.remove();
+            }
+        }
     }
 
     @Override
@@ -503,6 +596,21 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         canvas.drawPath(waterPath, waterPaint);
         waterPaint.setShader(null);
 
+        // 气泡绘制：半透明白色上浮圆，高于液面
+        if (!bubbles.isEmpty()) {
+            for (Bubble b : bubbles) {
+                int a = clamp255((int) (b.alpha * 160f));
+                bubblePaint.setColor(Color.argb(a, 220, 240, 255));
+                canvas.drawCircle(b.x, b.y, b.radius, bubblePaint);
+                // 高光
+                if (b.radius > dp(5f)) {
+                    bubblePaint.setColor(Color.argb((int) (a * 0.35f), 255, 255, 255));
+                    canvas.drawCircle(b.x - b.radius * 0.2f, b.y - b.radius * 0.25f,
+                            b.radius * 0.32f, bubblePaint);
+                }
+            }
+        }
+
         int rr = greenLiquid ? 55 : 255;
         int rg = greenLiquid ? 255 : 195;
         int rb = greenLiquid ? 140 : 115;
@@ -519,16 +627,5 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         super.onSizeChanged(w, h, oldw, oldh);
         cachedShader = null;
         cachedShaderHeight = 0;
-        if (w <= 0 || h <= 0 || (oldw > 0 && oldh > 0)) {
-            return;
-        }
-        for (int i = 0; i < 5; i++) {
-            spawnRippleAt(
-                w * (0.15f + random.nextFloat() * 0.7f),
-                h * (0.2f + random.nextFloat() * 0.6f),
-                0.65f,
-                dp(10f)
-            );
-        }
     }
 }

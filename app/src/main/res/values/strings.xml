@@ -543,6 +543,8 @@
     <string name="features_section_charging_animation">充电动画</string>
     <string name="features_charging_animation_switch">启用</string>
     <string name="features_charging_fill_speed_fmt">充满全屏约 %1$.1f 秒（越小越快，越大越慢）</string>
+    <string name="features_charging_info_items_title">背屏充电信息</string>
+    <string name="features_charging_info_items_configure">配置</string>
     <!-- 仅系统「通知类别」里显示；前台服务必需，IMPORTANCE_NONE 下一般不弹出状态栏 -->
     <string name="charging_service_channel_name">充电动画</string>
     <!-- 与标题 app_name「MiRoot」配对的前台服务摘要（避免副标题也显示成 MiRoot） -->
