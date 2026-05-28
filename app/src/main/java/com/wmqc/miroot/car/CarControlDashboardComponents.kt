@@ -215,6 +215,7 @@ fun TempBatteryRow(
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // 电瓶电压 + 电量
         val voltage = vehicleStatus?.voltage ?: ""
         val charge = vehicleStatus?.stateOfCharge ?: ""
         val batText = when {
@@ -224,11 +225,25 @@ fun TempBatteryRow(
             }
             else -> "---"
         }
-        val engStatus = VehicleStatusService.translateEngineStatus(vehicleStatus?.engineStatus)
-        val engineOn = engStatus == "运行中"
-        val speedTxt = try { vehicleStatus?.speed?.toDouble()?.let{"%.0f km/h".format(it)} ?: "---" } catch(e: Exception) { "---" }
-        StatusChip("车速", speedTxt, Modifier.weight(1f))
-        StatusChip("车外", vehicleUi?.exteriorTempText ?: "---", Modifier.weight(1f))
+
+        // 平均车速
+        val avgRaw = vehicleStatus?.avgSpeed ?: ""
+        val avgSpeedTxt = if (avgRaw.isNotEmpty() && avgRaw != "未知") {
+            runCatching { avgRaw.toDouble() }.getOrNull()?.let { "%.0f km/h".format(it) } ?: avgRaw
+        } else "---"
+
+        // 车内 + 车外温度合并
+        val interiorT = vehicleUi?.interiorTempText?.replace(Regex("[^\\d.-]"), "") ?: ""
+        val exteriorT = vehicleUi?.exteriorTempText?.replace(Regex("[^\\d.-]"), "") ?: ""
+        val tempText = when {
+            interiorT.isNotEmpty() && exteriorT.isNotEmpty() -> "${interiorT}° / ${exteriorT}°"
+            interiorT.isNotEmpty() -> "${interiorT}°"
+            exteriorT.isNotEmpty() -> "${exteriorT}°"
+            else -> "---"
+        }
+
+        StatusChip("平均车速", avgSpeedTxt, Modifier.weight(1f))
+        StatusChip("内/外温", tempText, Modifier.weight(1f))
         StatusChip("电瓶", batText, Modifier.weight(1f))
     }
 }
@@ -241,15 +256,23 @@ private fun StatusChip(label: String, value: String, modifier: Modifier = Modifi
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = CarUiColors.bgCard)
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            Text(
-                value, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                color = CarUiColors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis
-            )
-            Text(label, fontSize = 9.sp, color = CarUiColors.textSecondary)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    value, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                    color = CarUiColors.textPrimary, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+                )
+                Text(
+                    label, fontSize = 9.sp, color = CarUiColors.textSecondary,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }
