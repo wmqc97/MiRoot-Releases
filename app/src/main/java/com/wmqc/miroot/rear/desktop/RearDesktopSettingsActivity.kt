@@ -4,182 +4,401 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.view.WindowManager
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.updatePadding
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme as m3DarkColorScheme
+import androidx.compose.material3.lightColorScheme as m3LightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.dimensionResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.wmqc.miroot.BuildConfig
 import com.wmqc.miroot.R
-import com.wmqc.miroot.databinding.ActivityRearDesktopSettingsBinding
 import com.wmqc.miroot.rear.AppProjectionOfficialGesturePolicy
 import com.wmqc.miroot.rear.OfficialSubscreenServiceGate
 import com.wmqc.miroot.ui.apps.AppsFragment
+import top.yukonga.miuix.kmp.basic.Button
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardColors
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.darkColorScheme
+import top.yukonga.miuix.kmp.theme.lightColorScheme
 
-/**
- * 背屏桌面与应用投屏相关设置：列表模式、黑名单、在背屏打开桌面；第三方投屏时禁用官方背屏手势的全局范围。
- */
-class RearDesktopSettingsActivity : AppCompatActivity() {
-
-    private lateinit var binding: ActivityRearDesktopSettingsBinding
-
-    private var suppressProjectionRadio = false
-    private var insetsBound = false
+class RearDesktopSettingsActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        binding = ActivityRearDesktopSettingsBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-
-        WindowCompat.setDecorFitsSystemWindows(window, false)
         ensureSafeWindowSize()
-        val pagePad = resources.getDimensionPixelSize(R.dimen.mi_page_scroll_padding)
-        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
-            val bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
-            binding.nestedScrollRearDesktopSettings.updatePadding(
-                top = bars.top + pagePad,
-                bottom = bars.bottom + pagePad,
-                left = pagePad,
-                right = pagePad,
-            )
-            windowInsets
-        }
-        insetsBound = true
-        ViewCompat.requestApplyInsets(binding.root)
-
-        binding.radioRearDesktopListMode.setOnCheckedChangeListener { _, _ -> syncModeFromUi() }
-        binding.buttonOpenRearDesktop.setOnClickListener {
-            RearDesktopLaunchHelper.startDesktopOnRearDisplay(this)
-        }
-        binding.buttonHoneycombTest.setOnClickListener {
-            startActivity(Intent(this, RearDesktopHoneycombTestActivity::class.java))
-        }
-        binding.buttonHoneycombTest.visibility = if (BuildConfig.DEBUG) View.VISIBLE else View.GONE
-        binding.buttonBlacklist.setOnClickListener { showBlacklistDialog() }
-
-        binding.radioGroupProjectionOfficialScope.setOnCheckedChangeListener { _, checkedId ->
-            if (suppressProjectionRadio) return@setOnCheckedChangeListener
-            if (checkedId == View.NO_ID) return@setOnCheckedChangeListener
-            val scope =
-                if (checkedId == R.id.radio_projection_official_selected) {
-                    AppProjectionOfficialGesturePolicy.Scope.SELECTED
-                } else {
-                    AppProjectionOfficialGesturePolicy.Scope.ALL
+        enableEdgeToEdge()
+        setContent {
+            val dark = isSystemInDarkTheme()
+            MiuixTheme(colors = if (dark) darkColorScheme() else lightColorScheme()) {
+                val materialScheme = remember(dark) {
+                    val p = Color(ContextCompat.getColor(this, R.color.miuix_primary))
+                    if (dark) m3DarkColorScheme(primary = p, secondary = p, tertiary = p)
+                    else m3LightColorScheme(primary = p, secondary = p, tertiary = p)
                 }
-            AppProjectionOfficialGesturePolicy.setScope(applicationContext, scope)
-            syncProjectionUiFromPrefs()
+                MaterialTheme(colorScheme = materialScheme) {
+                    RearDesktopSettingsScreen()
+                }
+            }
         }
-
-        syncRadioFromPrefs()
-        updateModeVisibility()
-        syncProjectionUiFromPrefs()
-    }
-
-    override fun onResume() {
-        super.onResume()
-        syncProjectionUiFromPrefs()
-    }
-
-    override fun onDestroy() {
-        if (insetsBound) {
-            ViewCompat.setOnApplyWindowInsetsListener(binding.root, null)
-            insetsBound = false
-        }
-        super.onDestroy()
     }
 
     private fun ensureSafeWindowSize() {
         val lp = window.attributes ?: return
         var changed = false
-        if (lp.width == 0) {
-            lp.width = WindowManager.LayoutParams.MATCH_PARENT
-            changed = true
-        }
-        // MATCH_PARENT / WRAP_CONTENT are negative; only "0" is invalid here.
-        if (lp.height == 0) {
-            lp.height = WindowManager.LayoutParams.MATCH_PARENT
-            changed = true
-        }
-        if (changed) {
-            window.attributes = lp
-        }
+        if (lp.width == 0) { lp.width = WindowManager.LayoutParams.MATCH_PARENT; changed = true }
+        if (lp.height == 0) { lp.height = WindowManager.LayoutParams.MATCH_PARENT; changed = true }
+        if (changed) window.attributes = lp
+    }
+}
+
+@Composable
+private fun RearDesktopSettingsScreen() {
+    val ctx = LocalContext.current
+    val padH = dimensionResource(R.dimen.mi_page_scroll_padding)
+    val pageBg = Color(ContextCompat.getColor(ctx, R.color.mi_page_bg))
+    val onPrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
+    val onSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+    val cardSurface = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
+    val accent = Color(ContextCompat.getColor(ctx, R.color.miuix_primary))
+
+    // State
+    val currentMode = RearDesktopPrefs.listMode(ctx)
+    var listMode by remember { mutableStateOf(currentMode) }
+    var showBlacklist by remember { mutableStateOf(false) }
+
+    val masterEnabled = OfficialSubscreenServiceGate.isDisableEnabled(ctx)
+    val currentScope = AppProjectionOfficialGesturePolicy.getScope(ctx)
+    var gestureScope by remember { mutableStateOf(currentScope) }
+
+    fun persistMode(mode: RearDesktopListMode) {
+        listMode = mode
+        RearDesktopPrefs.setListMode(ctx, mode)
+        RearDesktopPrefs.notifyPrefsChanged(ctx)
     }
 
-    private fun syncRadioFromPrefs() {
-        binding.radioRearDesktopListMode.setOnCheckedChangeListener(null)
-        when (RearDesktopPrefs.listMode(this)) {
-            RearDesktopListMode.MANUAL -> binding.radioModeManual.isChecked = true
-            RearDesktopListMode.ALL_BY_FREQUENCY -> binding.radioModeAll.isChecked = true
-        }
-        binding.radioRearDesktopListMode.setOnCheckedChangeListener { _, _ -> syncModeFromUi() }
+    fun persistScope(scope: AppProjectionOfficialGesturePolicy.Scope) {
+        gestureScope = scope
+        AppProjectionOfficialGesturePolicy.setScope(ctx.applicationContext, scope)
     }
 
-    private fun syncModeFromUi() {
-        val mode =
-            when (binding.radioRearDesktopListMode.checkedRadioButtonId) {
-                R.id.radio_mode_all -> RearDesktopListMode.ALL_BY_FREQUENCY
-                else -> RearDesktopListMode.MANUAL
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(pageBg)
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .windowInsetsPadding(WindowInsets.navigationBars),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = padH, vertical = padH),
+        ) {
+            // ── Title ──
+            Text(
+                text = stringResource(R.string.rear_desktop_settings_title),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = onPrimary,
+            )
+
+            Spacer(Modifier.height(20.dp))
+
+            // ── Desktop Mode ──
+            SectionHeader("桌面模式")
+            Spacer(Modifier.height(4.dp))
+            Text(
+                stringResource(R.string.rear_desktop_editor_mode_title),
+                fontSize = 12.sp,
+                color = onSecondary,
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            // Mode toggle chips
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ModeChip(
+                    text = stringResource(R.string.rear_desktop_mode_manual),
+                    selected = listMode == RearDesktopListMode.MANUAL,
+                    onClick = { persistMode(RearDesktopListMode.MANUAL) },
+                    accent = accent,
+                    modifier = Modifier.weight(1f),
+                )
+                ModeChip(
+                    text = stringResource(R.string.rear_desktop_mode_all_freq),
+                    selected = listMode == RearDesktopListMode.ALL_BY_FREQUENCY,
+                    onClick = { persistMode(RearDesktopListMode.ALL_BY_FREQUENCY) },
+                    accent = accent,
+                    modifier = Modifier.weight(1f),
+                )
             }
-        RearDesktopPrefs.setListMode(this, mode)
-        RearDesktopPrefs.notifyPrefsChanged(this)
-        updateModeVisibility()
-    }
 
-    private fun updateModeVisibility() {
-        val manual = binding.radioModeManual.isChecked
-        binding.textManualHintAppsTab.visibility = if (manual) View.VISIBLE else View.GONE
+            Spacer(Modifier.height(12.dp))
 
-        binding.textAllModeHint.visibility = if (manual) View.GONE else View.VISIBLE
-        binding.buttonBlacklist.visibility = if (manual) View.GONE else View.VISIBLE
-    }
+            // Mode-specific hint
+            Text(
+                text = when (listMode) {
+                    RearDesktopListMode.MANUAL -> stringResource(R.string.rear_desktop_settings_hint_apps_tab)
+                    RearDesktopListMode.ALL_BY_FREQUENCY -> stringResource(R.string.rear_desktop_all_mode_hint)
+                },
+                fontSize = 12.sp,
+                color = onSecondary.copy(alpha = 0.8f),
+            )
 
-    private fun syncProjectionUiFromPrefs() {
-        AppProjectionOfficialGesturePolicy.ensureMigrated(this)
-        val master = OfficialSubscreenServiceGate.isDisableEnabled(this)
-        binding.textProjectionSettingsMasterHint.alpha = if (master) 1f else 0.55f
-        binding.radioGroupProjectionOfficialScope.isEnabled = master
+            Spacer(Modifier.height(14.dp))
 
-        val scope = AppProjectionOfficialGesturePolicy.getScope(this)
-        suppressProjectionRadio = true
-        when (scope) {
-            AppProjectionOfficialGesturePolicy.Scope.SELECTED ->
-                binding.radioProjectionOfficialSelected.isChecked = true
-            AppProjectionOfficialGesturePolicy.Scope.ALL ->
-                binding.radioProjectionOfficialAll.isChecked = true
+            // Actions
+            Button(
+                onClick = { RearDesktopLaunchHelper.startDesktopOnRearDisplay(ctx) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColorsPrimary(),
+            ) { Text(stringResource(R.string.rear_desktop_open_on_rear_button)) }
+
+            if (listMode == RearDesktopListMode.ALL_BY_FREQUENCY) {
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { showBlacklist = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(),
+                ) { Text(stringResource(R.string.rear_desktop_blacklist_manage)) }
+            }
+
+            if (BuildConfig.DEBUG) {
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        ctx.startActivity(Intent(ctx, RearDesktopHoneycombTestActivity::class.java))
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(),
+                ) { Text(stringResource(R.string.rear_desktop_honeycomb_test_button)) }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // ── Projection Gestures ──
+            SectionHeader("官方手势范围")
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = if (masterEnabled) stringResource(R.string.apps_official_gesture_master_hint)
+                else stringResource(R.string.apps_official_gesture_master_hint),
+                fontSize = 12.sp,
+                color = if (masterEnabled) onSecondary else onSecondary.copy(alpha = 0.5f),
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ScopeChip(
+                    text = stringResource(R.string.apps_official_gesture_scope_all),
+                    selected = gestureScope == AppProjectionOfficialGesturePolicy.Scope.ALL,
+                    enabled = masterEnabled,
+                    onClick = { persistScope(AppProjectionOfficialGesturePolicy.Scope.ALL) },
+                    accent = accent,
+                    modifier = Modifier.weight(1f),
+                )
+                ScopeChip(
+                    text = stringResource(R.string.apps_official_gesture_scope_selected),
+                    selected = gestureScope == AppProjectionOfficialGesturePolicy.Scope.SELECTED,
+                    enabled = masterEnabled,
+                    onClick = { persistScope(AppProjectionOfficialGesturePolicy.Scope.SELECTED) },
+                    accent = accent,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            if (masterEnabled && gestureScope == AppProjectionOfficialGesturePolicy.Scope.SELECTED) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.apps_official_gesture_selected_hint),
+                    fontSize = 12.sp,
+                    color = onSecondary.copy(alpha = 0.8f),
+                )
+            }
+
+            Spacer(Modifier.height(24.dp))
         }
-        suppressProjectionRadio = false
 
-        binding.textProjectionSettingsSelectedHint.visibility =
-            if (master && scope == AppProjectionOfficialGesturePolicy.Scope.SELECTED) {
-                View.VISIBLE
+        // Blacklist dialog
+        if (showBlacklist) {
+            BlacklistDialog(
+                onDismiss = { showBlacklist = false },
+                onSave = { bl ->
+                    RearDesktopPrefs.setBlacklist(ctx, bl)
+                    RearDesktopPrefs.notifyPrefsChanged(ctx)
+                    showBlacklist = false
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    val ctx = LocalContext.current
+    val accent = Color(ContextCompat.getColor(ctx, R.color.miuix_primary))
+    Text(
+        text = title,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = accent,
+    )
+}
+
+@Composable
+private fun ModeChip(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = LocalContext.current
+    val surface = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
+    val onPrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
+    val onSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) accent.copy(alpha = 0.12f) else surface)
+            .clickable { onClick() }
+            .padding(vertical = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            fontSize = 14.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (selected) accent else onSecondary,
+        )
+    }
+}
+
+@Composable
+private fun ScopeChip(
+    text: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    val ctx = LocalContext.current
+    val surface = Color(ContextCompat.getColor(ctx, R.color.mi_card_surface))
+    val onSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) accent.copy(alpha = 0.12f) else surface)
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            fontSize = 14.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (enabled) {
+                if (selected) accent else onSecondary
             } else {
-                View.GONE
-            }
+                onSecondary.copy(alpha = 0.4f)
+            },
+        )
     }
+}
 
-    private fun showBlacklistDialog() {
-        val appContext = applicationContext
-        val selfPkg = appContext.packageName
-        val rows = AppsFragment.queryLauncherApps(packageManager, selfPkg)
-        val bl = RearDesktopPrefs.blacklist(this).toMutableSet()
-        val labels = rows.map { it.label }.toTypedArray()
-        val checked = rows.map { it.packageName in bl }.toBooleanArray()
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.rear_desktop_blacklist_title)
-            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
-                val pkg = rows[which].packageName
-                if (isChecked) {
-                    bl.add(pkg)
-                } else {
-                    bl.remove(pkg)
+@Composable
+private fun BlacklistDialog(
+    onDismiss: () -> Unit,
+    onSave: (Set<String>) -> Unit,
+) {
+    val ctx = LocalContext.current
+    val selfPkg = ctx.applicationContext.packageName
+    val rows = remember { AppsFragment.queryLauncherApps(ctx.packageManager, selfPkg) }
+    val initial = remember { RearDesktopPrefs.blacklist(ctx) }
+    var selected by remember { mutableStateOf(initial.toSet()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.rear_desktop_blacklist_title)) },
+        text = {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                rows.forEach { row ->
+                    val checked = row.packageName in selected
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                selected = if (checked) selected - row.packageName else selected + row.packageName
+                            }
+                            .padding(vertical = 10.dp, horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("✓", fontSize = 14.sp, color = if (checked) Color(0xFF4CAF50) else Color.Transparent, modifier = Modifier.width(22.dp))
+                        Text(row.label, fontSize = 14.sp)
+                    }
                 }
             }
-            .setPositiveButton(R.string.rear_desktop_save) { _, _ ->
-                RearDesktopPrefs.setBlacklist(this, bl)
-                RearDesktopPrefs.notifyPrefsChanged(this)
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
-    }
+        },
+        confirmButton = {
+            TextButton(text = stringResource(R.string.rear_desktop_save), onClick = { onSave(selected) })
+        },
+        dismissButton = {
+            TextButton(text = "取消", onClick = onDismiss)
+        },
+    )
 }
