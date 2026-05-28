@@ -694,6 +694,8 @@
     <string name="record_channel_name">背屏录制</string>
     <string name="record_notif_title">MiRoot 背屏录制</string>
     <string name="record_notif_text">悬浮窗控制录制中</string>
+    <string name="record_notif_recording">正在录屏…</string>
+    <string name="record_notif_stopping">正在停止录制…</string>
     <string name="record_stop_first">请先停止录制再关闭</string>
     <string name="record_float_fail">无法显示悬浮窗：%1$s</string>
     <string name="record_switch_audio">录音</string>
@@ -705,11 +707,7 @@
     <string name="record_cmd_fail">启动 screenrecord 失败</string>
     <string name="record_proc_fail">录屏进程未启动</string>
     <string name="record_stopping">正在停止录制并保存…</string>
-    <string name="record_starting">正在启动视频录制…</string>
-    <string name="record_started">视频录制已开始</string>
-    <string name="record_synthesis_start">正在合成处理…</string>
     <string name="record_saved_missing">未找到输出文件</string>
-    <string name="record_saved_movies">已保存到 Movies</string>
     <string name="record_process_fail">后期处理失败：%1$s</string>
     <string name="record_process_fail_unknown">原因未知，请查看 Logcat 标签 MiRoot-RecordSynth</string>
     <string name="record_done_process">已保存到相册</string>

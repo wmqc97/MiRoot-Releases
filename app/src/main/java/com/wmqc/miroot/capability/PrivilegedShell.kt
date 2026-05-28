@@ -4,6 +4,7 @@ import rikka.shizuku.Shizuku
 import java.io.IOException
 import java.io.InputStream
 import java.lang.reflect.Method
+import java.util.concurrent.TimeUnit
 
 /**
  * 每次优先 **`su -c`**（与 [EnvironmentProbe.probeRootSync] 的检测结果无关），启动失败再 **Shizuku**。
@@ -102,23 +103,74 @@ object PrivilegedShell {
         ).start()
     }
 
-    /** 执行命令并等待结束，返回是否 exit code 为 0。 */
+    /**
+     * 执行命令并等待结束，返回是否 exit code 为 0。
+     * Root（su -c）失败后自动回退 Shizuku，不再继续等待。
+     */
     @JvmStatic
-    fun runAndWait(command: String, redirectErrorStream: Boolean = true): Boolean =
-        try {
-            startShell(command, redirectErrorStream).waitFor() == 0
+    fun runAndWait(command: String, redirectErrorStream: Boolean = true): Boolean {
+        val proc = try {
+            startShell(command, redirectErrorStream)
+        } catch (_: Exception) {
+            return shizukuFallbackOrNull(command, redirectErrorStream) != null
+        }
+        val ok = try {
+            proc.waitFor() == 0
         } catch (_: Exception) {
             false
         }
+        if (ok) return true
+        // Root 失败 → 立即销毁进程，走 Shizuku
+        try { proc.destroyForcibly() } catch (_: Exception) {}
+        return shizukuFallbackOrNull(command, redirectErrorStream) != null
+    }
 
-    /** 读取合并后的 stdout（适合单条输出，如 pid、单行路径）。 */
-    @JvmStatic
-    fun captureOutput(command: String): String? =
-        try {
-            startShell(command, redirectErrorStream = true)
-                .inputStream.bufferedReader().use { it.readText().trim() }
-                .ifEmpty { null }
+    /**
+     * 仅在 Shizuku 可用时通过 Shizuku 执行命令并返回 exit code == 0。
+     * 适用于 Root 通道失败后的快速回退。
+     */
+    private fun shizukuFallbackOrNull(command: String, redirectErrorStream: Boolean): Boolean? {
+        if (!shizukuReady()) return null
+        return try {
+            val p = shizukuNewProcessReflect(command)
+            if (redirectErrorStream) drainErrorStreamAsync(p.errorStream)
+            p.waitFor() == 0
         } catch (_: Exception) {
             null
         }
+    }
+
+    /** 读取合并后的 stdout（适合单条输出，如 pid、单行路径）。 */
+    @JvmStatic
+    fun captureOutput(command: String): String? {
+        val proc = try {
+            startShell(command, redirectErrorStream = true)
+        } catch (_: Exception) {
+            return shizukuCaptureFallback(command)
+        }
+        return try {
+            val out = proc.inputStream.bufferedReader().use { it.readText().trim() }
+            val exitOk = proc.waitFor() == 0
+            if (out.isNotEmpty() && exitOk) {
+                out
+            } else if (out.isNotEmpty()) {
+                // exit != 0 但有输出 → 仍可用
+                out
+            } else {
+                // 空输出 → 尝试 Shizuku
+                shizukuCaptureFallback(command)
+            }
+        } catch (_: Exception) {
+            shizukuCaptureFallback(command)
+        }
+    }
+
+    private fun shizukuCaptureFallback(command: String): String? {
+        if (!shizukuReady()) return null
+        return try {
+            shizukuNewProcessReflect(command).inputStream.bufferedReader().use { it.readText().trim() }.ifEmpty { null }
+        } catch (_: Exception) {
+            null
+        }
+    }
 }

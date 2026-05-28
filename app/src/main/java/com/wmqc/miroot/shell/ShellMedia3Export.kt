@@ -22,6 +22,7 @@ import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.VideoEncoderSettings
 import com.wmqc.miroot.record.RecordSynthDebugLog
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
@@ -317,10 +318,13 @@ object ShellMedia3Export {
 
         Handler(main).post {
             RecordSynthDebugLog.d("Transformer.start path=${outputFile.absolutePath}")
+            val videoEncoderSettings = VideoEncoderSettings.Builder()
+                .setBitrate(10_000_000) // 10 Mbps for canvas-size composite output
+                .build()
             val audioEncoderSettings = AudioEncoderSettings.Builder().setBitrate(96000).build()
             val encoderFactory = DefaultEncoderFactory.Builder(app)
                 .setRequestedAudioEncoderSettings(audioEncoderSettings)
-                .setCodecPriority(1)
+                .setRequestedVideoEncoderSettings(videoEncoderSettings)
                 .build()
             val transformer = Transformer.Builder(app)
                 .setAudioMimeType(MimeTypes.AUDIO_AAC)

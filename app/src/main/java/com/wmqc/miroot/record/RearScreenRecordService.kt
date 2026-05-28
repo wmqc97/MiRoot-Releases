@@ -290,8 +290,7 @@ class RearScreenRecordService : Service() {
                             ?: SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                         val dst = File(moviesDir, "MiRoot_$ts.mp4")
                         try {
-                            workFile.copyTo(dst, overwrite = true)
-                            if (dst.isFile && dst.length() > 0L) {
+                            if (copyToMoviesPrivileged(workFile, dst)) {
                                 mediaScan(dst)
                                 PrivilegedShell.execCmd("rm -f \"${workFile.absolutePath}\"")
                                 RecordSynthDebugLog.diagI("onDestroy: emergency save OK dst=${dst.absolutePath}")
@@ -699,7 +698,8 @@ class RearScreenRecordService : Service() {
                 ) {
                     PrivilegedShell.execCmd("input -d 1 keyevent KEYCODE_WAKEUP")
                 }
-                Thread.sleep(50)
+                // 背屏 DOZE_SUSPEND → ON 需要时间，screenrecord 才能捕获帧
+                Thread.sleep(500)
                 val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 currentCaptureTs = ts
                 val path = File(cacheDir, "miroot_rear_work_$ts").absolutePath
@@ -770,10 +770,9 @@ class RearScreenRecordService : Service() {
                 }
                 RecordSynthDebugLog.diagI("start: screenrecord bin=$which")
 
-                val cmd =
-                    "$which --display-id $displayId --bit-rate 12000000 $path > $LOG_FILE 2>&1 & echo \$! > $PID_FILE"
-                RecordSynthDebugLog.d("start: launch cmd=${cmd.take(520)}${if (cmd.length > 520) "…" else ""}")
-                if (!PrivilegedShell.execCmd(cmd)) {
+                val srCmd = "rm -f \"$PID_FILE\" \"$LOG_FILE\"; nohup $which --display-id $displayId --bit-rate 12000000 \"$path\" > \"$LOG_FILE\" 2>&1 & echo \$! > \"$PID_FILE\""
+                RecordSynthDebugLog.d("start: launch cmd=${srCmd.take(520)}${if (srCmd.length > 520) "…" else ""}")
+                if (!PrivilegedShell.execCmd(srCmd)) {
                     RecordSynthDebugLog.diagW(
                         "start: launch failed | logTail=\n${snapshotScreenrecordLog()}",
                     )
@@ -797,11 +796,11 @@ class RearScreenRecordService : Service() {
                     }
                 }
 
-                // 轮询 screenrecord 进程确认已启动，替代固定 sleep
-                var pollAttempts = 0
-                val pollMax = 12 // 12×50ms = 600ms 上限（shell 调用耗时另计，合计 ~1s 与原 800ms 相当）
+                // 轮询 screenrecord 进程确认已启动
                 var pidStr = ""
                 var processRunning = false
+                var pollAttempts = 0
+                val pollMax = 20 // 20×50ms = 1s；shell 调用耗时可另计
                 while (pollAttempts < pollMax) {
                     Thread.sleep(50)
                     pollAttempts++
@@ -810,7 +809,7 @@ class RearScreenRecordService : Service() {
                     processRunning = isScreenrecordBinaryProcessRunning(recordPid)
                     if (processRunning) break
                 }
-                val runningBin = isScreenrecordBinaryProcessRunning(recordPid)
+                var runningBin = isScreenrecordBinaryProcessRunning(recordPid)
                 val pidofLine = PrivilegedShell.captureOutput("pidof screenrecord 2>/dev/null").orEmpty()
                 val fileOk = PrivilegedShell.captureOutput("ls -l \"$path\" 2>&1")
                     .orEmpty()
@@ -818,9 +817,45 @@ class RearScreenRecordService : Service() {
                 RecordSynthDebugLog.diagI(
                     "start: polled=${pollAttempts}×50ms pidFile='$pidStr' recordPid=$recordPid fileOk=$fileOk runningBin=$runningBin pidof=$pidofLine",
                 )
+
+                // screenrecord 已启动但文件为 0 字节（背屏在 DOZE_SUSPEND 时收不到帧）
+                // → 等待 2s 看文件是否开始增长；不重试主屏幕
+                if (runningBin) {
+                    var fileCheckAttempts = 0
+                    val fileCheckMax = 40 // 40×50ms = 2s
+                    var fileSize = PrivilegedShell.captureOutput(
+                        "stat -c %s \"$path\" 2>/dev/null",
+                    )?.trim().orEmpty()
+                    while (fileCheckAttempts < fileCheckMax && (fileSize.isEmpty() || fileSize == "0")) {
+                        Thread.sleep(50)
+                        fileCheckAttempts++
+                        fileSize = PrivilegedShell.captureOutput(
+                            "stat -c %s \"$path\" 2>/dev/null",
+                        )?.trim().orEmpty()
+                    }
+                    val sizeBytes = fileSize.toLongOrNull() ?: 0L
+                    if (sizeBytes <= 0L) {
+                        RecordSynthDebugLog.diagW(
+                            "start: --display-id=$displayId file still 0 bytes " +
+                                "after ${fileCheckAttempts}×50ms | log=\n${snapshotScreenrecordLog()}",
+                        )
+                        // 清理后标记失败
+                        PrivilegedShell.execCmd("rm -f \"$path\" $PID_FILE $LOG_FILE")
+                        killScreenrecordFallback()
+                        recordPid = -1
+                        runningBin = false
+                    } else {
+                        RecordSynthDebugLog.diagI(
+                            "start: file growth OK size=${sizeBytes}B " +
+                                "after ${fileCheckAttempts}×50ms",
+                        )
+                    }
+                }
+
                 if (!runningBin) {
                     RecordSynthDebugLog.diagW(
-                        "start: process not running after poll | log=\n${snapshotScreenrecordLog()}",
+                        "start: process not running or 0-byte after all attempts " +
+                            "(displayId=$displayId) | log=\n${snapshotScreenrecordLog()}",
                     )
                     failStart(recordView, closeView, getString(R.string.record_proc_fail))
                     return@runInBackground
@@ -841,7 +876,7 @@ class RearScreenRecordService : Service() {
                     setRecordUiRecording(true)
                     setSwitchesBlockedDuringRecording(true)
                     startWakeup()
-                    toastMain(getString(R.string.record_started), longDuration = true)
+                    updateNotificationText(getString(R.string.record_notif_recording))
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
                         sessionAudioWanted &&
                         !sessionPcmCapture
@@ -909,11 +944,11 @@ class RearScreenRecordService : Service() {
             // 因 isRecording = false 且 stopWorker = null 而漏杀 screenrecord 进程
         }
         mainHandler.post {
-            toastMain(getString(R.string.record_stopping))
             cancelWakeup()
             setRecordUiRecording(false)
             closeView.visibility = View.VISIBLE
             setSwitchesBlockedDuringRecording(true)
+            updateNotificationText(getString(R.string.record_notif_stopping))
         }
         stopWorker = thread(name = "MiRoot-RecStop") {
             try {
@@ -961,12 +996,21 @@ class RearScreenRecordService : Service() {
 
                 val appCtx = applicationContext
                 if (workVideo == null || !workVideo.exists()) {
-                    currentCaptureTs = null
-                    mainHandler.post {
-                        toastMain(getString(R.string.record_saved_missing))
-                        afterStopUi(closeView)
+                    // 兜底：通过 shell test -f 绕过 SELinux 屏蔽，chown 后 Java 层 File.exists() 可见
+                    val shellFound = videoPath != null && "1" == PrivilegedShell.captureOutput(
+                        "test -f \"$videoPath\" && echo 1 || echo 0",
+                    )?.trim()
+                    if (shellFound) {
+                        chownWorkVideoToApp(videoPath!!)
                     }
-                    return@thread
+                    if (workVideo == null || !workVideo.exists()) {
+                        currentCaptureTs = null
+                        mainHandler.post {
+                            toastMain(getString(R.string.record_saved_missing))
+                            afterStopUi(closeView)
+                        }
+                        return@thread
+                    }
                 }
 
                 // 修复 root 写入的文件权限
@@ -1066,12 +1110,7 @@ class RearScreenRecordService : Service() {
                 }
 
                 if (!composite) {
-                    var copyOk = false
-                    try {
-                        videoForNext.copyTo(finalVideo, overwrite = true)
-                        copyOk = finalVideo.isFile && finalVideo.length() > 0L
-                    } catch (_: Exception) {
-                    }
+                    val copyOk = copyToMoviesPrivileged(videoForNext, finalVideo)
                     if (copyOk) {
                         if (videoForNext != workVideo) {
                             try { videoForNext.delete() } catch (_: Exception) {}
@@ -1087,7 +1126,8 @@ class RearScreenRecordService : Service() {
                         if (copyOk) {
                             toastMain(getString(R.string.record_done_process))
                         } else {
-                            toastMain(getString(R.string.record_process_fail, ""))
+                            RecordSynthDebugLog.diagW("non-composite copyToMovies FAILED (even with shell cp)")
+                            toastMain(getString(R.string.record_process_fail, "cp_failed"))
                         }
                     }
                     return@thread
@@ -1119,8 +1159,8 @@ class RearScreenRecordService : Service() {
                                         RecordSynthDebugLog.diagW("composite rm source: ${e.message}")
                                     }
                                     try {
-                                        if (!tmp.renameTo(finalVideo)) {
-                                            tmp.copyTo(finalVideo, overwrite = true)
+                                        if (!copyToMoviesPrivileged(tmp, finalVideo)) {
+                                            errorDetail = "cp_to_movies_failed"
                                         }
                                     } catch (e: Exception) {
                                         RecordSynthDebugLog.diagW(
@@ -1132,15 +1172,32 @@ class RearScreenRecordService : Service() {
                                     if (!success) {
                                         val detail = error?.takeIf { it.isNotBlank() }
                                             ?: getString(R.string.record_process_fail_unknown)
-                                        // 某些机型回调 success=false，但仍可能产出可用文件；最终以落盘结果判定提示。
+                                        // 复合失败时尝试原片直存：至少让用户拿到未经带壳/混音的原始录屏
+                                        try {
+                                            if (sourceForComposite.isFile && sourceForComposite.length() > 0L &&
+                                                copyToMoviesPrivileged(sourceForComposite, finalVideo)
+                                            ) {
+                                                RecordSynthDebugLog.diagI(
+                                                    "composite failed, raw fallback saved to Movies " +
+                                                        "len=${sourceForComposite.length()}",
+                                                )
+                                                errorDetail = null // 原片成功，不报错
+                                            } else {
+                                                errorDetail = detail
+                                            }
+                                        } catch (_: Exception) {
+                                            errorDetail = detail
+                                        }
                                         RecordSynthDebugLog.diagW("composite callback unsuccessful: $detail")
-                                        errorDetail = detail
+                                        if (errorDetail != null) errorDetail = detail
                                     } else if (out != null && !outMatchesTmp) {
                                         RecordSynthDebugLog.diagW(
                                             "composite: success but output path != tmp (out=${out.absolutePath})",
                                         )
                                         try {
-                                            out.copyTo(finalVideo, overwrite = true)
+                                            if (!copyToMoviesPrivileged(out, finalVideo)) {
+                                                errorDetail = "cp_mismatched_out_failed"
+                                            }
                                         } catch (e: Exception) {
                                             RecordSynthDebugLog.diagW(
                                                 "composite copy mismatched out: ${e.message}",
@@ -1160,8 +1217,8 @@ class RearScreenRecordService : Service() {
                                             RecordSynthDebugLog.diagW("composite rm source: ${e.message}")
                                         }
                                         try {
-                                            if (!tmp.renameTo(finalVideo)) {
-                                                tmp.copyTo(finalVideo, overwrite = true)
+                                            if (!copyToMoviesPrivileged(tmp, finalVideo)) {
+                                                errorDetail = "cp_tmp_fallback_failed"
                                             }
                                         } catch (e: Exception) {
                                             RecordSynthDebugLog.diagW(
@@ -1178,11 +1235,11 @@ class RearScreenRecordService : Service() {
                                     } catch (_: Exception) {
                                     }
                                 }
-                                if (finalVideo.isFile && finalVideo.length() > 0L) {
+                                if (fileExistsInPublicStorage(finalVideo)) {
                                     mediaScan(finalVideo)
                                 }
                                 afterStopUi(closeView)
-                                if (finalVideo.isFile && finalVideo.length() > 0L) {
+                                if (fileExistsInPublicStorage(finalVideo)) {
                                     toastMain(getString(R.string.record_done_process))
                                 } else if (errorDetail != null) {
                                     toastMain(getString(R.string.record_process_fail, errorDetail ?: ""))
@@ -1246,6 +1303,7 @@ class RearScreenRecordService : Service() {
         recordBtn?.let { setRecordUiRecording(false) }
         closeView.visibility = View.VISIBLE
         setSwitchesBlockedDuringRecording(false)
+        updateNotificationText(getString(R.string.record_notif_text))
     }
 
     private fun stopAndReleaseMediaProjection() {
@@ -1361,14 +1419,72 @@ class RearScreenRecordService : Service() {
     }
 
     private fun mediaScan(file: File) {
-        val uri = android.net.Uri.fromFile(file).toString()
-        PrivilegedShell.execCmd(
-            "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d $uri",
-        )
+        // 0) 确保文件已落盘、mtime 最新（FUSE 延迟可能让 MediaStore 读不到刚写入的文件）
+        PrivilegedShell.execCmd("touch \"${file.absolutePath}\"")
+
+        // 1) MediaStore ContentProvider insert — Android 11+ 通用
+        try {
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, file.name)
+                put(android.provider.MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(android.provider.MediaStore.Video.Media.SIZE, fileSizeInStorage(file))
+                put(android.provider.MediaStore.Video.Media.DATE_ADDED, System.currentTimeMillis() / 1000)
+                put(android.provider.MediaStore.Video.Media.DATE_MODIFIED, System.currentTimeMillis() / 1000)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "Movies")
+                    put(android.provider.MediaStore.Video.Media.IS_PENDING, 0)
+                }
+            }
+            val inserted = contentResolver.insert(
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                values,
+            )
+            RecordSynthDebugLog.diagI("mediaScan: ContentResolver insert inserted=$inserted")
+        } catch (e: Exception) {
+            RecordSynthDebugLog.diagW("mediaScan ContentResolver insert failed: ${e.message}")
+        }
+
+        // 2) MediaScannerConnection (deprecated 但仍可触发系统扫描)
+        try {
+            android.media.MediaScannerConnection.scanFile(
+                this,
+                arrayOf(file.absolutePath),
+                arrayOf("video/mp4"),
+                null,
+            )
+        } catch (_: Exception) {
+        }
     }
 
     private fun privilegedOk(): Boolean =
         com.wmqc.miroot.capability.EnvironmentProbe.hasPrivilegedShellChannelSync()
+
+    /**
+     * 直接用特权 shell `cp` 写入 Movies（绕过 Android 11+ 分区存储限制）。
+     * Root 优先，失败自动回退 Shizuku（由 [PrivilegedShell.execCmd] 保证）。
+     * 仅依赖 shell exit code，不检查 Java File API（分区存储下不可见）。
+     */
+    private fun copyToMoviesPrivileged(src: File, dst: File): Boolean {
+        try {
+            dst.parentFile?.mkdirs()
+            return PrivilegedShell.execCmd("cp \"${src.absolutePath}\" \"${dst.absolutePath}\" && sync")
+        } catch (_: Exception) {
+            return false
+        }
+    }
+
+    /** 分区存储下通过 shell test -f 检查文件是否实际落盘。 */
+    private fun fileExistsInPublicStorage(file: File): Boolean {
+        if (file.isFile && file.length() > 0L) return true
+        return PrivilegedShell.execCmd("test -f \"${file.absolutePath}\"")
+    }
+
+    /** 分区存储下通过 shell stat 获取文件字节数。 */
+    private fun fileSizeInStorage(file: File): Long {
+        if (file.isFile) return file.length()
+        val out = PrivilegedShell.captureOutput("stat -c %s \"${file.absolutePath}\" 2>/dev/null")?.trim()
+        return out?.toLongOrNull() ?: 0L
+    }
 
     private fun prefs() = getSharedPreferences(PREFS, MODE_PRIVATE)
 
@@ -1526,7 +1642,20 @@ class RearScreenRecordService : Service() {
         }
     }
 
-    private fun buildNotification(): Notification {
+    /**
+     * 在录制开始/停止时更新通知栏文本，为用户提供持续性反馈（Toast 会超时消失）。
+     */
+    private fun updateNotificationText(text: String) {
+        try {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(NOTIF_ID, buildNotification(text))
+            RecordSynthDebugLog.d("updateNotificationText: $text")
+        } catch (e: Exception) {
+            RecordSynthDebugLog.diagW("updateNotificationText failed: ${e.message}")
+        }
+    }
+
+    private fun buildNotification(contentText: String? = null): Notification {
         val pi = PendingIntent.getActivity(
             this,
             0,
@@ -1535,7 +1664,7 @@ class RearScreenRecordService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(getString(R.string.record_notif_title))
-            .setContentText(getString(R.string.record_notif_text))
+            .setContentText(contentText ?: getString(R.string.record_notif_text))
             .setSmallIcon(R.drawable.ic_stat_notify_record)
             .setContentIntent(pi)
             .setOngoing(true)
