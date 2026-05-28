@@ -373,7 +373,9 @@ public class ModernLyricsView extends View {
     private final Runnable tokenizerReadyListener = new Runnable() {
         @Override
         public void run() {
-            clearTokenizationCache();
+            // 不清空 tokenCache：splitLyricTokens 中的异步任务已能正确地从
+            // SimpleChinese 兜底结果升级为 Jieba 结果；清空缓存会导致布局在
+            // 兜底 ↔ Jieba 之间来回切换，表现为两个不同的帧交替闪烁。
             refreshShuffleAfterWordTokenChange();
         }
     };

@@ -75,6 +75,13 @@ class RearRecordQsTileService : TileService() {
                 return@unlockAndRun
             }
             if (RearScreenRecordService.isRunning()) {
+                if (RearScreenRecordService.isRecordingActive()) {
+                    MainDisplayUi.showToast(
+                        applicationContext,
+                        R.string.record_stopping,
+                        Toast.LENGTH_SHORT,
+                    )
+                }
                 stopService(Intent(this, RearScreenRecordService::class.java))
                 qsTile?.apply {
                     state = Tile.STATE_INACTIVE

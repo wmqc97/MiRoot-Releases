@@ -18,6 +18,7 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.os.Environment
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Handler
@@ -88,6 +89,7 @@ class RearScreenRecordService : Service() {
     private var currentVideoPath: String? = null
     @Volatile
     private var currentCaptureTs: String? = null
+    @Volatile
     private var recordPid = -1
 
     /** 开始录制成功时快照；停止后带壳/保存路径依赖此值 */
@@ -104,6 +106,7 @@ class RearScreenRecordService : Service() {
 
     @Volatile
     private var projectionPending: Boolean = false
+    private var projectionTimeoutRunnable: Runnable? = null
 
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile
@@ -167,6 +170,7 @@ class RearScreenRecordService : Service() {
         if (intent != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             when (intent.action) {
                 ACTION_START_WITH_PROJECTION -> {
+                    cancelProjectionTimeout()
                     synchronized(stateLock) { projectionPending = false }
                     val code = intent.getIntExtra(EXTRA_MEDIA_PROJECTION_RESULT_CODE, Activity.RESULT_CANCELED)
                     val data: Intent? = if (Build.VERSION.SDK_INT >= 33) {
@@ -232,6 +236,7 @@ class RearScreenRecordService : Service() {
                     startRecordingInternal(r, c, projection)
                 }
                 ACTION_PROJECTION_CANCELLED -> {
+                    cancelProjectionTimeout()
                     synchronized(stateLock) { projectionPending = false }
                     mainHandler.post {
                         toastMain(getString(R.string.record_projection_cancelled))
@@ -239,6 +244,7 @@ class RearScreenRecordService : Service() {
                     RecordSynthDebugLog.diagI("onStartCommand: user cancelled MediaProjection, record not started")
                 }
                 ACTION_START_VIDEO_ONLY -> {
+                    cancelProjectionTimeout()
                     synchronized(stateLock) { projectionPending = false }
                     val r = recordBtn ?: return START_STICKY
                     val c = closeBtn ?: return START_STICKY
@@ -265,11 +271,36 @@ class RearScreenRecordService : Service() {
                 w.join(6000)
             } catch (_: InterruptedException) {
             }
-        } else if (isRecording) {
+        } else if (isRecording || isStarting || isStopping) {
             try {
                 if (recordPid > 0) PrivilegedShell.execCmd("kill -2 $recordPid")
                 killScreenrecordFallback()
             } catch (_: Exception) {
+            }
+            // 紧急保存：QS 磁贴直接停服务时，尝试保存当前录制的视频
+            if (currentVideoPath != null) {
+                try {
+                    Thread.sleep(300) // 等 screenrecord 写完文件头
+                    val workFile = File(currentVideoPath!!)
+                    if (workFile.isFile && workFile.length() > 0L) {
+                        chownWorkVideoToApp(workFile.absolutePath)
+                        val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                        PrivilegedShell.execCmd("mkdir -p \"${moviesDir.absolutePath}\"")
+                        val ts = currentCaptureTs
+                            ?: SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                        val dst = File(moviesDir, "MiRoot_$ts.mp4")
+                        try {
+                            workFile.copyTo(dst, overwrite = true)
+                            if (dst.isFile && dst.length() > 0L) {
+                                mediaScan(dst)
+                                PrivilegedShell.execCmd("rm -f \"${workFile.absolutePath}\"")
+                                RecordSynthDebugLog.diagI("onDestroy: emergency save OK dst=${dst.absolutePath}")
+                            }
+                        } catch (_: Exception) {
+                        }
+                    }
+                } catch (_: Exception) {
+                }
             }
         }
         instance = null
@@ -343,12 +374,12 @@ class RearScreenRecordService : Service() {
                 gravity = Gravity.CENTER_HORIZONTAL
             }
             setOnClickListener {
-                if (isRecording) {
-                    stopRecordingInternal(this, close)
-                    return@setOnClickListener
-                }
                 if (isStopping) {
                     toastMain(getString(R.string.record_busy))
+                    return@setOnClickListener
+                }
+                if (isRecording) {
+                    stopRecordingInternal(this, close)
                     return@setOnClickListener
                 }
                 if (isStarting) {
@@ -587,6 +618,14 @@ class RearScreenRecordService : Service() {
         btn.background = bg
     }
 
+    /**
+     * 取消投影授权超时定时器，配合 [projectionTimeoutRunnable] 使用。
+     */
+    private fun cancelProjectionTimeout() {
+        projectionTimeoutRunnable?.let { mainHandler.removeCallbacks(it) }
+        projectionTimeoutRunnable = null
+    }
+
     private fun requestMediaProjectionThenStart(recordView: View, closeView: View) {
         synchronized(stateLock) {
             if (isRecording || isStarting || isStopping || projectionPending) {
@@ -595,6 +634,18 @@ class RearScreenRecordService : Service() {
             }
             projectionPending = true
         }
+        cancelProjectionTimeout()
+        // 超时保护：若 MediaProjectionRequestActivity 被杀/无回调，30s 后自动释放锁
+        val r = Runnable {
+            synchronized(stateLock) {
+                if (projectionPending) {
+                    projectionPending = false
+                    RecordSynthDebugLog.diagW("projectionPending timeout — auto released")
+                }
+            }
+        }
+        projectionTimeoutRunnable = r
+        mainHandler.postDelayed(r, 30_000L)
         val req = Intent(this, MediaProjectionRequestActivity::class.java)
         req.addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -610,6 +661,7 @@ class RearScreenRecordService : Service() {
                 startActivity(req)
             }
         } catch (t: Throwable) {
+            cancelProjectionTimeout()
             synchronized(stateLock) { projectionPending = false }
             toastMain(getString(R.string.record_float_fail, t.message ?: ""))
         }
@@ -696,6 +748,17 @@ class RearScreenRecordService : Service() {
                 var displayId = PrivilegedShell.captureOutput(
                     "dumpsys SurfaceFlinger --display-id | grep -oE 'Display [0-9]+' | awk 'NR==2{print \$2}'",
                 )?.trim().orEmpty()
+                if (displayId.isEmpty()) {
+                    // 备选：dumpsys display / wm displays 解析
+                    displayId = PrivilegedShell.captureOutput(
+                        "dumpsys display 2>/dev/null | grep -oE 'Display\\d+' | awk 'NR==2' | grep -oE '[0-9]+'",
+                    )?.trim().orEmpty()
+                }
+                if (displayId.isEmpty()) {
+                    displayId = PrivilegedShell.captureOutput(
+                        "wm displays 2>/dev/null | grep -oE 'displayId=[0-9]+' | awk -F= 'NR==2{print \$2}'",
+                    )?.trim().orEmpty()
+                }
                 if (displayId.isEmpty()) displayId = "1"
                 RecordSynthDebugLog.d("start: displayId=$displayId")
 
@@ -734,28 +797,30 @@ class RearScreenRecordService : Service() {
                     }
                 }
 
-                // 轮询 screenrecord 进程/文件确认已启动，替代固定 sleep
+                // 轮询 screenrecord 进程确认已启动，替代固定 sleep
                 var pollAttempts = 0
                 val pollMax = 12 // 12×50ms = 600ms 上限（shell 调用耗时另计，合计 ~1s 与原 800ms 相当）
                 var pidStr = ""
-                var fileOk = false
+                var processRunning = false
                 while (pollAttempts < pollMax) {
                     Thread.sleep(50)
                     pollAttempts++
                     pidStr = PrivilegedShell.captureOutput("cat $PID_FILE 2>/dev/null")?.trim().orEmpty()
                     recordPid = pidStr.toIntOrNull() ?: -1
-                    val lsOut = PrivilegedShell.captureOutput("ls -l \"$path\" 2>&1").orEmpty()
-                    fileOk = lsOut.isNotBlank() && !lsOut.contains("No such")
-                    if (fileOk || isScreenrecordBinaryProcessRunning(recordPid)) break
+                    processRunning = isScreenrecordBinaryProcessRunning(recordPid)
+                    if (processRunning) break
                 }
                 val runningBin = isScreenrecordBinaryProcessRunning(recordPid)
                 val pidofLine = PrivilegedShell.captureOutput("pidof screenrecord 2>/dev/null").orEmpty()
+                val fileOk = PrivilegedShell.captureOutput("ls -l \"$path\" 2>&1")
+                    .orEmpty()
+                    .let { it.isNotBlank() && !it.contains("No such") }
                 RecordSynthDebugLog.diagI(
                     "start: polled=${pollAttempts}×50ms pidFile='$pidStr' recordPid=$recordPid fileOk=$fileOk runningBin=$runningBin pidof=$pidofLine",
                 )
-                if (!fileOk && !runningBin) {
+                if (!runningBin) {
                     RecordSynthDebugLog.diagW(
-                        "start: proc/file check failed | log=\n${snapshotScreenrecordLog()}",
+                        "start: process not running after poll | log=\n${snapshotScreenrecordLog()}",
                     )
                     failStart(recordView, closeView, getString(R.string.record_proc_fail))
                     return@runInBackground
@@ -793,6 +858,7 @@ class RearScreenRecordService : Service() {
 
     private fun failStart(recordView: View, closeView: View, msg: String) {
         RecordSynthDebugLog.diagW("failStart: $msg | logTail=\n${snapshotScreenrecordLog()}")
+        cancelProjectionTimeout()
         try {
             audioCaptureHelper?.stop()
         } catch (_: Exception) {
@@ -839,7 +905,8 @@ class RearScreenRecordService : Service() {
             if (!isRecording && !isStarting) return
             isStopping = true
             isStarting = false
-            isRecording = false
+            // isRecording 在 afterStopUi 中才置 false，避免 onDestroy 在 worker 线程启动前
+            // 因 isRecording = false 且 stopWorker = null 而漏杀 screenrecord 进程
         }
         mainHandler.post {
             toastMain(getString(R.string.record_stopping))
@@ -916,9 +983,11 @@ class RearScreenRecordService : Service() {
                 val tsToken = currentCaptureTs
                     ?: workVideo.name.removePrefix("miroot_rear_work_").takeIf { it.isNotEmpty() }
                 currentCaptureTs = null
-                PrivilegedShell.execCmd("mkdir -p /storage/emulated/0/Movies")
+                val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                PrivilegedShell.execCmd("mkdir -p \"${moviesDir.absolutePath}\"")
                 val finalVideo = File(
-                    "/storage/emulated/0/Movies/MiRoot_${tsToken ?: SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.mp4",
+                    moviesDir,
+                    "MiRoot_${tsToken ?: SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.mp4",
                 )
 
                 // PCM 音频合并/带壳合成
@@ -997,24 +1066,29 @@ class RearScreenRecordService : Service() {
                 }
 
                 if (!composite) {
+                    var copyOk = false
                     try {
                         videoForNext.copyTo(finalVideo, overwrite = true)
+                        copyOk = finalVideo.isFile && finalVideo.length() > 0L
                     } catch (_: Exception) {
                     }
-                    if (videoForNext != workVideo) {
-                        try {
-                            videoForNext.delete()
-                        } catch (_: Exception) {
+                    if (copyOk) {
+                        if (videoForNext != workVideo) {
+                            try { videoForNext.delete() } catch (_: Exception) {}
                         }
-                    }
-                    PrivilegedShell.execCmd("rm -f \"${workVideo.absolutePath}\"")
-                    if (finalVideo.isFile && finalVideo.length() > 0L) {
+                        PrivilegedShell.execCmd("rm -f \"${workVideo.absolutePath}\"")
                         mediaScan(finalVideo)
+                        RecordSynthDebugLog.d("branch: copy to Movies -> ${finalVideo.length()} bytes")
+                    } else {
+                        RecordSynthDebugLog.diagW("branch: copy to Movies FAILED (copyOk=$copyOk)")
                     }
-                    RecordSynthDebugLog.d("branch: copy to Movies -> ${finalVideo.length()} bytes")
                     mainHandler.post {
                         afterStopUi(closeView)
-                        toastMain(getString(R.string.record_done_process))
+                        if (copyOk) {
+                            toastMain(getString(R.string.record_done_process))
+                        } else {
+                            toastMain(getString(R.string.record_process_fail, ""))
+                        }
                     }
                     return@thread
                 }
@@ -1167,6 +1241,7 @@ class RearScreenRecordService : Service() {
     private fun afterStopUi(closeView: View) {
         synchronized(stateLock) {
             isStopping = false
+            isRecording = false
         }
         recordBtn?.let { setRecordUiRecording(false) }
         closeView.visibility = View.VISIBLE
@@ -1480,6 +1555,8 @@ class RearScreenRecordService : Service() {
             private set
 
         fun isRunning(): Boolean = instance != null
+
+        fun isRecordingActive(): Boolean = instance?.isRecording ?: false
 
         private const val PID_FILE = "/data/local/tmp/miroot_record.pid"
         private const val LOG_FILE = "/data/local/tmp/miroot_record.log"

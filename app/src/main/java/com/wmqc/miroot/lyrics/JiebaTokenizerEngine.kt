@@ -115,6 +115,9 @@ object JiebaTokenizerEngine {
             if (context != null && !initialized.get()) {
                 preloadAsync(context.applicationContext)
             }
+            synchronized(cache) {
+                cache.get(normalized)?.let { return it }
+            }
             return SimpleChineseTokenizer.tokenize(normalized)
         }
 
