@@ -648,7 +648,10 @@ private fun AcControlCard(
                     text = if (status) "● 已开启" else "已关闭",
                     fontSize = 13.sp,
                     color = if (status) accentColor else onPageSecondary,
-                    modifier = Modifier.clickable { showAcConfirm = true },
+                    modifier = Modifier.clickable(
+                        indication = null,
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    ) { showAcConfirm = true },
                 )
             }
 
@@ -1034,10 +1037,7 @@ private fun RearButtonCell(
     }
 
     Column(
-        modifier = modifier
-            .clickable {
-                showDialog = true
-            },
+        modifier = modifier,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         // 确认弹窗
@@ -1063,7 +1063,11 @@ private fun RearButtonCell(
             modifier = Modifier
                 .size(56.dp)
                 .clip(CircleShape)
-                .background(bg),
+                .background(bg)
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                ) { showDialog = true },
             contentAlignment = Alignment.Center,
         ) {
             if (iconBitmap != null) {
