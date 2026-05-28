@@ -282,6 +282,7 @@ private fun DashboardScreen(
     var vehicleLng by remember { mutableStateOf(Double.NaN) }
     var vehicleLat by remember { mutableStateOf(Double.NaN) }
     var mapRefreshKey by remember { mutableIntStateOf(0) }
+    var showButtonEditDialog by remember { mutableStateOf(false) }
 
     // 加载车辆数据
     LaunchedEffect(Unit) {
@@ -449,16 +450,7 @@ private fun DashboardScreen(
                 vehicleStatus = vehicleStatus,
                 acStatus = acStatus,
                 seatHeatingStatus = seatHeatingStatus,
-                onEditButtons = {
-                    val act = ctx as? android.app.Activity ?: return@RearButtonGrid
-                    RearButtonConfigDialog.show(act, rearButtons) { newList ->
-                        val normalized = normalizeValidRearButtons(newList)
-                        ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
-                            .putString(KEY_DASHBOARD_REAR_BUTTONS, encodeRearButtons(normalized))
-                            .apply()
-                        rearButtons = normalized
-                    }
-                },
+                onEditButtons = { showButtonEditDialog = true },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = scrollPad),
@@ -537,10 +529,163 @@ private fun DashboardScreen(
 
             Spacer(Modifier.size(24.dp))
         }
+        // 按钮排列编辑弹窗
+        if (showButtonEditDialog) {
+            ButtonEditDialog(
+                initial = rearButtons,
+                onDismiss = { showButtonEditDialog = false },
+                onConfirm = { newList ->
+                    val normalized = normalizeValidRearButtons(newList)
+                    ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
+                        .putString(KEY_DASHBOARD_REAR_BUTTONS, encodeRearButtons(normalized))
+                        .apply()
+                    rearButtons = normalized
+                    showButtonEditDialog = false
+                },
+            )
+        }
     }
 }
 
 // ─── CarConfirmAction ───────────────────────────────────────────────────────────
+
+// ─── ButtonEditDialog ──────────────────────────────────────────────────────────
+
+@Composable
+private fun ButtonEditDialog(
+    initial: List<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (List<String>) -> Unit,
+) {
+    val ctx = LocalContext.current
+    val carColors = carColors()
+    var selected by remember { mutableStateOf(initial.toMutableList()) }
+    val available = remember(selected) {
+        RearButtonConfigDialog.CONTROL_FUNCTIONS.filter { it !in selected }.toMutableList()
+    }
+
+    fun moveUp(i: Int) {
+        if (i > 0) {
+            selected = selected.toMutableList().also { val t = it[i]; it[i] = it[i-1]; it[i-1] = t }
+        }
+    }
+    fun moveDown(i: Int) {
+        if (i < selected.size - 1) {
+            selected = selected.toMutableList().also { val t = it[i]; it[i] = it[i+1]; it[i+1] = t }
+        }
+    }
+    fun removeSelected(i: Int) {
+        if (selected.size > 1) {
+            selected = selected.toMutableList().also { it.removeAt(i) }
+        }
+    }
+    fun addFromAvailable(func: String) {
+        if (selected.size < 8) {
+            selected = selected.toMutableList().also { it.add(func) }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("按钮排列编辑", fontWeight = FontWeight.SemiBold)
+                Text("${selected.size}/8", fontSize = 13.sp, color = carColors.textSecondary)
+            }
+        },
+        text = {
+            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                // 已选列表（可拖拽排序、点击移除、上移）
+                Text("已选功能", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = carColors.accentBlue)
+                Spacer(Modifier.height(6.dp))
+                selected.forEachIndexed { index, func ->
+                    val bg = if (index % 2 == 0) carColors.bgCard.copy(alpha = 0.5f) else Color.Transparent
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(bg, RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(8.dp))
+                            .padding(vertical = 6.dp, horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "${index + 1}.",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = carColors.accentBlue,
+                            modifier = Modifier.width(26.dp),
+                        )
+                        Text(
+                            func,
+                            fontSize = 14.sp,
+                            color = carColors.textPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        // 上移按钮
+                        TextButton(
+                            onClick = { moveUp(index) },
+                            modifier = Modifier.size(36.dp),
+                            contentPadding = PaddingValues(0.dp),
+                        ) { Text(if (index > 0) "↑" else " ", color = carColors.textSecondary) }
+                        // 下移按钮
+                        TextButton(
+                            onClick = { moveDown(index) },
+                            modifier = Modifier.size(36.dp),
+                            contentPadding = PaddingValues(0.dp),
+                        ) { Text(if (index < selected.size - 1) "↓" else " ", color = carColors.textSecondary) }
+                        // 移除按钮
+                        TextButton(
+                            onClick = { removeSelected(index) },
+                            modifier = Modifier.size(36.dp),
+                            contentPadding = PaddingValues(0.dp),
+                        ) { Text("✕", color = Color(0xFFDC2626)) }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // 可用列表（点击添加）
+                Text("可用功能", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = carColors.accentGreen)
+                Spacer(Modifier.height(6.dp))
+                available.forEachIndexed { index, func ->
+                    val bg = if (index % 2 == 0) carColors.bgCard.copy(alpha = 0.5f) else Color.Transparent
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(bg, RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { addFromAvailable(func) }
+                            .padding(vertical = 8.dp, horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("+", fontSize = 14.sp, color = carColors.accentGreen, modifier = Modifier.width(24.dp))
+                        Text(
+                            func,
+                            fontSize = 14.sp,
+                            color = carColors.textPrimary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (selected.size >= 8) {
+                            Text("已满", fontSize = 11.sp, color = Color(0xFFDC2626))
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (selected.isEmpty()) {
+                    android.widget.Toast.makeText(ctx, "至少需要1个按钮", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    onConfirm(selected.toList())
+                }
+            }) { Text("确认") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
 
 // ─── TopBar ────────────────────────────────────────────────────────────────────
 
