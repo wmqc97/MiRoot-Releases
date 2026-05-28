@@ -246,12 +246,10 @@ private fun DashboardScreen(
     val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
 
     var vehicleUi by remember { mutableStateOf<CarVehicleDisplayUi?>(null) }
-    var vehicleLoading by remember { mutableStateOf(true) }
     var vehicleStatus by remember { mutableStateOf<VehicleStatusService.VehicleStatusInfo?>(null) }
 
     // 车模图片 bitmap
     var carModelBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var carModelLoading by remember { mutableStateOf(true) }
 
     // 底部按钮配置
     var rearButtons by remember { mutableStateOf(defaultRearButtonsForFirstInstall()) }
@@ -271,16 +269,17 @@ private fun DashboardScreen(
     var mapRefreshKey by remember { mutableIntStateOf(0) }
     var showButtonEditDialog by remember { mutableStateOf(false) }
 
-    // 加载车辆数据
+    // 加载车辆数据（后台静默刷新，避免频闪）
     LaunchedEffect(Unit) {
-        vehicleUi = withContext(Dispatchers.IO) { CarVehicleDisplayHelper.load(appCtx) }
-        vehicleLoading = false
-    }
-
-    // 加载车模图片
-    LaunchedEffect(Unit) {
-        carModelBitmap = withContext(Dispatchers.IO) { loadCarModelBitmap(appCtx) }
-        carModelLoading = false
+        withContext(Dispatchers.IO) {
+            vehicleUi = CarVehicleDisplayHelper.load(appCtx)
+            vehicleStatus = VehicleStatusService.getVehicleStatus(appCtx)
+            carModelBitmap = loadCarModelBitmap(appCtx)
+            loadVehiclePosition(appCtx) { lng, lat ->
+                vehicleLng = lng; vehicleLat = lat
+            }
+        }
+        refreshVehicleStatePrefs(ctx)
     }
 
     // 加载底部按钮配置
@@ -300,21 +299,6 @@ private fun DashboardScreen(
         seatHeatingDuration = p.getInt(KEY_SEAT_HEATING_DURATION, 10)
         seatHeatingLevel = p.getInt(KEY_SEAT_HEATING_LEVEL, 1)
     }
-    // 初始加载时同步车辆状态到 SharedPreferences
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { refreshVehicleStatePrefs(ctx) }
-    }
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { vehicleStatus = VehicleStatusService.getVehicleStatus(appCtx) }
-    }
-    // 加载车辆位置
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            loadVehiclePosition(appCtx) { lng, lat ->
-                vehicleLng = lng; vehicleLat = lat
-            }
-        }
-    }
 
     // 计算总页数（每页4个按钮，2列2行）
     val totalPages = ((rearButtons.size + 3) / 4).coerceIn(1, 2)
@@ -333,7 +317,6 @@ private fun DashboardScreen(
             withContext(Dispatchers.Main) {
                 vehicleUi = ui
                 vehicleStatus = vs
-                vehicleLoading = false
                 isRefreshing = false
             }
         }
@@ -403,7 +386,7 @@ private fun DashboardScreen(
             CarImageAndGaugesSection(
                 vehicleUi = vehicleUi,
                 carModelBitmap = carModelBitmap,
-                loading = carModelLoading,
+                loading = false,
                 onPickCarModel = onPickCarModel,
                 onResetCarModel = onResetCarModel,
                 modifier = Modifier

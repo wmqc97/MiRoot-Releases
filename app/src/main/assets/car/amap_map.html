@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>车辆位置</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#1a1d23; font-family:-apple-system, "PingFang SC", sans-serif; }
+  #container { width:100%; height:100%; min-height:180px; border-radius:16px; overflow:hidden; position:relative; }
+  #map { width:100%; height:100%; min-height:180px; }
+  .loading-overlay {
+    position:absolute; top:0; left:0; right:0; bottom:0;
+    display:flex; align-items:center; justify-content:center;
+    background:#1a1d23; color:#8a8f98; font-size:13px;
+    transition:opacity 0.5s; z-index:10;
+  }
+  .loading-overlay.hidden { opacity:0; pointer-events:none; }
+  .car-marker-label {
+    background:rgba(52,130,255,0.9); color:#fff; padding:3px 8px;
+    border-radius:10px; font-size:11px; font-weight:600; white-space:nowrap;
+    box-shadow:0 1px 4px rgba(0,0,0,0.3);
+  }
+</style>
+</head>
+<body>
+<div id="container">
+  <div class="loading-overlay" id="loadingOverlay">加载地图中...</div>
+  <div id="map"></div>
+</div>
+<script>
+var _amapLoaded = false;
+var _mapInstance = null;
+var _marker = null;
+var _pendingLng = null;
+var _pendingLat = null;
+
+function loadAMap() {
+  if (_amapLoaded) return;
+  _amapLoaded = true;
+  var s = document.createElement('script');
+  s.src = 'https://webapi.amap.com/maps?v=2.0&key=d8d772c43a33e003b5c77d12e6a52e09&plugin=AMap.Geolocation';
+  s.onload = function() { initMap(); };
+  s.onerror = function() {
+    document.getElementById('loadingOverlay').textContent = '地图加载失败';
+    document.getElementById('loadingOverlay').classList.remove('hidden');
+    // fallback: show nav button anyway
+  };
+  document.head.appendChild(s);
+}
+
+function initMap() {
+  var lng = _pendingLng !== null ? _pendingLng : 113.27;
+  var lat = _pendingLat !== null ? _pendingLat : 23.13;
+  
+  _mapInstance = new AMap.Map('map', {
+    zoom: 15,
+    center: [lng, lat],
+    mapStyle: 'amap://styles/darkblue',
+    layers: [new AMap.TileLayer.Satellite()],
+    features: ['point', 'road', 'building'],
+    showIndoorMap: false,
+    zoomEnable: true,
+    dragEnable: true
+  });
+  
+  _marker = new AMap.Marker({
+    position: [lng, lat],
+    icon: new AMap.Icon({
+      image: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="38" viewBox="0 0 24 28"><path fill="#3482ff" d="M12 0C7.58 0 4 3.58 4 8c0 6 8 16 8 16s8-10 8-16c0-4.42-3.58-8-8-8z"/><circle cx="12" cy="8" r="3" fill="#fff"/></svg>'),
+      size: [32, 38],
+      anchor: 'bottom-center'
+    }),
+    offset: new AMap.Pixel(0, -8)
+  });
+  _mapInstance.add(_marker);
+
+  var label = new AMap.Text({
+    text: '<div class="car-marker-label">&#x1F697; 我的车辆</div>',
+    anchor: 'bottom-center',
+    offset: new AMap.Pixel(0, -44),
+    position: [lng, lat]
+  });
+  _mapInstance.add(label);
+  
+  document.getElementById('loadingOverlay').classList.add('hidden');
+}
+
+function updatePosition(lng, lat) {
+  _pendingLng = lng;
+  _pendingLat = lat;
+  if (_mapInstance) {
+    _mapInstance.setCenter([lng, lat]);
+    if (_marker) _marker.setPosition([lng, lat]);
+    var existingLabel = document.querySelector('.car-marker-label');
+    document.getElementById('loadingOverlay').classList.add('hidden');
+  }
+}
+
+  var lng = _pendingLng !== null ? _pendingLng : 113.27;
+  var lat = _pendingLat !== null ? _pendingLat : 23.13;
+  if (window.AndroidNavigate) {
+    window.AndroidNavigate.navigateToCar(lat, lng);
+  } else {
+    window.location.href = 'amapuri://route/plan/?&dlon=' + lng + '&dlat=' + lat + '&dname=车辆位置&dev=1&t=2';
+  }
+});
+
+// Auto load on DOM ready
+loadAMap();
+</script>
+</body>
+</html>
