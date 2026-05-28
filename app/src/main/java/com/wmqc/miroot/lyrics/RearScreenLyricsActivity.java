@@ -2273,16 +2273,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private ITaskService taskService;
     private boolean isOfficialGestureDisabled = false; // 标记是否已屏蔽官方手势服务
 
-    /** 与 {@link com.wmqc.miroot.car.RearScreenCarControlActivity} 一致：屏底窄条内左右滑结束投屏；raw→decor */
-    private static final float BOTTOM_SWIPE_EXIT_ZONE_FRACTION = 0.10f;
-    private static final float BOTTOM_SWIPE_EXIT_MIN_HORIZ_DP = 48f;
-    /** 水平位移须明显大于垂直分量，避免与歌词上下滑动混淆 */
-    private static final float BOTTOM_SWIPE_EXIT_HORIZONTAL_DOMINANCE = 1.35f;
-    private boolean bottomSwipeExitPointerDownInZone;
-    private float bottomSwipeExitStartY;
-    private float bottomSwipeExitStartX;
-    /** 已触发上滑退出，避免重复 performCleanup / finish */
-    private boolean bottomSwipeExitPending;
+    /** 屏底窄条内左右滑结束投屏：统一手势处理器 */
+    private final BottomSwipeExitHelper.Handler bottomSwipeHandler =
+        new BottomSwipeExitHelper.Handler(this, () -> finishProjectionFromUser("bottom-swipe-exit"));
     private boolean lyricsBackPressedCallbackRegistered;
 
     // TaskService连接回调
@@ -2983,8 +2976,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         songTitleText.setSelected(true); // 必须设置为selected才能滚动
         
         // 歌名区域统一手势：单击显隐按钮、长按开关跑马灯、左右滑切歌（互斥处理，避免冲突）
-        final int titleSwipeMinDistancePx = dp(84);
-        final int titleSwipeMinVelocityPx = dp(48);
+        final int titleSwipeMinDistancePx = dp(60);
+        final int titleSwipeMinVelocityPx = dp(36);
         final float titleSwipeDirectionRatio = 1.35f;
         final GestureDetector titleGestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
             @Override
@@ -8293,77 +8286,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        tryTrackBottomSwipeExit(ev);
+        if (getDisplayIdSafe() == 1) {
+            bottomSwipeHandler.handleTouchEvent(ev);
+        }
         return super.dispatchTouchEvent(ev);
-    }
-
-    /**
-     * 背屏音乐投屏：在屏底窄条内向左或向右滑动结束投屏（清理与返回键/通知结束等一致）。
-     * 滑动过程中达到阈值即触发，无需等手指抬起（与车控投屏一致）。
-     */
-    private void tryTrackBottomSwipeExit(MotionEvent ev) {
-        if (getDisplayIdSafe() != 1 || isFinishing() || bottomSwipeExitPending) {
-            return;
-        }
-        View decor = getWindow().getDecorView();
-        if (decor == null) {
-            return;
-        }
-        float[] xy = new float[2];
-        if (!BottomSwipeExitHelper.decorLocalXY(decor, ev, xy)) {
-            return;
-        }
-        int action = ev.getActionMasked();
-        float h = decor.getHeight();
-        float y = xy[1];
-        float x = xy[0];
-
-        if (action == MotionEvent.ACTION_DOWN && ev.getPointerCount() == 1) {
-            bottomSwipeExitPointerDownInZone = h > 0 && y > h * (1f - BOTTOM_SWIPE_EXIT_ZONE_FRACTION);
-            bottomSwipeExitStartY = y;
-            bottomSwipeExitStartX = x;
-            return;
-        }
-        if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP) {
-            bottomSwipeExitPointerDownInZone = false;
-            return;
-        }
-        if (action == MotionEvent.ACTION_MOVE) {
-            if (bottomSwipeExitPointerDownInZone && ev.getPointerCount() == 1) {
-                maybeFireBottomSwipeExit(xy[1], xy[0]);
-            }
-            return;
-        }
-        if (action == MotionEvent.ACTION_UP) {
-            if (bottomSwipeExitPointerDownInZone && ev.getPointerCount() == 1) {
-                maybeFireBottomSwipeExit(xy[1], xy[0]);
-            }
-            bottomSwipeExitPointerDownInZone = false;
-        } else if (action == MotionEvent.ACTION_CANCEL) {
-            bottomSwipeExitPointerDownInZone = false;
-        }
-    }
-
-    private void maybeFireBottomSwipeExit(float endY, float endX) {
-        float horizDist = Math.abs(endX - bottomSwipeExitStartX);
-        float vertDist = Math.abs(endY - bottomSwipeExitStartY);
-        float touchSlop = ViewConfiguration.get(this).getScaledTouchSlop();
-        if (vertDist < touchSlop * 2.5f) {
-            vertDist = 0f;
-        }
-        float minHoriz = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP,
-                BOTTOM_SWIPE_EXIT_MIN_HORIZ_DP,
-                getResources().getDisplayMetrics());
-        if (horizDist < minHoriz || horizDist < vertDist * BOTTOM_SWIPE_EXIT_HORIZONTAL_DOMINANCE) {
-            return;
-        }
-        if (BuildConfig.DEBUG) {
-            LogHelper.d(TAG, "👆 底部左右滑结束音乐投屏 (horizDist=" + horizDist + "px)");
-        }
-        bottomSwipeExitPointerDownInZone = false;
-        bottomSwipeExitPending = true;
-        finishProjectionFromUser("bottom-swipe-exit");
     }
 
     @Override

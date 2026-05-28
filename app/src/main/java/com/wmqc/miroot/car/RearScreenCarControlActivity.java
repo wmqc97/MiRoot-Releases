@@ -271,20 +271,13 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     
     // 清理标志，防止重复清理导致二次动画
     private boolean isCleaningUp = false;
-    
+
     // 双击手势检测器
     private GestureDetector gestureDetector;
 
-    /** 屏底窄条内左右滑结束投屏（不含车控按钮条，避免与 ViewPager 横滑翻页冲突） */
-    private static final float BOTTOM_SWIPE_EXIT_ZONE_FRACTION = 0.10f;
-    private static final float BOTTOM_SWIPE_EXIT_MIN_HORIZ_DP = 48f;
-    private static final float BOTTOM_SWIPE_EXIT_HORIZONTAL_DOMINANCE = 1.35f;
-    private boolean bottomSwipeExitPointerDownInZone;
-    private boolean bottomSwipeExitTriggered;
-    /** 与背屏桌面一致：手势退出已排队，忽略后续触摸直到 Activity 结束。 */
-    private boolean bottomSwipeExitPending;
-    private float bottomSwipeExitStartY;
-    private float bottomSwipeExitStartX;
+    /** 屏底窄条内左右滑结束投屏：统一手势处理器 */
+    private final BottomSwipeExitHelper.Handler bottomSwipeHandler =
+        new BottomSwipeExitHelper.Handler(this, () -> finishProjectionFromUser("bottom-swipe"));
 
     // 屏幕关闭监听（防止双击息屏）
     private android.content.BroadcastReceiver screenReceiver;
@@ -1802,7 +1795,9 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
-        tryTrackBottomSwipeExit(ev);
+        if (getDisplayIdSafe() == 1 && !isCleaningUp) {
+            bottomSwipeHandler.handleTouchEvent(ev);
+        }
         return super.dispatchTouchEvent(ev);
     }
 
@@ -1849,75 +1844,6 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         } catch (Throwable t) {
             LogHelper.w(TAG, "手势退出前强制歌词 UI 可见失败: " + t.getMessage());
         }
-    }
-
-    /**
-     * 背屏车控：在屏底窄条内向左或向右滑动结束投屏（注销常亮等与返回键一致）。
-     * 滑动过程中达到阈值即触发，无需等手指抬起。
-     */
-    private void tryTrackBottomSwipeExit(MotionEvent ev) {
-        if (getDisplayIdSafe() != 1 || isFinishing() || isCleaningUp || bottomSwipeExitPending) {
-            return;
-        }
-        View decor = getWindow().getDecorView();
-        if (decor == null) {
-            return;
-        }
-        float[] xy = new float[2];
-        if (!BottomSwipeExitHelper.decorLocalXY(decor, ev, xy)) {
-            return;
-        }
-        int action = ev.getActionMasked();
-        float h = decor.getHeight();
-        float y = xy[1];
-        float x = xy[0];
-
-        if (action == MotionEvent.ACTION_DOWN && ev.getPointerCount() == 1) {
-            bottomSwipeExitTriggered = false;
-            bottomSwipeExitPointerDownInZone = h > 0 && y > h * (1f - BOTTOM_SWIPE_EXIT_ZONE_FRACTION);
-            bottomSwipeExitStartY = y;
-            bottomSwipeExitStartX = x;
-            return;
-        }
-        if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP) {
-            bottomSwipeExitPointerDownInZone = false;
-            return;
-        }
-        if (action == MotionEvent.ACTION_MOVE) {
-            if (bottomSwipeExitPointerDownInZone && !bottomSwipeExitTriggered && ev.getPointerCount() == 1) {
-                maybeFireBottomSwipeExit(xy[1], xy[0]);
-            }
-            return;
-        }
-        if (action == MotionEvent.ACTION_UP) {
-            if (bottomSwipeExitPointerDownInZone && !bottomSwipeExitTriggered && ev.getPointerCount() == 1) {
-                maybeFireBottomSwipeExit(xy[1], xy[0]);
-            }
-            bottomSwipeExitPointerDownInZone = false;
-        } else if (action == MotionEvent.ACTION_CANCEL) {
-            bottomSwipeExitPointerDownInZone = false;
-        }
-    }
-
-    private void maybeFireBottomSwipeExit(float endY, float endX) {
-        float horizDist = Math.abs(endX - bottomSwipeExitStartX);
-        float vertDist = Math.abs(endY - bottomSwipeExitStartY);
-        float touchSlop = ViewConfiguration.get(this).getScaledTouchSlop();
-        if (vertDist < touchSlop * 2.5f) {
-            vertDist = 0f;
-        }
-        float minHoriz = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP,
-                BOTTOM_SWIPE_EXIT_MIN_HORIZ_DP,
-                getResources().getDisplayMetrics());
-        if (horizDist < minHoriz || horizDist < vertDist * BOTTOM_SWIPE_EXIT_HORIZONTAL_DOMINANCE) {
-            return;
-        }
-        bottomSwipeExitTriggered = true;
-        bottomSwipeExitPointerDownInZone = false;
-        bottomSwipeExitPending = true;
-        LogHelper.d(TAG, "👆 底部左右滑结束车控投屏 (horizDist=" + horizDist + "px)");
-        finishProjectionFromUser("bottom-swipe");
     }
 
     private void registerCarControlBackPressedCallback() {
