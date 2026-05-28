@@ -570,7 +570,7 @@ private fun TopBar(
                 .pointerInput(Unit) {
                     detectTapGestures(
                         onLongPress = {
-                            android.widget.Toast.makeText(ctx, "正在退出登录...", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(ctx, "正在重新登录...", android.widget.Toast.LENGTH_SHORT).show()
                             onLongPressTitle?.invoke()
                         },
                     )
@@ -935,11 +935,6 @@ private fun RearButtonGrid(
                         dragTotal += dragAmount
                     },
                 )
-            }
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onLongPress = { onEditButtons?.invoke() },
-                )
             },
     ) {
         Column(
@@ -960,6 +955,7 @@ private fun RearButtonGrid(
                         vehicleStatus = vehicleStatus,
                         acStatus = acStatus,
                         seatHeatingStatus = seatHeatingStatus,
+                        onEditButtons = onEditButtons,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -1004,6 +1000,7 @@ private fun RearButtonCell(
     vehicleStatus: VehicleStatusService.VehicleStatusInfo?,
     acStatus: Boolean,
     seatHeatingStatus: Boolean,
+    onEditButtons: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -1064,10 +1061,12 @@ private fun RearButtonCell(
                 .size(56.dp)
                 .clip(CircleShape)
                 .background(bg)
-                .clickable(
-                    indication = null,
-                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                ) { showDialog = true },
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { showDialog = true },
+                        onLongPress = { onEditButtons?.invoke() },
+                    )
+                },
             contentAlignment = Alignment.Center,
         ) {
             if (iconBitmap != null) {
