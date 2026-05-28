@@ -332,7 +332,6 @@ private fun DashboardScreen(
 
     val scope = rememberCoroutineScope()
     var isRefreshing by remember { mutableStateOf(false) }
-    var confirmAction by remember { mutableStateOf<CarConfirmAction?>(null) }
     fun refreshVehicleData() {
         isRefreshing = true
         scope.launch(Dispatchers.IO) {
@@ -524,34 +523,10 @@ private fun DashboardScreen(
 
             Spacer(Modifier.size(24.dp))
         }
-        // 确认弹窗
-        confirmAction?.let { action ->
-            AlertDialog(
-                onDismissRequest = { confirmAction = null },
-                title = { Text(text = action.title) },
-                text = { Text(text = action.message) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        val act = action
-                        confirmAction = null
-                        scope.launch(Dispatchers.IO) { act.onConfirm() }
-                    }) { Text("确认") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { confirmAction = null }) { Text("取消") }
-                },
-            )
-        }
     }
 }
 
 // ─── CarConfirmAction ───────────────────────────────────────────────────────────
-
-private data class CarConfirmAction(
-    val title: String,
-    val message: String,
-    val onConfirm: suspend () -> Unit,
-)
 
 // ─── TopBar ────────────────────────────────────────────────────────────────────
 
@@ -617,8 +592,9 @@ private fun AcControlCard(
         insideMargin = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         colors = CardColors(color = cardColor, contentColor = onPagePrimary),
     ) {
+        var showAcConfirm by remember { mutableStateOf(false) }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            // 标题行 + 参数 + 状态（长按 1000ms 开启/关闭）
+            // 标题行 + 参数（长按 1000ms 开启/关闭）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -661,7 +637,25 @@ private fun AcControlCard(
                     text = if (status) "● 已开启" else "已关闭",
                     fontSize = 13.sp,
                     color = if (status) accentColor else onPageSecondary,
-                    modifier = Modifier.clickable { onToggle() },
+                    modifier = Modifier.clickable { showAcConfirm = true },
+                )
+            }
+
+            // 空调确认弹窗
+            if (showAcConfirm) {
+                val actionName = if (status) "关闭" else "开启"
+                AlertDialog(
+                    onDismissRequest = { showAcConfirm = false },
+                    title = { Text(text = "确认${actionName}空调") },
+                    text = { Text(text = "确认${actionName}空调？温度${temp}℃，时长${duration}分钟") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showAcConfirm = false; onToggle()
+                        }) { Text("确认") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showAcConfirm = false }) { Text("取消") }
+                    },
                 )
             }
 
@@ -723,8 +717,9 @@ private fun SeatHeatingControlCard(
         insideMargin = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         colors = CardColors(color = cardColor, contentColor = onPagePrimary),
     ) {
+        var showHeatConfirm by remember { mutableStateOf(false) }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            // 标题行 + 参数 + 状态（长按 1000ms 开启/关闭）
+            // 标题行 + 参数（长按 1000ms 开启/关闭）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -767,7 +762,25 @@ private fun SeatHeatingControlCard(
                     text = if (status) "● 已开启" else "已关闭",
                     fontSize = 13.sp,
                     color = if (status) accentColor else onPageSecondary,
-                    modifier = Modifier.clickable { onToggle() },
+                    modifier = Modifier.clickable { showHeatConfirm = true },
+                )
+            }
+
+            // 座椅加热确认弹窗
+            if (showHeatConfirm) {
+                val actionName = if (status) "关闭" else "开启"
+                AlertDialog(
+                    onDismissRequest = { showHeatConfirm = false },
+                    title = { Text(text = "确认${actionName}座椅加热") },
+                    text = { Text(text = "确认${actionName}座椅加热？等级${level}，时长${duration}分钟") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showHeatConfirm = false; onToggle()
+                        }) { Text("确认") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showHeatConfirm = false }) { Text("取消") }
+                    },
                 )
             }
 
@@ -1010,6 +1023,7 @@ private fun RearButtonCell(
     }
 
     var iconBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var showDialog by remember { mutableStateOf(false) }
 
     // Reload icon when display text changes (resolved from vehicle status)
     LaunchedEffect(displayText, vehicleStatus) {
@@ -1019,16 +1033,29 @@ private fun RearButtonCell(
     Column(
         modifier = modifier
             .clickable {
-                val acStatusNow = acStatus
-                val seatHeatNow = seatHeatingStatus
-                val dispText = resolveDisplayTextV2(text, vehicleStatus, acStatusNow, seatHeatNow)
-                // Single click → trigger callback for confirmation dialog
-                scope.launch(Dispatchers.IO) {
-                    executeByText(ctx, text)
-                }
+                showDialog = true
             },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // 确认弹窗
+        if (showDialog) {
+            AlertDialog(
+                onDismissRequest = { showDialog = false },
+                title = { Text(text = "确认操作") },
+                text = { Text(text = "确认执行「${displayText}」？") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDialog = false
+                        scope.launch(Dispatchers.IO) {
+                            executeByText(ctx, text)
+                        }
+                    }) { Text("确认") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDialog = false }) { Text("取消") }
+                },
+            )
+        }
         Box(
             modifier = Modifier
                 .size(56.dp)
