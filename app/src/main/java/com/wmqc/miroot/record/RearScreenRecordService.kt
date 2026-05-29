@@ -1234,6 +1234,15 @@ class RearScreenRecordService : Service() {
                                     } catch (_: Exception) {
                                     }
                                 }
+                                // Clean up raw screenrecord output (no .mp4 extension)
+                                try {
+                                    workVideo.delete()
+                                } catch (_: Exception) {
+                                }
+                                try {
+                                    sourceForComposite.delete()
+                                } catch (_: Exception) {
+                                }
                                 if (fileExistsInPublicStorage(finalVideo)) {
                                     mediaScan(finalVideo)
                                 }
