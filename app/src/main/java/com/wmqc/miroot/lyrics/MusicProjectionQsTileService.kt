@@ -12,7 +12,7 @@ import android.widget.Toast
 import com.wmqc.miroot.AppExecutors
 import com.wmqc.miroot.R
 import com.wmqc.miroot.MainActivity
-import com.wmqc.miroot.capability.EnvironmentProbe
+import com.wmqc.miroot.capability.PermissionCache
 import com.wmqc.miroot.capability.PrivilegedShell
 import com.wmqc.miroot.license.OfflineActivationRepository
 import com.wmqc.miroot.ui.music.MusicProjectionController
@@ -102,5 +102,5 @@ class MusicProjectionQsTileService : TileService() {
     }
 
     private fun privilegedShellAvailable(): Boolean =
-        EnvironmentProbe.hasPrivilegedShellChannelSync()
+        PermissionCache.privileged
 }

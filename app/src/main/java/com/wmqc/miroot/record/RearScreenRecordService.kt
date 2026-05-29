@@ -65,7 +65,7 @@ import java.util.concurrent.TimeUnit
  * 背屏录屏：前台服务 + 悬浮窗，[PrivilegedShell] 调 `screenrecord`（**仅画面**，不带 `--audio`）。
  * [MediaProjectionRequestActivity] 授权 → 启动 `screenrecord` 并确认进程/文件
  * → **再** 在已处于「录制中」状态下启动 [AudioCaptureHelper]（Playback Capture → PCM）。
- * 原始视频在 [cacheDir]`/miroot_rear_work_<时间戳>`（root 写入，停止后 chown），最终 `Movies/MiRoot_*.mp4`。
+ * 原始视频直接写到 Movies/（参考 MRSS），shell 写入 -> app 进程直接可读，无需迁移。
  *
  * **合成**：音轨合并与带壳均使用 **AndroidX Media3**（[ShellMedia3Export]），不使用 FFmpeg。
  */
@@ -281,22 +281,16 @@ class RearScreenRecordService : Service() {
             if (currentVideoPath != null) {
                 try {
                     Thread.sleep(300) // 等 screenrecord 写完文件头
-                    val workFile = File(currentVideoPath!!)
-                    if (workFile.isFile && workFile.length() > 0L) {
-                        chownWorkVideoToApp(workFile.absolutePath)
-                        val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
-                        PrivilegedShell.execCmd("mkdir -p \"${moviesDir.absolutePath}\"")
-                        val ts = currentCaptureTs
-                            ?: SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                        val dst = File(moviesDir, "MiRoot_$ts.mp4")
-                        try {
-                            if (copyToMoviesPrivileged(workFile, dst)) {
-                                mediaScan(dst)
-                                PrivilegedShell.execCmd("rm -f \"${workFile.absolutePath}\"")
-                                RecordSynthDebugLog.diagI("onDestroy: emergency save OK dst=${dst.absolutePath}")
-                            }
-                        } catch (_: Exception) {
-                        }
+                    val workPath = currentVideoPath!!
+                    val fileExists = PrivilegedShell.execCmd("test -f \"$workPath\"")
+                    val fileSize = PrivilegedShell.captureOutput("stat -c %s \"$workPath\" 2>/dev/null")?.trim()?.toLongOrNull() ?: 0L
+                    if (fileExists && fileSize > 0L) {
+                        val workFile = File(workPath)
+                        // file already in Movies, just mediaScan (like MRSS)
+                        mediaScan(workFile)
+                        RecordSynthDebugLog.diagI(
+                            "onDestroy: emergency scan OK path=${workFile.absolutePath} size=$fileSize"
+                        )
                     }
                 } catch (_: Exception) {
                 }
@@ -693,16 +687,15 @@ class RearScreenRecordService : Service() {
             try {
                 sessionAudioWanted = mediaProjection != null
                 sessionPcmCapture = false
-                if (RearAssistPrefs.isRecordScreenshotKeepScreenOnEnabled(this) &&
-                    !RearScreenWakeService.isWakeupLoopActive()
-                ) {
-                    PrivilegedShell.execCmd("input -d 1 keyevent KEYCODE_WAKEUP")
-                }
-                // 背屏 DOZE_SUSPEND → ON 需要时间，screenrecord 才能捕获帧
-                Thread.sleep(500)
+                // 录制前先唤醒背屏（参考 MRSS）
+                PrivilegedShell.execCmd("input -d 1 keyevent KEYCODE_WAKEUP")
+                Thread.sleep(200)
                 val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 currentCaptureTs = ts
-                val path = File(cacheDir, "miroot_rear_work_$ts").absolutePath
+                // 直接写到 Movies/（参考 MRSS），shell 写入，app 进程直接可读
+                val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
+                PrivilegedShell.execCmd("mkdir -p \"${moviesDir.absolutePath}\"")
+                val path = File(moviesDir, "MiRoot_$ts").absolutePath
                 currentVideoPath = path
                 RecordSynthDebugLog.diagI("start: workPath=$path ts=$ts")
 
@@ -770,7 +763,7 @@ class RearScreenRecordService : Service() {
                 }
                 RecordSynthDebugLog.diagI("start: screenrecord bin=$which")
 
-                val srCmd = "rm -f \"$PID_FILE\" \"$LOG_FILE\"; nohup $which --display-id $displayId --bit-rate 12000000 \"$path\" > \"$LOG_FILE\" 2>&1 & echo \$! > \"$PID_FILE\""
+                val srCmd = "rm -f \"$PID_FILE\" \"$LOG_FILE\"; nohup $which --display-id $displayId --bit-rate 20000000 \"$path\" > \"$LOG_FILE\" 2>&1 & echo \$! > \"$PID_FILE\""
                 RecordSynthDebugLog.d("start: launch cmd=${srCmd.take(520)}${if (srCmd.length > 520) "…" else ""}")
                 if (!PrivilegedShell.execCmd(srCmd)) {
                     RecordSynthDebugLog.diagW(
@@ -993,17 +986,15 @@ class RearScreenRecordService : Service() {
                 currentVideoPath = null
                 val composite = sessionCompositeEnabled
                 val workVideo = if (videoPath != null) File(videoPath) else null
-
                 val appCtx = applicationContext
-                if (workVideo == null || !workVideo.exists()) {
-                    // 兜底：通过 shell test -f 绕过 SELinux 屏蔽，chown 后 Java 层 File.exists() 可见
-                    val shellFound = videoPath != null && "1" == PrivilegedShell.captureOutput(
-                        "test -f \"$videoPath\" && echo 1 || echo 0",
+
+                // 外部存储文件，app 进程可直接访问
+                if (workVideo == null || !workVideo.isFile) {
+                    // 通过 shell test -f 二次确认（绕过可能的 FUSE 延迟）
+                    val shellFound = workVideo != null && "1" == PrivilegedShell.captureOutput(
+                        "test -f \"${workVideo.absolutePath}\" && echo 1 || echo 0",
                     )?.trim()
-                    if (shellFound) {
-                        chownWorkVideoToApp(videoPath!!)
-                    }
-                    if (workVideo == null || !workVideo.exists()) {
+                    if (!shellFound) {
                         currentCaptureTs = null
                         mainHandler.post {
                             toastMain(getString(R.string.record_saved_missing))
@@ -1012,20 +1003,8 @@ class RearScreenRecordService : Service() {
                         return@thread
                     }
                 }
-
-                // 修复 root 写入的文件权限
-                chownWorkVideoToApp(workVideo.absolutePath)
-                if (!workVideo.canRead()) {
-                    RecordSynthDebugLog.diagW("stop: video unreadable after chown path=$videoPath")
-                    mainHandler.post {
-                        toastMain(getString(R.string.record_saved_missing))
-                        afterStopUi(closeView)
-                    }
-                    return@thread
-                }
-
                 val tsToken = currentCaptureTs
-                    ?: workVideo.name.removePrefix("miroot_rear_work_").takeIf { it.isNotEmpty() }
+                    ?: workVideo.name.removeSuffix(".mp4").removePrefix("MiRoot_").takeIf { it.isNotEmpty() }
                 currentCaptureTs = null
                 val moviesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES)
                 PrivilegedShell.execCmd("mkdir -p \"${moviesDir.absolutePath}\"")
@@ -1110,31 +1089,48 @@ class RearScreenRecordService : Service() {
                 }
 
                 if (!composite) {
-                    val copyOk = copyToMoviesPrivileged(videoForNext, finalVideo)
-                    if (copyOk) {
-                        if (videoForNext != workVideo) {
-                            try { videoForNext.delete() } catch (_: Exception) {}
-                        }
-                        PrivilegedShell.execCmd("rm -f \"${workVideo.absolutePath}\"")
+                    // 文件直接写到 Movies/（参考 MRSS），无需复制
+                    if (videoForNext.absolutePath == finalVideo.absolutePath) {
                         mediaScan(finalVideo)
-                        RecordSynthDebugLog.d("branch: copy to Movies -> ${finalVideo.length()} bytes")
-                    } else {
-                        RecordSynthDebugLog.diagW("branch: copy to Movies FAILED (copyOk=$copyOk)")
-                    }
-                    mainHandler.post {
-                        afterStopUi(closeView)
-                        if (copyOk) {
+                        RecordSynthDebugLog.d("branch: already in Movies -> " + finalVideo.length() + " bytes")
+                        mainHandler.post {
+                            afterStopUi(closeView)
                             toastMain(getString(R.string.record_done_process))
+                        }
+                    } else {
+                        // PCM 合并产物（在 cacheDir），需要复制到 Movies
+                        val copyOk = copyToMoviesPrivileged(videoForNext, finalVideo)
+                        if (copyOk) {
+                            try { videoForNext.delete() } catch (_: Exception) {}
+                            PrivilegedShell.execCmd("rm -f \"${workVideo.absolutePath}\"")
+                            mediaScan(finalVideo)
+                            RecordSynthDebugLog.d("branch: copy merged -> " + finalVideo.length() + " bytes")
                         } else {
-                            RecordSynthDebugLog.diagW("non-composite copyToMovies FAILED (even with shell cp)")
-                            toastMain(getString(R.string.record_process_fail, "cp_failed"))
+                            RecordSynthDebugLog.diagW("branch: copy merged to Movies FAILED")
+                        }
+                        mainHandler.post {
+                            afterStopUi(closeView)
+                            if (copyOk) {
+                                toastMain(getString(R.string.record_done_process))
+                            } else {
+                                toastMain(getString(R.string.record_process_fail, "cp_failed"))
+                            }
                         }
                     }
                     return@thread
                 }
 
+
                 val tmp = File(appCtx.cacheDir, "miroot_record_out_${System.currentTimeMillis()}.mp4")
-                val sourceForComposite = videoForNext
+                val compositeInput = if (composite) {
+                    File(appCtx.cacheDir, "miroot_composite_in_" + System.currentTimeMillis() + ".mp4").also { ci ->
+                        PrivilegedShell.execCmd("cp \"" + videoForNext.absolutePath + "\" \"" + ci.absolutePath + "\"")
+                        RecordSynthDebugLog.d("composite: cp input to " + ci.absolutePath)
+                    }
+                } else {
+                    videoForNext
+                }
+                val sourceForComposite = compositeInput
                 val cb = object : ShellMedia3Export.ExportCallback {
                     override fun onFinished(success: Boolean, outputOrNull: File?, error: String?) {
                         val tmpPath = tmp.absolutePath
@@ -1264,7 +1260,7 @@ class RearScreenRecordService : Service() {
                     }
                     ShellMedia3Export.mergePcmThenCompositeShell(
                         appCtx,
-                        workVideo,
+                        compositeInput,
                         pcmFile,
                         tmp,
                         pcmSampleRate = pcmRate,
@@ -1341,17 +1337,6 @@ class RearScreenRecordService : Service() {
         val comm = PrivilegedShell.captureOutput("ps -p $recordPid -o COMM= 2>/dev/null")?.trim().orEmpty()
         return comm == "screenrecord"
     }
-
-    private fun chownWorkVideoToApp(workPath: String) {
-        val dir = cacheDir.absolutePath
-        val cmd =
-            "test -f \"$workPath\" && " +
-                "chown \$(ls -nd \"$dir\" | awk '{print \$3\":\"\$4}') \"$workPath\" 2>/dev/null; " +
-                "chmod 644 \"$workPath\" 2>/dev/null || chmod 666 \"$workPath\" 2>/dev/null"
-        val ok = PrivilegedShell.execCmd(cmd)
-        RecordSynthDebugLog.d("chownWorkVideoToApp: run ok=$ok path=$workPath")
-    }
-
     private fun killScreenrecordFallback() {
         val pidof = PrivilegedShell.captureOutput("pidof screenrecord")?.trim().orEmpty()
         if (pidof.isNotEmpty()) {

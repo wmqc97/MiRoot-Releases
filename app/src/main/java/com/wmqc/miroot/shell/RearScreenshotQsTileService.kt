@@ -9,7 +9,7 @@ import android.service.quicksettings.TileService
 import android.widget.Toast
 import com.wmqc.miroot.AppExecutors
 import com.wmqc.miroot.R
-import com.wmqc.miroot.capability.EnvironmentProbe
+import com.wmqc.miroot.capability.PermissionCache
 
 /**
  * 快捷设置磁贴：背屏截图；是否带壳与功能页「带壳截图」开关一致（需 Root 或 Shizuku）。
@@ -59,5 +59,5 @@ class RearScreenshotQsTileService : TileService() {
     }
 
     private fun privilegedShellAvailable(): Boolean =
-        EnvironmentProbe.hasPrivilegedShellChannelSync()
+        PermissionCache.privileged
 }

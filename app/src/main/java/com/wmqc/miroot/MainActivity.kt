@@ -17,6 +17,7 @@ import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.wmqc.miroot.RearDisplayInputHelper
 import com.wmqc.miroot.license.OfflineActivationRepository
+import com.wmqc.miroot.capability.PermissionCache
 import com.wmqc.miroot.capability.PrivilegedShell
 import com.wmqc.miroot.charging.ChargingServiceSync
 import com.wmqc.miroot.lyrics.MusicProjectionPublicBroadcast
@@ -39,11 +40,11 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
 
     // Binder 异步就绪：须在收到/断开时重新探测，避免冷启动误判未授权（Shizuku.addBinderReceivedListener）。
     private val shizukuBinderReceivedListener = Shizuku.OnBinderReceivedListener {
-        permissionViewModel.refresh()
+        PermissionCache.onShizukuBinderReceived()
     }
 
     private val shizukuBinderDeadListener = Shizuku.OnBinderDeadListener {
-        permissionViewModel.refresh()
+        PermissionCache.onShizukuBinderDead()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,6 +54,7 @@ class MainActivity : AppCompatActivity(), Shizuku.OnRequestPermissionResultListe
         Shizuku.addRequestPermissionResultListener(this)
         Shizuku.addBinderReceivedListenerSticky(shizukuBinderReceivedListener)
         Shizuku.addBinderDeadListener(shizukuBinderDeadListener)
+        PermissionCache.refresh()
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)

@@ -13,7 +13,7 @@ import android.os.Looper
 import android.widget.Toast
 import com.wmqc.miroot.BuildConfig
 import com.wmqc.miroot.R
-import com.wmqc.miroot.capability.EnvironmentProbe
+import com.wmqc.miroot.capability.PermissionCache
 import com.wmqc.miroot.capability.PrivilegedShellRoute
 import com.wmqc.miroot.lyrics.ITaskService
 import com.wmqc.miroot.lyrics.LogHelper
@@ -83,9 +83,10 @@ class RearAppLaunchService : IntentService("RearAppLaunchService") {
         val appCtx = applicationContext
         val pkg = intent.getStringExtra(EXTRA_PACKAGE_NAME)?.trim().orEmpty()
         if (pkg.isEmpty()) return
-        val rootReady = EnvironmentProbe.probeRootSync()
-        val shizukuRunning = EnvironmentProbe.shizukuServiceRunning()
-        val shizukuGranted = EnvironmentProbe.shizukuPermissionGranted()
+        val snap = com.wmqc.miroot.capability.PermissionCache.snapshot
+        val rootReady = snap.root
+        val shizukuRunning = snap.shizukuRunning
+        val shizukuGranted = snap.shizukuGranted
         val route =
             when {
                 rootReady -> PrivilegedShellRoute.ROOT

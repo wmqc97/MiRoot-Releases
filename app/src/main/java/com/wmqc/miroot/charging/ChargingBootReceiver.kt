@@ -9,7 +9,7 @@ import android.os.Looper
 import android.os.UserManager
 import androidx.core.content.ContextCompat
 import com.wmqc.miroot.AppExecutors
-import com.wmqc.miroot.capability.EnvironmentProbe
+import com.wmqc.miroot.capability.PermissionCache
 
 /**
  * 开机后若用户已开启充电动画且特权通道可用，则拉起 [ChargingService]，
@@ -36,7 +36,7 @@ class ChargingBootReceiver : BroadcastReceiver() {
                 pendingResult.finish()
                 return@runInBackground
             }
-            if (!EnvironmentProbe.hasPrivilegedShellChannelSync()) {
+            if (!PermissionCache.privileged) {
                 pendingResult.finish()
                 return@runInBackground
             }

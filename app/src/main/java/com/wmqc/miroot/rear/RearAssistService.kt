@@ -19,7 +19,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.wmqc.miroot.R
-import com.wmqc.miroot.capability.EnvironmentProbe
+import com.wmqc.miroot.capability.PermissionCache
 import com.wmqc.miroot.capability.PrivilegedShell
 import com.wmqc.miroot.lyrics.RearScreenWakeManager
 import java.util.concurrent.Executors
@@ -304,7 +304,7 @@ class RearAssistService : Service() {
 
         @JvmStatic
         fun sync(context: Context) {
-            sync(context, EnvironmentProbe.hasPrivilegedShellChannelSync())
+            sync(context, PermissionCache.privileged)
         }
     }
 }

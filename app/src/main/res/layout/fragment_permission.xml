@@ -111,6 +111,7 @@
                             android:textColor="@color/mi_text_secondary"
                             android:textSize="12sp"
                             tools:text="背屏 v2.1.0" />
+
                     </LinearLayout>
 
                     <ImageView
