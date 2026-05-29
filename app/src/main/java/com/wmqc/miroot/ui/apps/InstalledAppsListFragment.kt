@@ -22,8 +22,10 @@ import com.wmqc.miroot.rear.RearAppLaunchService
 import com.wmqc.miroot.rear.desktop.RearDesktopListMode
 import com.wmqc.miroot.rear.desktop.RearDesktopPrefs
 import kotlin.concurrent.thread
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.wmqc.miroot.ui.music.MusicAutoProjectionPrefs
 
-/** 「应用」标签：搜索 + 列表；自选应用模式下右侧勾选加入背屏自选列表。 */
+/** 闁靛棗鑻花鏌ユ偨閵婏絺鍋撳鍡欏灱缂佹稒鎷濈槐浼村箹濠婂懎鍋?+ 闁告帗顨夐妴鍐晬濞戞粌娈伴梺顐㈩槸缁ㄦ煡鎮介妸未浣割嚕韫囧海鐟撻柛娆忓帠閺呭爼宕熸ィ鍐ｅ亾婢跺﹤顫ｉ柛蹇嬪劥閸庢浠﹁箛姘闂侇偄顦崹顏嗘偘閵婏絺鍋?*/
 class InstalledAppsListFragment : Fragment() {
 
     private var _binding: FragmentInstalledAppsListBinding? = null
@@ -39,7 +41,7 @@ class InstalledAppsListFragment : Fragment() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action != RearDesktopPrefs.ACTION_REAR_DESKTOP_PREFS_CHANGED) return
                 if (!isAdded || _binding == null) return
-                // 轻量刷新：模式切换/勾选变更时只重算当前列表，避免每次都重查包管理器造成抖动。
+                // 閺夌偛顭烽崳娲礆闁垮鐓€闁挎稒纰嶈啯鐎殿喖绻愰崹蹇涘箲?闁告洟绠栭埀顒€顦ぐ澶愬即鐎涙ɑ顦ч柛娆樹邯閸ｅ摜绮诲Δ鈧紞瀣礈瀹ュ懎鐏欓悶娑辩厜缁辨繈鏌嗛崹顔煎赋婵絽绻戦濂告焾娴犲娅㈤柡灞诲劚鐎垫绮婚敍鍕€為柛锝冨姂閳ь剛濮甸崹姘跺箮閺嵮冃楅柕?
                 refreshFromCacheOrReload()
             }
         }
@@ -59,7 +61,7 @@ class InstalledAppsListFragment : Fragment() {
         listAdapter =
             InstalledAppsAdapter(
                 onClick = { row -> showProjectionConfigDialog(row) },
-                onLongClick = { row -> launchAppOnRearDisplay(row.packageName) },
+                onLongClick = { row -> showAppLongPressDialog(row) },
                 onRearDesktopToggle = { row -> toggleRearDesktopMembership(row.packageName) },
             )
         binding.recyclerApps.layoutManager = LinearLayoutManager(requireContext())
@@ -105,7 +107,7 @@ class InstalledAppsListFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
-        // 回到页面时做一次全量重载，兜底外部应用安装/卸载变化。
+        // 闁搞儳鍋涢崺灞俱亜閻㈠憡妗ㄩ柡鍐硾娴犳稒绋夐埀顒€鈻庨垾鍐插伎闂佹彃绻橀崳鍛婃姜閺傘倗绀夐柛蹇旂矊缁ㄨ櫕寰勯弽顓炲姤閹煎瓨姊婚弫銈団偓鐟邦槼椤?闁告鐡曞ù鍥矗濡搫顕ч柕?
         loadAppsAsync()
     }
 
@@ -136,6 +138,7 @@ class InstalledAppsListFragment : Fragment() {
         latestLoadToken = token
         thread {
             val manualMode = RearDesktopPrefs.listMode(appContext) == RearDesktopListMode.MANUAL
+            val musicBlacklist = MusicAutoProjectionPrefs.blacklist(appContext)
             val manualIds =
                 if (manualMode) {
                     RearDesktopPrefs.manualOrder(appContext).toSet()
@@ -147,6 +150,7 @@ class InstalledAppsListFragment : Fragment() {
                     row.copy(
                         projectionConfig = AppProjectionDisplayPrefs.getConfig(appContext, row.packageName),
                         rearDesktopPinned = manualMode && row.packageName in manualIds,
+                        musicAutoProjectionBlacklisted = row.packageName in musicBlacklist,
                     )
                 }
             activity?.runOnUiThread {
@@ -170,15 +174,16 @@ class InstalledAppsListFragment : Fragment() {
             }
 
         listAdapter.showRearDesktopToggle = manualMode
+        val musicBlacklist = MusicAutoProjectionPrefs.blacklist(ctx)
 
         val q = query.trim().lowercase()
         val filtered =
             if (q.isEmpty()) {
                 allApps.map {
                     if (manualMode) {
-                        it.copy(rearDesktopPinned = it.packageName in manualIds)
+                        it.copy(rearDesktopPinned = it.packageName in manualIds, musicAutoProjectionBlacklisted = it.packageName in musicBlacklist)
                     } else {
-                        it.copy(rearDesktopPinned = false)
+                        it.copy(rearDesktopPinned = false, musicAutoProjectionBlacklisted = it.packageName in musicBlacklist)
                     }
                 }.sortedForDisplay(manualMode)
             } else {
@@ -187,9 +192,9 @@ class InstalledAppsListFragment : Fragment() {
                         row.label.lowercase().contains(q) || row.packageName.lowercase().contains(q)
                     }.map {
                         if (manualMode) {
-                            it.copy(rearDesktopPinned = it.packageName in manualIds)
+                            it.copy(rearDesktopPinned = it.packageName in manualIds, musicAutoProjectionBlacklisted = it.packageName in musicBlacklist)
                         } else {
-                            it.copy(rearDesktopPinned = false)
+                            it.copy(rearDesktopPinned = false, musicAutoProjectionBlacklisted = it.packageName in musicBlacklist)
                         }
                     }.sortedForDisplay(manualMode)
             }
@@ -265,10 +270,128 @@ class InstalledAppsListFragment : Fragment() {
         }
     }
 
+
+    // -----------------------------------------------------------------
+    //  Long-press dialog: back screen launch / music blacklist / desktop blacklist
+    // -----------------------------------------------------------------
+
+    private fun showAppLongPressDialog(row: InstalledAppRow) {
+        val ctx = requireContext()
+        val items = mutableListOf<CharSequence>()
+
+        items.add(getString(R.string.apps_long_press_launch_rear))
+        val musicToggleLabel =
+            if (MusicAutoProjectionPrefs.isBlacklisted(ctx, row.packageName)) {
+                getString(R.string.apps_long_press_music_blacklist_remove)
+            } else {
+                getString(R.string.apps_long_press_music_blacklist_add)
+            }
+        items.add(musicToggleLabel)
+
+        val fullBlacklist = MusicAutoProjectionPrefs.blacklist(ctx)
+        var manageIndex: Int? = null
+        if (fullBlacklist.isNotEmpty()) {
+            manageIndex = items.size
+            items.add(getString(R.string.apps_long_press_music_blacklist_manage))
+        }
+        items.add(getString(R.string.apps_long_press_rear_desktop_blacklist))
+
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle(row.label)
+            .setItems(items.toTypedArray<CharSequence>()) { dialog, which ->
+                when (which) {
+                    0 -> launchAppOnRearDisplay(row.packageName)
+                    1 -> toggleMusicAutoProjectionBlacklist(row.packageName)
+                    manageIndex -> showMusicBlacklistManageDialog()
+                    else -> addToRearDesktopBlacklist(row.packageName)
+                }
+                dialog.dismiss()
+            }
+            .show()
+    }
+
+    private fun toggleMusicAutoProjectionBlacklist(packageName: String) {
+        val ctx = requireContext().applicationContext
+        if (MusicAutoProjectionPrefs.isBlacklisted(ctx, packageName)) {
+            MusicAutoProjectionPrefs.removeFromBlacklist(ctx, packageName)
+            MainDisplayUi.showToast(
+                requireContext(),
+                getString(R.string.apps_music_blacklist_removed),
+                Toast.LENGTH_SHORT,
+            )
+        } else {
+            MusicAutoProjectionPrefs.addToBlacklist(ctx, packageName)
+            MainDisplayUi.showToast(
+                requireContext(),
+                getString(R.string.apps_music_blacklist_added),
+                Toast.LENGTH_SHORT,
+            )
+        }
+        
+        
+        val appIndex = allApps.indexOfFirst { it.packageName == packageName }
+        if (appIndex >= 0) {
+            val currentBlacklist = MusicAutoProjectionPrefs.blacklist(ctx)
+            allApps[appIndex] = allApps[appIndex].copy(
+                musicAutoProjectionBlacklisted = packageName in currentBlacklist
+            )
+        }
+        refreshFromCacheOrReload()
+    }
+
+    private fun showMusicBlacklistManageDialog() {
+        val ctx = requireContext()
+        val appCtx = ctx.applicationContext
+        val rows = allApps.filter { MusicAutoProjectionPrefs.isBlacklisted(appCtx, it.packageName) }
+        if (rows.isEmpty()) {
+            MainDisplayUi.showToast(ctx, R.string.apps_music_blacklist_empty, Toast.LENGTH_SHORT)
+            return
+        }
+        val labels = rows.map { it.label }.toTypedArray()
+        val checked = BooleanArray(rows.size) { true }
+
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle(R.string.apps_music_blacklist_manage_title)
+            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+                checked[which] = isChecked
+            }
+            .setPositiveButton(R.string.apps_music_blacklist_remove_selected) { _, _ ->
+                for (i in rows.indices) {
+                    if (checked[i]) {
+                        MusicAutoProjectionPrefs.removeFromBlacklist(appCtx, rows[i].packageName)
+                    }
+                }
+                refreshFromCacheOrReload()
+                MainDisplayUi.showToast(ctx, R.string.apps_music_blacklist_removed, Toast.LENGTH_SHORT)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun addToRearDesktopBlacklist(packageName: String) {
+        val ctx = requireContext().applicationContext
+        val cur = RearDesktopPrefs.blacklist(ctx).toMutableSet()
+        if (cur.add(packageName)) {
+            RearDesktopPrefs.setBlacklist(ctx, cur)
+            RearDesktopPrefs.notifyPrefsChanged(ctx)
+            MainDisplayUi.showToast(
+                requireContext(),
+                getString(R.string.apps_rear_desktop_blacklist_added),
+                Toast.LENGTH_SHORT,
+            )
+        } else {
+            MainDisplayUi.showToast(
+                requireContext(),
+                getString(R.string.apps_rear_desktop_blacklist_already),
+                Toast.LENGTH_SHORT,
+            )
+        }
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
         _binding = null
-    }
+        }
 }
 
 private fun List<InstalledAppRow>.sortedForDisplay(manualMode: Boolean): List<InstalledAppRow> =

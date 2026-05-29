@@ -1,4 +1,4 @@
-package com.wmqc.miroot.ui.music
+﻿package com.wmqc.miroot.ui.music
 import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.ComponentName
@@ -45,17 +45,21 @@ object MusicProjectionController {
 
     /**
      * 是否有任意媒体会话处于 [PlaybackState.STATE_PLAYING]。
-     * 无通知使用权等导致无法枚举会话时返回 null（调用方勿据此停止投屏）。
+     * 无通知使用权等导致无法枚举会话时返回 null（调用方据此停止投屏）。
+     * 已加入 [MusicAutoProjectionPrefs] 黑名单的应用会被跳过。
      */
     fun hasAnyPlayingSession(context: Context): Boolean? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return true
         return try {
+            val blacklist = MusicAutoProjectionPrefs.blacklist(context)
             val msm = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
             val cn = ComponentName(context, MiRootNotificationListenerService::class.java)
             val sessions = msm.getActiveSessions(cn)
             if (sessions.isEmpty()) return false
             for (s in sessions) {
                 val c = MediaController(context, s.sessionToken)
+                val pkg = c.packageName
+                if (pkg in blacklist) continue
                 val st = c.playbackState ?: continue
                 if (st.state == PlaybackState.STATE_PLAYING) return true
             }
@@ -65,7 +69,7 @@ object MusicProjectionController {
         }
     }
 
-    /** 背屏/主屏横屏歌词界面是否已展示歌词 UI（与 [com.wmqc.miroot.ui.music.MusicViewModel.refreshProjectionState] 一致）。 */
+    /** 背屏/主屏横屏歌词界面是否已显示歌词 UI（与 [com.wmqc.miroot.ui.music.MusicViewModel.refreshProjectionState] 一致）。*/
     fun isMusicProjectionUiActive(): Boolean {
         val act = RearScreenLyricsActivity.getCurrentInstance() ?: return false
         if (act.isFinishing) return false

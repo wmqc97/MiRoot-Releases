@@ -1,4 +1,4 @@
-<resources>
+﻿<resources>
     <string name="app_name">MiRoot</string>
 
     <string name="welcome_dialog_confirm">知道了</string>
@@ -844,4 +844,18 @@
     <string name="more_lyrics_dict_import_success">导入成功：新增 %1$d 条，当前运行时词库 %2$d 条</string>
     <string name="more_lyrics_dict_import_failed">导入失败：%1$s</string>
     <string name="more_lyrics_dict_runtime_path">运行时词库文件：%1$s</string>
+    <!-- 音乐自动投屏黑名单 -->
+    <string name="apps_music_blacklist_pill_short">音乐黑名单</string>
+    <string name="apps_long_press_launch_rear">背屏启动</string>
+    <string name="apps_long_press_music_blacklist_add">添加音乐黑名单</string>
+    <string name="apps_long_press_music_blacklist_remove">移出音乐黑名单</string>
+    <string name="apps_long_press_music_blacklist_manage">管理音乐黑名单...</string>
+    <string name="apps_long_press_rear_desktop_blacklist">加入桌面黑名单</string>
+    <string name="apps_music_blacklist_added">已加入音乐黑名单</string>
+    <string name="apps_music_blacklist_removed">已移出音乐黑名单</string>
+    <string name="apps_music_blacklist_empty">音乐黑名单为空</string>
+    <string name="apps_music_blacklist_manage_title">管理音乐黑名单</string>
+    <string name="apps_music_blacklist_remove_selected">移除所选</string>
+    <string name="apps_rear_desktop_blacklist_added">已加入桌面黑名单</string>
+    <string name="apps_rear_desktop_blacklist_already">已在桌面黑名单中</string>
 </resources>

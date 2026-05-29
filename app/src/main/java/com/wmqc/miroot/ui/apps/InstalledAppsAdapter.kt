@@ -1,4 +1,4 @@
-package com.wmqc.miroot.ui.apps
+﻿package com.wmqc.miroot.ui.apps
 
 import android.view.LayoutInflater
 import android.view.View
@@ -16,12 +16,11 @@ class InstalledAppsAdapter(
     private val onRearDesktopToggle: (InstalledAppRow) -> Unit,
 ) : ListAdapter<InstalledAppRow, InstalledAppsAdapter.Vh>(DIFF) {
 
-    /** 手动布局模式下显示右侧「背屏」勾选。 */
+    /** 手动布局模式下显示右侧「背屏」勾选。*/
     var showRearDesktopToggle: Boolean = false
         set(value) {
             if (field == value) return
             field = value
-            // 模式切换时，即使列表数据本身未变化，也要强制重绑可见项刷新勾选框可见性。
             notifyItemRangeChanged(0, itemCount)
         }
 
@@ -85,7 +84,10 @@ class InstalledAppsAdapter(
             if (item.rearDesktopPinned) {
                 segments.add(ctx.getString(R.string.apps_rear_desktop_in_layout_short))
             }
-            val combined = segments.joinToString(" · ")
+            if (item.musicAutoProjectionBlacklisted) {
+                segments.add(ctx.getString(R.string.apps_music_blacklist_pill_short))
+            }
+            val combined = segments.joinToString(" 路 ")
             binding.textAppProjectionConfig.text = combined
             binding.textAppProjectionConfig.visibility = if (combined.isEmpty()) View.GONE else View.VISIBLE
         }
@@ -100,7 +102,8 @@ class InstalledAppsAdapter(
                 oldItem.label == newItem.label &&
                     oldItem.packageName == newItem.packageName &&
                     oldItem.projectionConfig == newItem.projectionConfig &&
-                    oldItem.rearDesktopPinned == newItem.rearDesktopPinned
+                    oldItem.rearDesktopPinned == newItem.rearDesktopPinned &&
+                    oldItem.musicAutoProjectionBlacklisted == newItem.musicAutoProjectionBlacklisted
         }
     }
 }
