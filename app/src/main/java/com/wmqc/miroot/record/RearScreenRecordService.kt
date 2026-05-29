@@ -1127,8 +1127,14 @@ class RearScreenRecordService : Service() {
                 val tmp = File(appCtx.cacheDir, "miroot_record_out_${System.currentTimeMillis()}.mp4")
                 val compositeInput = if (composite) {
                     File(appCtx.cacheDir, "miroot_composite_in_" + System.currentTimeMillis() + ".mp4").also { ci ->
-                        PrivilegedShell.execCmd("cp \"" + videoForNext.absolutePath + "\" \"" + ci.absolutePath + "\"")
-                        RecordSynthDebugLog.d("composite: cp input to " + ci.absolutePath)
+                        try {
+                            videoForNext.inputStream().use { input ->
+                                ci.outputStream().use { output -> input.copyTo(output) }
+                            }
+                            RecordSynthDebugLog.d("composite: cp input OK to " + ci.absolutePath)
+                        } catch (e: Exception) {
+                            RecordSynthDebugLog.diagW("composite: cp input failed: ${e.message}")
+                        }
                     }
                 } else {
                     videoForNext
