@@ -12,9 +12,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <!-- API 34+：AudioRecord（含 AudioPlaybackCapture 内录）视为麦克风类前台使用，须与 manifest 中 microphone 类型一致 -->
+    <!-- API 34+閿涙udioRecord閿涘牆鎯?AudioPlaybackCapture 閸愬懎缍嶉敍澶庮潒娑撴椽瀹抽崗瀣棑缁澧犻崣棰佸▏閻㈩煉绱濇い璁崇瑢 manifest 娑?microphone 缁鐎锋稉鈧懛?-->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <!-- 有 Root/Shizuku 时可 pm grant；REMOTE_SUBMIX 系统混音内录 -->
+    <!-- 閺?Root/Shizuku 閺冭泛褰?pm grant閿涙被EMOTE_SUBMIX 缁崵绮哄ǎ鐑界叾閸愬懎缍?-->
     <uses-permission
         android:name="android.permission.CAPTURE_AUDIO_OUTPUT"
         tools:ignore="ProtectedPermissions" />
@@ -34,7 +34,7 @@
         <package android:name="rikka.shizuku" />
         <package android:name="com.xiaomi.subscreencenter" />
         <package android:name="com.geely.consumer" />
-        <!-- 悬浮窗：小米安全中心（Xiaomi HyperOS 兼容）权限页 -->
+        <!-- 閹剚璇炵粣妤嬬窗鐏忓繒鑳岀€瑰鍙忔稉顓炵妇閿涘湺iaomi HyperOS 閸忕厧顔愰敍澶嬫綀闂勬劙銆?-->
         <package android:name="com.miui.securitycenter" />
     </queries>
 
@@ -52,19 +52,19 @@
         android:networkSecurityConfig="@xml/network_security_config">
 
         <!--
-          Target API 36：在 sw600dp+ 大屏上系统默认忽略方向/比例限制；
-          背屏歌词等依赖 setRequestedOrientation，暂保留兼容模式（API 37 起将失效，需改为自适应布局）。
+          Target API 36閿涙艾婀?sw600dp+ 婢堆冪潌娑撳﹦閮寸紒鐔肩帛鐠併倕鎷烽悾銉︽煙閸?濮ｆ柧绶ラ梽鎰煑閿?
+          閼冲苯鐫嗗宀冪槤缁涘绶风挧?setRequestedOrientation閿涘本娈忔穱婵堟殌閸忕厧顔愬Ο鈥崇础閿涘湏PI 37 鐠у嘲鐨㈡径杈ㄦ櫏閿涘矂娓堕弨閫涜礋閼奉亪鈧倸绨茬敮鍐ㄧ湰閿涘鈧?
         -->
         <property
             android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
             android:value="true" />
 
-        <!-- 🔑 关键：背屏准入证！已验证有效！ -->
+        <!-- 棣冩斀 閸忔娊鏁敍姘冲剹鐏炲繐鍣崗銉ㄧ槈閿涗礁鍑℃宀冪槈閺堝鏅ラ敍?-->
         <meta-data
             android:name="miui.rear.policy"
             android:value="1"/>
 
-        <!-- SuperLyric API 接入声明 -->
+        <!-- SuperLyric API 閹恒儱鍙嗘竟鐗堟 -->
         <meta-data
             android:name="superlyricapi"
             android:value="true"
@@ -103,7 +103,7 @@
             android:label="@string/app_name"
             android:theme="@style/Theme.MiRoot"
             android:enableOnBackInvokedCallback="false">
-            <!-- 背屏策略与专用页一致：miui.rear.policy（预测性返回已关闭） -->
+            <!-- 閼冲苯鐫嗙粵鏍殣娑撳簼绗撻悽銊┿€夋稉鈧懛杈剧窗miui.rear.policy閿涘牓顣╁ù瀣偓褑绻戦崶鐐插嚒閸忔娊妫撮敍?-->
             <meta-data
                 android:name="miui.rear.policy"
                 android:value="miui" />
@@ -144,7 +144,7 @@
                 android:value="miui" />
         </activity>
 
-        <!-- 独立 taskAffinity：避免与 MainActivity 同任务，弹出系统录屏授权时把整个 MiRoot 主界面拉到前台 -->
+        <!-- 閻欘剛鐝?taskAffinity閿涙岸浼╅崗宥勭瑢 MainActivity 閸氬奔鎹㈤崝鈽呯礉瀵懓鍤化鑽ょ埠瑜版洖鐫嗛幒鍫熸綀閺冭埖濡搁弫缈犻嚋 MiRoot 娑撹崵鏅棃銏″閸掓澘澧犻崣?-->
         <activity
             android:name=".record.MediaProjectionRequestActivity"
             android:exported="false"
@@ -303,7 +303,7 @@
             android:name=".lyrics.ScreenshotSavedReceiver"
             android:exported="false" />
 
-        <!-- 通知栏结束投屏：显式 Broadcast，避免 PendingIntent 拉起 Activity 在主屏闪一下 -->
+        <!-- 闁氨鐓￠弽蹇曠波閺夌喐濮囩仦蹇ョ窗閺勬儳绱?Broadcast閿涘矂浼╅崗?PendingIntent 閹峰鎹?Activity 閸︺劋瀵岀仦蹇涙／娑撯偓娑?-->
         <receiver
             android:name=".rear.ProjectionNotificationStopReceiver"
             android:exported="false" />
@@ -541,6 +541,14 @@
                 <action android:name="android.intent.action.USER_UNLOCKED" />
             </intent-filter>
         </receiver>
-    </application>
+            <activity
+            android:name=".record.SaveStrategyTestActivity"
+            android:exported="false"
+            android:label="@string/save_strategy_test_title"
+            android:theme="@style/Theme.MiRoot"
+            android:enableOnBackInvokedCallback="false" />
+
+</application>
 
 </manifest>
+

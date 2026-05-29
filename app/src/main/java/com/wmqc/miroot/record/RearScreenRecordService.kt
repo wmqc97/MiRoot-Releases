@@ -50,6 +50,7 @@ import com.wmqc.miroot.lyrics.RearScreenWakeService
 import com.wmqc.miroot.rear.RearAssistPrefs
 import com.wmqc.miroot.capability.PrivilegedShell
 import com.wmqc.miroot.capability.RuntimePermissionGate
+import com.wmqc.miroot.capability.PermissionCache
 import com.wmqc.miroot.shell.DeviceGeometry
 import com.wmqc.miroot.shell.ShellMedia3Export
 import java.io.File
@@ -111,6 +112,8 @@ class RearScreenRecordService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile
     private var stopWorker: Thread? = null
+    @Volatile
+    private var lastCopyUsedContentResolver = false
 
     /**
      * 录屏专属常亮：仅读取「录屏/截图常亮」开关；与投屏常亮设置逻辑分离。
@@ -673,10 +676,10 @@ class RearScreenRecordService : Service() {
             isStarting = true
         }
         RecordSynthDebugLog.diagI(
-            "start: enter privilegedOk=${privilegedOk()} cacheDir=${cacheDir.absolutePath} " +
+            "start: enter privilegedOk=${PermissionCache.privileged} cacheDir=${cacheDir.absolutePath} " +
                 "hasProjection=${mediaProjection != null}",
         )
-        if (!privilegedOk()) {
+        if (!PermissionCache.privileged) {
             RecordSynthDebugLog.diagW("start: abort — no privileged shell (Root/Shizuku)")
             synchronized(stateLock) { isStarting = false }
             resetAfterFail(recordView, closeView)
@@ -1420,11 +1423,13 @@ class RearScreenRecordService : Service() {
                     put(android.provider.MediaStore.Video.Media.IS_PENDING, 0)
                 }
             }
-            val inserted = contentResolver.insert(
+            if (!lastCopyUsedContentResolver) {
+                val inserted = contentResolver.insert(
                 android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                 values,
             )
             RecordSynthDebugLog.diagI("mediaScan: ContentResolver insert inserted=$inserted")
+            }
         } catch (e: Exception) {
             RecordSynthDebugLog.diagW("mediaScan ContentResolver insert failed: ${e.message}")
         }
@@ -1441,20 +1446,44 @@ class RearScreenRecordService : Service() {
         }
     }
 
-    private fun privilegedOk(): Boolean =
-        com.wmqc.miroot.capability.EnvironmentProbe.hasPrivilegedShellChannelSync()
-
     /**
      * 直接用特权 shell `cp` 写入 Movies（绕过 Android 11+ 分区存储限制）。
      * Root 优先，失败自动回退 Shizuku（由 [PrivilegedShell.execCmd] 保证）。
      * 仅依赖 shell exit code，不检查 Java File API（分区存储下不可见）。
      */
+    /**
+     * Shell cp first, then ContentResolver fallback for Shizuku+SELinux.
+     * Sets [lastCopyUsedContentResolver] so mediaScan can skip its own ContentResolver insert.
+     */
     private fun copyToMoviesPrivileged(src: File, dst: File): Boolean {
+        lastCopyUsedContentResolver = false
         try {
             dst.parentFile?.mkdirs()
-            return PrivilegedShell.execCmd("cp \"${src.absolutePath}\" \"${dst.absolutePath}\" && sync")
+            // 1) Try shell cp
+            if (PrivilegedShell.execCmd("cp \"${src.absolutePath}\" \"${dst.absolutePath}\" && sync")) {
+                if (dst.isFile && dst.length() > 0L) return true
+            }
+        } catch (_: Exception) { }
+        // 2) ContentResolver fallback (Shizuku SELinux-safe)
+        return try {
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, dst.name)
+                put(android.provider.MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(android.provider.MediaStore.Video.Media.RELATIVE_PATH, "Movies")
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    put(android.provider.MediaStore.Video.Media.IS_PENDING, 0)
+                }
+            }
+            val uri = contentResolver.insert(
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values
+            ) ?: return false
+            contentResolver.openOutputStream(uri)?.use { out ->
+                src.inputStream().use { it.copyTo(out) }
+            } ?: run { contentResolver.delete(uri, null, null); return false }
+            lastCopyUsedContentResolver = true
+            true
         } catch (_: Exception) {
-            return false
+            false
         }
     }
 

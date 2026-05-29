@@ -858,4 +858,5 @@
     <string name="apps_music_blacklist_remove_selected">移除所选</string>
     <string name="apps_rear_desktop_blacklist_added">已加入桌面黑名单</string>
     <string name="apps_rear_desktop_blacklist_already">已在桌面黑名单中</string>
+    <string name="save_strategy_test_title">SaveStrategy Test</string>
 </resources>

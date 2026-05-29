@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
+    android:background="@color/mi_page_bg"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="录制存储方案测试"
+        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle"
+        android:layout_marginBottom="4dp"/>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="需要 Shizuku 权限。测试将创建 1MB 测试文件并用多种方案保存到 Movies/ 和私有目录，记录结果。"
+        android:textAppearance="@style/TextAppearance.MiRoot.Body"
+        android:textSize="13sp"
+        android:textColor="@color/mi_text_secondary"
+        android:layout_marginBottom="16dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="12dp">
+
+        <Button
+            android:id="@+id/btn_start_test"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="开始测试"/>
+
+        <Button
+            android:id="@+id/btn_share_log"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="分享日志"/>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/text_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textAppearance="@style/TextAppearance.MiRoot.BodyStrong"
+        android:textSize="14sp"
+        android:layout_marginBottom="8dp"
+        android:text="就绪，请确保 Shizuku 已授权"/>
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/mi_card_surface"
+        android:padding="8dp">
+
+        <TextView
+            android:id="@+id/text_log"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textAppearance="@style/TextAppearance.MiRoot.Body"
+            android:textSize="11sp"
+            android:typeface="monospace"
+            android:lineSpacingExtra="2dp"
+            android:text="等待开始..."/>
+    </ScrollView>
+</LinearLayout>

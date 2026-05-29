@@ -1,5 +1,6 @@
 package com.wmqc.miroot.ui.permission
 import com.wmqc.miroot.display.MainDisplayUi
+import com.wmqc.miroot.BuildConfig
 
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -45,6 +46,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.wmqc.miroot.record.SaveStrategyTestActivity
 
 class PermissionFragment : Fragment(R.layout.fragment_permission) {
 
@@ -154,6 +156,13 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
             val ctx = requireContext()
             if (RuntimePermissionGate.hasAllFilesAccess(ctx)) return@setOnClickListener
             openRuntimeSetting { RuntimePermissionGate.intentAllFilesAccess(it) }
+        }
+        if (BuildConfig.DEBUG) {
+            binding.rowSaveTest.visibility = View.VISIBLE
+            binding.rowSaveTest.setOnClickListener {
+                val intent = Intent(requireContext(), SaveStrategyTestActivity::class.java)
+                startActivity(intent)
+            }
         }
         binding.rowOverlay.setOnClickListener {
             val ctx = requireContext()
