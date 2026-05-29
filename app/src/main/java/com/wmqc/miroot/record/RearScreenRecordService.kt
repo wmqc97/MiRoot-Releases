@@ -114,6 +114,7 @@ class RearScreenRecordService : Service() {
     private var stopWorker: Thread? = null
     @Volatile
     private var lastCopyUsedContentResolver = false
+    private var recordLogFile: java.io.File? = null  // user-facing recording log
 
     /**
      * 录屏专属常亮：仅读取「录屏/截图常亮」开关；与投屏常亮设置逻辑分离。
@@ -700,6 +701,7 @@ class RearScreenRecordService : Service() {
                 PrivilegedShell.execCmd("mkdir -p \"${moviesDir.absolutePath}\"")
                 val path = File(moviesDir, "MiRoot_$ts").absolutePath
                 currentVideoPath = path
+                appendRecordLog("START ts=$ts path=$path composite=$sessionCompositeEnabled audio=$sessionAudioWanted")
                 RecordSynthDebugLog.diagI("start: workPath=$path ts=$ts")
 
                 // API 34+：须先以 mediaProjection(+microphone) 类型完成 startForeground，再采内录；否则
@@ -1019,6 +1021,7 @@ class RearScreenRecordService : Service() {
                 // PCM 音频合并/带壳合成
                 val pcmFile = pcmPathForMerge?.let { File(it) }
                 val pcmLen = pcmFile?.takeIf { it.isFile }?.length() ?: 0L
+                appendRecordLog("STOP workSize=${workVideo.length()} composite=$composite pcmLen=$pcmLen pcmMerge=$tryPcmMerge")
                 val doMerge = tryPcmMerge && pcmLen >= AudioCaptureHelper.MIN_VALID_BYTES
                 val singlePassShellWithPcm = composite && doMerge && pcmFile != null
 
@@ -1096,6 +1099,8 @@ class RearScreenRecordService : Service() {
                     if (videoForNext.absolutePath == finalVideo.absolutePath) {
                         mediaScan(finalVideo)
                         RecordSynthDebugLog.d("branch: already in Movies -> " + finalVideo.length() + " bytes")
+                        appendRecordLog("DONE nonComposite finalSize=${finalVideo.length()} inMovies=true")
+                        try { recordLogFile?.let { if (it.isFile && it.length() > 0L) it.copyTo(java.io.File(finalVideo.parent, finalVideo.name.replace(".mp4", "_log.txt")), overwrite = true) } } catch (_: Exception) { }
                         mainHandler.post {
                             afterStopUi(closeView)
                             toastMain(getString(R.string.record_done_process))
@@ -1108,6 +1113,8 @@ class RearScreenRecordService : Service() {
                             PrivilegedShell.execCmd("rm -f \"${workVideo.absolutePath}\"")
                             mediaScan(finalVideo)
                             RecordSynthDebugLog.d("branch: copy merged -> " + finalVideo.length() + " bytes")
+                        appendRecordLog("DONE nonComposite merged finalSize=${finalVideo.length()} usedCR=$lastCopyUsedContentResolver")
+                        try { recordLogFile?.let { if (it.isFile && it.length() > 0L) it.copyTo(java.io.File(finalVideo.parent, finalVideo.name.replace(".mp4", "_log.txt")), overwrite = true) } } catch (_: Exception) { }
                         } else {
                             RecordSynthDebugLog.diagW("branch: copy merged to Movies FAILED")
                         }
@@ -1166,6 +1173,8 @@ class RearScreenRecordService : Service() {
                                     try {
                                         if (!copyToMoviesPrivileged(tmp, finalVideo)) {
                                             errorDetail = "cp_to_movies_failed"
+                                        } else {
+                                            appendRecordLog("COMPOSITE OK finalSize=${finalVideo.length()} usedCR=$lastCopyUsedContentResolver")
                                         }
                                     } catch (e: Exception) {
                                         RecordSynthDebugLog.diagW(
@@ -1182,6 +1191,7 @@ class RearScreenRecordService : Service() {
                                             if (sourceForComposite.isFile && sourceForComposite.length() > 0L &&
                                                 copyToMoviesPrivileged(sourceForComposite, finalVideo)
                                             ) {
+                                                appendRecordLog("COMPOSITE FAILED rawFallback srcSize=${sourceForComposite.length()}")
                                                 RecordSynthDebugLog.diagI(
                                                     "composite failed, raw fallback saved to Movies " +
                                                         "len=${sourceForComposite.length()}",
@@ -1249,6 +1259,7 @@ class RearScreenRecordService : Service() {
                                     sourceForComposite.delete()
                                 } catch (_: Exception) {
                                 }
+                                try { recordLogFile?.let { if (it.isFile && it.length() > 0L) it.copyTo(java.io.File(finalVideo.parent, finalVideo.name.replace(".mp4", "_log.txt")), overwrite = true) } } catch (_: Exception) { }
                                 if (fileExistsInPublicStorage(finalVideo)) {
                                     mediaScan(finalVideo)
                                 }
@@ -1698,6 +1709,14 @@ class RearScreenRecordService : Service() {
             .setContentIntent(pi)
             .setOngoing(true)
             .build()
+    }
+
+    private fun appendRecordLog(msg: String) {
+        try {
+            val f = recordLogFile ?: java.io.File(cacheDir, "miroot_record_user.log").also { recordLogFile = it }
+            val ts = java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.US).format(java.util.Date())
+            f.appendText("$ts $msg\n")
+        } catch (_: Exception) { }
     }
 
     companion object {
