@@ -51,7 +51,6 @@ import com.wmqc.miroot.BuildConfig
 import com.wmqc.miroot.RearDisplayInputHelper
 import com.wmqc.miroot.R
 import com.wmqc.miroot.lyrics.LogHelper
-import com.wmqc.miroot.lyrics.RootTaskServiceConnector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
@@ -289,9 +288,6 @@ class RearScreenDesktopActivity : ComponentActivity() {
     }
 
     override fun finish() {
-        RearMirootProjectionLifecycle.sendMainDisplayHomeBeforeProjectionEnd(
-            RootTaskServiceConnector.getIfConnected(),
-        )
         super.finish()
         @Suppress("DEPRECATION")
         overridePendingTransition(0, 0)

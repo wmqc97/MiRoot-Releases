@@ -3821,7 +3821,6 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     public void finish() {
         if (finishRequestedByMiRoot || projectionExitFlowStarted) {
             RearMirootProjectionLifecycle.hideWindowBeforeProjectionFinish(this);
-            RearMirootProjectionLifecycle.sendMainDisplayHomeBeforeProjectionEnd(taskService);
             RearMirootProjectionLifecycle.prepareRearDisplayBeforeFinish(getDisplayIdSafe(), taskService);
             if (initialDisplayId == 1 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 if (Build.VERSION.SDK_INT >= 34) {

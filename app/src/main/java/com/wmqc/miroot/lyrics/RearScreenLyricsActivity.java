@@ -8334,7 +8334,6 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     public void finish() {
         if (finishRequestedByMiRoot || projectionExitFlowStarted) {
             RearMirootProjectionLifecycle.hideWindowBeforeProjectionFinish(this);
-            RearMirootProjectionLifecycle.sendMainDisplayHomeBeforeProjectionEnd(taskService);
             RearMirootProjectionLifecycle.prepareRearDisplayBeforeFinish(getDisplayIdSafe(), taskService);
             if (initialDisplayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID
                     && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {

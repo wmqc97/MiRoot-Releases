@@ -155,8 +155,6 @@ public class RearScreenChargingActivity extends ComponentActivity {
     @Override
     public void finish() {
         if (finishRequestedByMiRoot) {
-            RearMirootProjectionLifecycle.sendMainDisplayHomeBeforeProjectionEnd(
-                    ChargingService.getTaskService());
         }
         prepareRearProjectionVisibleBeforeFinish();
         super.finish();
