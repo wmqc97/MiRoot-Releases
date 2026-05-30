@@ -753,6 +753,11 @@ public class RearScreenChargingActivity extends ComponentActivity {
                 }
             }
 
+            // 同步更新中央电量百分比（此前仅更新了底部信息栏）
+            int batteryPct = level * 100 / Math.max(scale, 1);
+            if (batteryTextView != null) {
+                batteryTextView.setText(batteryPct + "%");
+            }
             scheduleNextBatteryInfoQuery(3000L);
         } catch (Exception e) {
             LogHelper.w(TAG, "queryAndUpdateBatteryInfo: " + e.getMessage());
