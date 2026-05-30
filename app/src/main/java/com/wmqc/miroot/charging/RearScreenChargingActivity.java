@@ -724,6 +724,16 @@ public class RearScreenChargingActivity extends ComponentActivity {
                 current = bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CURRENT_NOW);
                 chargeCounterMicroAh = bm.getIntProperty(
                         BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER);
+
+                // Override level/scale from BATTERY_PROPERTY_CAPACITY
+                // (aligned with ChargingService.getBatteryLevel),
+                // ACTION_BATTERY_CHANGED sticky intent may be stale on some MIUI devices.
+                int capacity = bm.getIntProperty(
+                        BatteryManager.BATTERY_PROPERTY_CAPACITY);
+                if (capacity > 0 && capacity <= 100) {
+                    level = capacity;
+                    scale = 100;
+                }
             }
 
             // 功率 W = V × A
@@ -753,11 +763,9 @@ public class RearScreenChargingActivity extends ComponentActivity {
                 }
             }
 
-            // 同步更新中央电量百分比（此前仅更新了底部信息栏）
+            // 用权威电量刷新整个充电 UI（文字 + 液位 + 内部状态）
             int batteryPct = level * 100 / Math.max(scale, 1);
-            if (batteryTextView != null) {
-                batteryTextView.setText(batteryPct + "%");
-            }
+            updateBatteryLevel(batteryPct);
             scheduleNextBatteryInfoQuery(3000L);
         } catch (Exception e) {
             LogHelper.w(TAG, "queryAndUpdateBatteryInfo: " + e.getMessage());
