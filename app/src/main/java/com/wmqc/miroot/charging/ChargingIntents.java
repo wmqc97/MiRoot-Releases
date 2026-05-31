@@ -36,6 +36,10 @@ public final class ChargingIntents {
     public static final String ACTION_STOP_CHARGING_WAKEUP =
         "com.wmqc.miroot.charging.STOP_CHARGING_WAKEUP";
 
+    /** 功能页长按充电动画标题：背屏预览（不走插电冷却；动画常亮开启时与插电相同唤醒循环）。 */
+    public static final String ACTION_PREVIEW_CHARGING_ANIMATION =
+        "com.wmqc.miroot.charging.PREVIEW_CHARGING_ANIMATION";
+
     private ChargingIntents() {
     }
 }

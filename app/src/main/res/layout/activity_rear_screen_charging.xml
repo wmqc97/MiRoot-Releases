@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 背屏充电：陀螺仪+加速度计水波液面、触摸/自动涟漪 + 闪电图标 + 电量 + 底部信息卡 -->
+<!-- 背屏充电：底层视频/图片背景 + 水波液面 + 闪电/电量/信息 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/charging_container"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/charging_window_bg">
+
+    <TextureView
+        android:id="@+id/charging_background_video"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
 
     <com.wmqc.miroot.charging.GyroWaterRippleView
         android:id="@+id/gyro_water_ripple"
@@ -48,8 +54,7 @@
                 android:shadowRadius="12"
                 android:text="100%"
                 android:textColor="#FFFFFFFF"
-                android:textSize="60sp"
-                android:textStyle="bold" />
+                android:textSize="60sp" />
         </LinearLayout>
 
         <!-- 底部信息卡：无背景，在可见区域底部居中 -->

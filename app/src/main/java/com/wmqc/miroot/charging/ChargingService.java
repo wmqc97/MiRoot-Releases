@@ -112,6 +112,17 @@ public class ChargingService extends Service {
         }
     };
 
+    private final BroadcastReceiver previewReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (!ChargingIntents.ACTION_PREVIEW_CHARGING_ANIMATION.equals(intent.getAction())) {
+                return;
+            }
+            LogHelper.d(TAG, "收到功能页充电动画预览请求");
+            mainHandler.post(() -> executor.execute(ChargingService.this::triggerPreviewChargingAnimation));
+        }
+    };
+
     private final BroadcastReceiver resumeChargingReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -202,6 +213,13 @@ public class ChargingService extends Service {
             registerReceiver(stopWakeupReceiver, stopWakeupFilter);
         }
 
+        IntentFilter previewFilter = new IntentFilter(ChargingIntents.ACTION_PREVIEW_CHARGING_ANIMATION);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(previewReceiver, previewFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(previewReceiver, previewFilter);
+        }
+
         startForeground(NOTIF_ID, RearSwitchKeeperService.createServiceNotification(this));
         LogHelper.d(TAG, "ChargingService created");
     }
@@ -228,6 +246,11 @@ public class ChargingService extends Service {
             unregisterReceiver(stopWakeupReceiver);
         } catch (Exception e) {
             LogHelper.w(TAG, "unregisterReceiver stopWakeup: " + e.getMessage());
+        }
+        try {
+            unregisterReceiver(previewReceiver);
+        } catch (Exception e) {
+            LogHelper.w(TAG, "unregisterReceiver preview: " + e.getMessage());
         }
         try {
             unbindService(taskServiceConnection);
@@ -317,11 +340,7 @@ public class ChargingService extends Service {
     }
 
     private static int getBatteryLevel(Context context) {
-        BatteryManager bm = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
-        if (bm == null) {
-            return 0;
-        }
-        return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+        return ChargingBatteryLevel.getPercent(context);
     }
 
     private void acquireWakeLock(long timeoutMs) {
@@ -353,14 +372,23 @@ public class ChargingService extends Service {
     }
 
     private void showChargingOnRearScreen(int level, boolean isLocked) {
-        showChargingOnRearScreenWithRetry(level, isLocked, 0);
+        showChargingOnRearScreenWithRetry(level, isLocked, false, 0);
     }
 
-    private void showChargingOnRearScreenWithRetry(int level, boolean isLocked, int retryCount) {
+    private void showChargingOnRearScreenPreview(int level) {
+        showChargingOnRearScreenWithRetry(level, false, true, 0);
+    }
+
+    private void showChargingOnRearScreenWithRetry(
+        int level,
+        boolean isLocked,
+        boolean previewMode,
+        int retryCount
+    ) {
         if (taskService == null) {
             if (retryCount < TASK_SERVICE_READY_RETRY_MAX) {
                 mainHandler.postDelayed(
-                    () -> showChargingOnRearScreenWithRetry(level, isLocked, retryCount + 1),
+                    () -> showChargingOnRearScreenWithRetry(level, isLocked, previewMode, retryCount + 1),
                     TASK_SERVICE_READY_RETRY_STEP_MS);
             }
             return;
@@ -375,15 +403,18 @@ public class ChargingService extends Service {
 
             int rearDisplayId = REAR_DISPLAY_ID;
 
+            String previewExtra = previewMode ? " --ez " + RearScreenChargingActivity.EXTRA_PREVIEW_MODE + " true" : "";
             String component = getPackageName() + "/" + RearScreenChargingActivity.class.getName();
             String mainCmd = "am start -n " + component
                 + " --ei batteryLevel " + level
                 + " --ei rearTaskId " + rearTaskId
-                + " --ei rearDisplayId " + rearDisplayId;
+                + " --ei rearDisplayId " + rearDisplayId
+                + previewExtra;
             String directCmd = "am start --display " + rearDisplayId + " -n " + component
                 + " --ei batteryLevel " + level
                 + " --ei rearTaskId " + rearTaskId
-                + " --ei rearDisplayId " + rearDisplayId;
+                + " --ei rearDisplayId " + rearDisplayId
+                + previewExtra;
 
             RearActivityLaunchSpec launchSpec = new RearActivityLaunchSpec(
                 "RearScreenChargingActivity",
@@ -407,7 +438,9 @@ public class ChargingService extends Service {
                 return;
             }
 
-            if (isLocked) {
+            if (previewMode) {
+                LogHelper.d(TAG, "功能页预览：充电动画已在背屏启动 level=" + level);
+            } else if (isLocked) {
                 LogHelper.d(TAG, "锁屏状态，充电动画已在背屏启动");
             } else {
                 LogHelper.d(TAG, "亮屏状态，充电动画已在背屏启动");
@@ -416,6 +449,33 @@ public class ChargingService extends Service {
             LogHelper.w(TAG, "showChargingOnRearScreen failed: " + e.getMessage());
         } finally {
             releaseWakeLock();
+        }
+    }
+
+    private void triggerPreviewChargingAnimation() {
+        Context app = getApplicationContext();
+        int level = getBatteryLevel(app);
+        if (RearChargingAnimationCoordinator.isAnimationPlaying()) {
+            finishChargingAnimation();
+            mainHandler.postDelayed(() -> startPreviewChargingOnRear(level), 450L);
+            return;
+        }
+        startPreviewChargingOnRear(level);
+    }
+
+    private void startPreviewChargingOnRear(int level) {
+        RearChargingAnimationCoordinator.AnimationType old =
+            RearChargingAnimationCoordinator.startAnimation(
+                RearChargingAnimationCoordinator.AnimationType.CHARGING);
+        if (old == RearChargingAnimationCoordinator.AnimationType.NOTIFICATION) {
+            RearChargingAnimationCoordinator.sendInterruptBroadcast(
+                getApplicationContext(),
+                RearChargingAnimationCoordinator.AnimationType.NOTIFICATION);
+        }
+        showChargingOnRearScreenPreview(level);
+        reloadChargingPrefsFromDisk();
+        if (chargingAlwaysOnEnabled) {
+            mainHandler.post(this::startWakeupAndUpdateLoop);
         }
     }
 

@@ -39,6 +39,8 @@
     <string name="update_log_v189_message">【简短说明】\nMiRoot 已更新至 V1.8.9：新增在线版本更新检查、逐字高亮进度准确性与切歌清旧歌词优化。\n\n【更新内容】\n• 新增「版本更新」：状态页支持检查 GitHub 新版本，一键下载与安装更新。\n• 歌词逐字高亮：修复逐字进度虚高问题（首字唱到一半显示 80%），预计算总权重后字时长加权更准确。\n• LRC 逐字等分拉伸：网络歌词内嵌逐字时间戳不均匀时自动等分到行时长，逐字高亮速度与演唱匹配。\n• 切歌清歌词：切换歌曲后立即清空旧歌词视图，减少残留与错句。\n• 背屏歌词投屏、显示体验持续优化。\n• 修复若干已知问题。</string>
     <string name="update_log_v190_title">MiRoot V1.9.0 更新</string>
     <string name="update_log_v190_message">【简短说明】\nMiRoot 已更新至 V1.9.0：升级弹窗焕新，自定义背景开关新增，背屏体验与稳定性持续改进。\n\n【更新内容】\n• 版本更新弹窗全新改版：更清晰的版本对比布局，更新日志独立展示，下载交互更直观。\n• 自定义背景功能：背屏支持自定义背景图片/视频，提供更多个性化选择。\n• 背屏歌词显示、投屏稳定性与切歌衔接持续优化。\n• Root / Shizuku 调用链路与异常兜底持续改进。\n• 修复若干已知问题。</string>
+    <string name="update_log_v200_title">MiRoot V2.0 更新</string>
+    <string name="update_log_v200_message">【简短说明】\nMiRoot 已更新至 V2.0：背屏充电动画全面焕新，背屏手势可一键唤起充电动画，并修复 Shizuku 权限下带壳录屏等关键问题。\n\n【新增】\n• 背屏充电动画：陀螺仪水波纹涨水、色盘自定义水体颜色（默认深绿）、场景图片/视频背景、水中漂浮电量与底部信息项（功率/时间/温度等可配置）。\n• 充电动画预览：功能页长按充电动画区块标题可在背屏预览；预览时长与「动画常亮」设置联动。\n• 背屏手势：新增「唤起背屏充电动画」互斥动作；默认上滑音乐歌词、左滑充电动画、右滑背屏桌面。\n• 截图/录屏导出：Shizuku 场景下公共相册保存优先 MediaStore，避免 shell 直拷产生 0 字节或相册不可见。\n\n【修复与优化】\n• 修复 Shizuku 授权下带壳录屏失败、合成异常或保存为空文件等问题。\n• 充电动画：液面涟漪与气泡表现优化；漂浮物与信息项默认偏移与显示策略调整。\n• 背屏歌词、投屏与 Root / Shizuku 调用链路持续改进。\n• 修复若干已知问题。</string>
     <string name="update_log_v195_title">MiRoot V1.9.5 更新</string>
     <string name="update_log_v195_message">【简短说明】\nMiRoot 已更新至 V1.9.5：充电动画常亮优化、背屏歌词修复与内存优化。\n\n【更新内容】\n• 充电动画：常亮开关开启时，背屏关闭后自动停止唤醒循环，避免背屏一直被点亮。\n• 充电动画：底部信息卡默认显示项调整为功率、预估充满时间、温度。\n• 背屏歌词：修复分词模式下逐字切换屏闪问题，过渡更平滑。\n• 修复车控页与歌词投屏页在 Release 构建中的崩溃问题。\n• 背屏内存优化：投屏歌词 Bitmap 及时回收并限制分辨率，减少内存占用。\n• 修复若干已知问题。</string>
     <string name="update_log_v194_title">MiRoot V1.9.4 更新</string>
@@ -106,7 +108,9 @@
     <string name="help_theme_meta_edit">选择主题包（.zip），编辑作者、名称、描述与预览图，保存后写回包内。</string>
     <string name="help_theme_cache">清理主题注入与视频替换产生的临时目录（MiRoot/theme_temp、video_replace 等）。有进行中的任务时请先结束再清理。</string>
     <string name="help_features_record_screenshot">背屏录屏悬浮窗：开始/停止录制、内录/带壳/贴图三开关；带壳截图、外框颜色、贴图与叠放坐标。依赖 Root/Shizuku 与悬浮窗权限。</string>
-    <string name="help_features_charging">背屏充电动画总开关、充满全屏时间（毫秒）。数值越小动画越快，越大越慢。实机效果因机型与系统可能略有差异。</string>
+    <string name="help_features_charging">背屏充电动画总开关、充满全屏时间、场景背景/视频、水体颜色（色盘内可调透明度，默认深绿）、水中漂浮物。漂浮物可选无、自定义图片或电量百分比。数值越小涨水越快。长按本区块标题可在背屏预览（时长随涨水设置与当前电量）。</string>
+    <string name="features_charging_preview_started">已在背屏启动充电动画预览，约 %1$.1f 秒后关闭</string>
+    <string name="features_charging_preview_started_always_on">已在背屏启动预览（动画常亮，不自动关闭）</string>
     <string name="help_features_rear_assist">含「禁用官方背屏服务」、合盖/遮挡检测、常亮服务、始终常亮与唤醒间隔。常亮服务仅在投屏（截图/录屏/音乐/车控/桌面/应用）运行时保持屏幕常亮，退出后自动关闭。若修改官方服务相关项后异常，可先关闭对应开关或恢复系统默认。</string>
     <string name="help_features_rear_dpi">调整背屏显示密度并锁定方向。密度改变后背屏图标与界面会整体缩放。需要 Root 或已授权 Shizuku。</string>
     <string name="features_section_rear_dpi">背屏 DPI</string>
@@ -548,6 +552,31 @@
     <string name="features_charging_animation_switch">启用</string>
     <string name="features_charging_always_on">动画常亮</string>
     <string name="features_charging_fill_speed_fmt">充满全屏约 %1$.1f 秒（越小越快，越大越慢）</string>
+    <string name="features_charging_pick_background">选择场景背景</string>
+    <string name="features_charging_reset_background">恢复纯黑背景</string>
+    <string name="features_charging_background_default">场景背景：纯黑</string>
+    <string name="features_charging_background_custom">场景背景：自定义图片</string>
+    <string name="features_charging_background_video">场景背景：自定义视频</string>
+    <string name="features_charging_background_picked">场景背景图片已更新</string>
+    <string name="features_charging_background_video_picked">场景背景视频已更新</string>
+    <string name="features_charging_background_copy_fail">保存场景背景图片失败</string>
+    <string name="features_charging_background_video_copy_fail">保存场景背景视频失败</string>
+    <string name="features_charging_background_reset_ok">已恢复纯黑背景</string>
+    <string name="features_charging_pick_background_video">选择背景视频</string>
+    <string name="features_charging_water_color_pick">选择颜色</string>
+    <string name="features_charging_water_color_dialog_title">水体颜色</string>
+    <string name="features_charging_water_opacity">水体透明度</string>
+    <string name="features_charging_water_opacity_value">%1$d%%</string>
+    <string name="features_charging_floating_title">水中漂浮</string>
+    <string name="features_charging_floating_none">无</string>
+    <string name="features_charging_floating_image">图片</string>
+    <string name="features_charging_floating_battery">电量</string>
+    <string name="features_charging_pick_mascot">选择漂浮图片</string>
+    <string name="features_charging_mascot_unselected">漂浮图片：未选择</string>
+    <string name="features_charging_mascot_custom">漂浮图片：已自定义</string>
+    <string name="features_charging_mascot_picked">卡通形象已更新</string>
+    <string name="features_charging_mascot_copy_fail">保存卡通形象失败</string>
+    <string name="features_charging_mascot_reset_ok">已恢复默认卡通形象</string>
     <string name="features_charging_info_items_title">背屏充电信息</string>
     <string name="features_charging_info_items_configure">配置</string>
     <!-- 仅系统「通知类别」里显示；前台服务必需，IMPORTANCE_NONE 下一般不弹出状态栏 -->
@@ -706,6 +735,14 @@
     <string name="record_no_screenrecord">系统无 screenrecord 命令</string>
     <string name="record_cmd_fail">启动 screenrecord 失败</string>
     <string name="record_proc_fail">录屏进程未启动</string>
+    <string name="record_proc_fail_reason">录屏进程未启动：%1$s</string>
+    <string name="record_shell_workdir_fail">无法创建录屏临时目录（/sdcard/MiRoot）</string>
+    <string name="record_shell_write_fail">Shell 无法写入录屏临时文件，请确认 Shizuku 已授权</string>
+    <string name="record_fail_reason_write">临时文件无写入权限</string>
+    <string name="record_fail_reason_display">背屏 displayId=%1$s 不可用</string>
+    <string name="record_fail_reason_no_pid">screenrecord 未生成进程（可能被系统拒绝）</string>
+    <string name="record_fail_reason_log">screenrecord 报错，详见日志</string>
+    <string name="record_fail_reason_generic">displayId=%1$s，输出=%2$s</string>
     <string name="record_stopping">正在停止录制并保存…</string>
     <string name="record_saved_missing">未找到输出文件</string>
     <string name="record_process_fail">后期处理失败：%1$s</string>
@@ -751,7 +788,7 @@
 
     <string name="rear_gesture_config_title">背屏手势配置</string>
     <string name="rear_gesture_config_card_title">三卡槽动作</string>
-    <string name="rear_gesture_config_intro">上滑、左滑、右滑对应槽位 1～3。桌面、歌词、车控、切换至背屏四种互斥（每种最多一槽），指定应用可多槽。主题广播由「主题 → 注入手势」决定，本页仅改动作映射。</string>
+    <string name="rear_gesture_config_intro">上滑、左滑、右滑对应槽位 1～3。桌面、歌词、车控、切换至背屏、充电动画五种互斥（每种最多一槽），指定应用可多槽。主题广播由「主题 → 注入手势」决定，本页仅改动作映射。</string>
     <string name="rear_gesture_slot_up">底部上滑（槽位 1）</string>
     <string name="rear_gesture_slot_left">底部左滑（槽位 2）</string>
     <string name="rear_gesture_slot_right">底部右滑（槽位 3）</string>
@@ -761,13 +798,14 @@
     <string name="rear_gesture_action_car">唤起车控界面</string>
     <string name="rear_gesture_action_app">唤起指定应用</string>
     <string name="rear_gesture_action_foreground_to_rear">切换至背屏</string>
+    <string name="rear_gesture_action_charging">唤起背屏充电动画</string>
     <string name="rear_gesture_pick_app">选择应用</string>
     <string name="rear_gesture_app_unknown">未安装或无法读取</string>
     <string name="pick_launcher_app_search_hint">搜索应用名或包名</string>
     <string name="pick_launcher_app_no_match">无匹配应用</string>
     <string name="rear_gesture_save">保存配置</string>
     <string name="rear_gesture_saved">已保存</string>
-    <string name="rear_gesture_save_note_mutual">同一互斥动作（桌面 / 音乐 / 车控 / 切换至背屏）不可占用多个槽位，已按上滑 → 左滑 → 右滑保留一处。</string>
+    <string name="rear_gesture_save_note_mutual">同一互斥动作（桌面 / 音乐 / 车控 / 切换至背屏 / 充电动画）不可占用多个槽位，已按上滑 → 左滑 → 右滑保留一处。</string>
     <string name="rear_gesture_save_note_launch">「指定应用」未选择应用，已改为无动作。</string>
     <string name="features_car_control">车控（吉利）</string>
     <string name="car_control_login_title">车控登录</string>
@@ -858,5 +896,5 @@
     <string name="apps_music_blacklist_remove_selected">移除所选</string>
     <string name="apps_rear_desktop_blacklist_added">已加入桌面黑名单</string>
     <string name="apps_rear_desktop_blacklist_already">已在桌面黑名单中</string>
-    <string name="save_strategy_test_title">SaveStrategy Test</string>
+    <string name="save_strategy_test_title">录制存储方案测试</string>
 </resources>

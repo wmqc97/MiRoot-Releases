@@ -12,6 +12,7 @@ import android.os.Build
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.content.ComponentName
 import android.content.ServiceConnection
@@ -48,6 +49,10 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import com.wmqc.miroot.charging.ChargingAnimationPrefs
 import com.wmqc.miroot.charging.ChargingIntents
+import com.wmqc.miroot.charging.ChargingBackgroundLoader
+import com.wmqc.miroot.charging.ChargingBatteryLevel
+import com.wmqc.miroot.charging.ChargingMascotLoader
+import com.wmqc.miroot.charging.ChargingPreviewLauncher
 import com.wmqc.miroot.charging.ChargingServiceSync
 import com.wmqc.miroot.charging.RearScreenChargingActivity
 import com.wmqc.miroot.databinding.DialogCompositeXyBinding
@@ -123,6 +128,45 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
     private val wakeSliderStepState = mutableIntStateOf(0)
     private val chargingFillSpeedStepState = mutableIntStateOf(27)
 
+    private val pickChargingMascotLauncher = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri: Uri? ->
+        if (!isAdded || uri == null) return@registerForActivityResult
+        val ctx = requireContext()
+        if (ChargingMascotLoader.copyFromUri(ctx, uri)) {
+            MainDisplayUi.showToast(ctx, R.string.features_charging_mascot_picked, Toast.LENGTH_SHORT)
+            syncChargingMascotStatusText()
+            sendReloadChargingSettingsBroadcast(ctx)
+        } else {
+            MainDisplayUi.showToast(ctx, R.string.features_charging_mascot_copy_fail, Toast.LENGTH_LONG)
+        }
+    }
+
+    private val pickChargingBackgroundLauncher = registerForActivityResult(
+        ActivityResultContracts.PickVisualMedia(),
+    ) { uri: Uri? ->
+        if (!isAdded || uri == null) return@registerForActivityResult
+        val ctx = requireContext()
+        val isVideo = ChargingBackgroundLoader.copyMediaFromUriIsVideo(ctx, uri)
+        if (ChargingBackgroundLoader.copyMediaFromUri(ctx, uri)) {
+            val toastRes = if (isVideo) {
+                R.string.features_charging_background_video_picked
+            } else {
+                R.string.features_charging_background_picked
+            }
+            MainDisplayUi.showToast(ctx, toastRes, Toast.LENGTH_SHORT)
+            syncChargingBackgroundStatusText()
+            sendReloadChargingSettingsBroadcast(ctx)
+        } else {
+            val failRes = if (isVideo) {
+                R.string.features_charging_background_video_copy_fail
+            } else {
+                R.string.features_charging_background_copy_fail
+            }
+            MainDisplayUi.showToast(ctx, failRes, Toast.LENGTH_LONG)
+        }
+    }
+
     private var featuresTitleTapCount = 0
     private var featuresTitleLastTapUptime = 0L
 
@@ -197,6 +241,28 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         }
         binding.textSectionFeaturesCharging.setOnClickListener {
             showSectionHelp(R.string.features_section_charging_animation, R.string.help_features_charging)
+        }
+        binding.textSectionFeaturesCharging.setOnLongClickListener {
+            if (!requirePrivilege()) {
+                return@setOnLongClickListener true
+            }
+            val ctx = requireContext()
+            ChargingServiceSync.sync(ctx, viewModel.snapshot.value?.privileged == true)
+            ChargingPreviewLauncher.requestPreview(ctx)
+            val toastRes = if (ChargingAnimationPrefs.isAlwaysOn(ctx)) {
+                R.string.features_charging_preview_started_always_on
+            } else {
+                val level = ChargingBatteryLevel.getPercent(ctx).coerceIn(0, 100)
+                val seconds = ChargingAnimationPrefs.estimateChargingVisibleDurationMs(ctx, level) / 1000f
+                MainDisplayUi.showToast(
+                    ctx,
+                    getString(R.string.features_charging_preview_started, seconds),
+                    Toast.LENGTH_SHORT,
+                )
+                return@setOnLongClickListener true
+            }
+            MainDisplayUi.showToast(ctx, toastRes, Toast.LENGTH_SHORT)
+            true
         }
         binding.textSectionFeaturesRearAssist.setOnClickListener {
             showSectionHelp(R.string.features_section_rear_assist, R.string.help_features_rear_assist)
@@ -547,6 +613,8 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
 
     private fun bindChargingAnimationSection() {
         setupChargingFillSpeedSliderCompose()
+        setupChargingWaterColorSection()
+        setupChargingFloatingDisplayToggle()
         syncChargingAnimationUiFromPrefs()
         binding.switchChargingAnimation.setOnCheckedChangeListener { _, checked ->
             if (suppressChargingAnimationCallbacks) return@setOnCheckedChangeListener
@@ -554,12 +622,29 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
                 suppressChargingAnimationCallbacks = true
                 binding.switchChargingAnimation.isChecked = !checked
                 suppressChargingAnimationCallbacks = false
-                setChargingFillSpeedSectionVisible(binding.switchChargingAnimation.isChecked)
+                setChargingSubSectionVisible(binding.switchChargingAnimation.isChecked)
                 return@setOnCheckedChangeListener
             }
             ChargingAnimationPrefs.setEnabled(requireContext(), checked)
             ChargingServiceSync.sync(requireContext(), viewModel.snapshot.value?.privileged == true)
-            setChargingFillSpeedSectionVisible(checked)
+            setChargingSubSectionVisible(checked)
+        }
+        binding.buttonChargingPickBackground.setOnClickListener {
+            pickChargingBackgroundLauncher.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo),
+            )
+        }
+        binding.buttonChargingResetBackground.setOnClickListener {
+            val ctx = requireContext()
+            ChargingBackgroundLoader.deleteCustom(ctx)
+            MainDisplayUi.showToast(ctx, R.string.features_charging_background_reset_ok, Toast.LENGTH_SHORT)
+            syncChargingBackgroundStatusText()
+            sendReloadChargingSettingsBroadcast(ctx)
+        }
+        binding.buttonChargingPickMascot.setOnClickListener {
+            pickChargingMascotLauncher.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+            )
         }
         binding.buttonChargingInfoItems.setOnClickListener {
             showChargingInfoItemsDialog()
@@ -571,15 +656,160 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         }
     }
 
+    private fun setupChargingWaterColorSection() {
+        binding.buttonChargingPickWaterColor.setOnClickListener {
+            showChargingWaterColorDialog()
+        }
+    }
+
+    private fun setupChargingFloatingDisplayToggle() {
+        binding.toggleChargingFloating.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked || suppressChargingAnimationCallbacks) return@addOnButtonCheckedListener
+            val ctx = requireContext()
+            val mode = when (checkedId) {
+                R.id.button_charging_floating_image -> ChargingAnimationPrefs.FLOATING_IMAGE
+                R.id.button_charging_floating_battery -> ChargingAnimationPrefs.FLOATING_BATTERY
+                else -> ChargingAnimationPrefs.FLOATING_NONE
+            }
+            ChargingAnimationPrefs.setFloatingDisplay(ctx, mode)
+            updateChargingMascotRowVisibility()
+            sendReloadChargingSettingsBroadcast(ctx)
+        }
+    }
+
+    private fun syncChargingFloatingDisplayUiFromPrefs() {
+        val mode = ChargingAnimationPrefs.getFloatingDisplay(requireContext())
+        binding.buttonChargingFloatingNone.isChecked = mode == ChargingAnimationPrefs.FLOATING_NONE
+        binding.buttonChargingFloatingImage.isChecked = mode == ChargingAnimationPrefs.FLOATING_IMAGE
+        binding.buttonChargingFloatingBattery.isChecked = mode == ChargingAnimationPrefs.FLOATING_BATTERY
+    }
+
+    private fun showChargingWaterColorDialog() {
+        val ctx = requireContext()
+        val dialogView = layoutInflater.inflate(R.layout.dialog_charging_water_color, null)
+        val wheel = dialogView.findViewById<HsvColorWheelView>(R.id.charging_water_color_wheel)
+        val preview = dialogView.findViewById<View>(R.id.charging_water_color_preview)
+        val hexText = dialogView.findViewById<android.widget.TextView>(R.id.charging_water_color_hex)
+        val opacitySlider = dialogView.findViewById<com.google.android.material.slider.Slider>(
+            R.id.charging_water_opacity_slider,
+        )
+        val opacityValue = dialogView.findViewById<android.widget.TextView>(R.id.charging_water_opacity_value)
+        var selected = ChargingAnimationPrefs.getWaterColor(ctx)
+        var opacity = ChargingAnimationPrefs.getWaterOpacityPercent(ctx)
+        wheel.setColor(selected)
+        opacitySlider.value = opacity.toFloat()
+        opacityValue.text = getString(R.string.features_charging_water_opacity_value, opacity)
+        refreshWaterColorDialogPreview(preview, hexText, selected, opacity)
+        wheel.onColorChanged = { color ->
+            selected = color
+            refreshWaterColorDialogPreview(preview, hexText, color, opacity)
+        }
+        opacitySlider.addOnChangeListener { _, value, _ ->
+            opacity = value.toInt().coerceIn(
+                ChargingAnimationPrefs.MIN_WATER_OPACITY_PERCENT,
+                ChargingAnimationPrefs.MAX_WATER_OPACITY_PERCENT,
+            )
+            opacityValue.text = getString(R.string.features_charging_water_opacity_value, opacity)
+            refreshWaterColorDialogPreview(preview, hexText, selected, opacity)
+        }
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle(R.string.features_charging_water_color_dialog_title)
+            .setView(dialogView)
+            .setPositiveButton(R.string.car_rear_btn_dialog_confirm) { _, _ ->
+                ChargingAnimationPrefs.setWaterColor(ctx, selected)
+                ChargingAnimationPrefs.setWaterOpacityPercent(ctx, opacity)
+                syncChargingWaterColorPreviewFromPrefs()
+                sendReloadChargingSettingsBroadcast(ctx)
+            }
+            .setNegativeButton(R.string.car_rear_btn_dialog_cancel, null)
+            .show()
+    }
+
+    private fun refreshWaterColorDialogPreview(
+        preview: View,
+        hexText: android.widget.TextView,
+        argb: Int,
+        opacityPercent: Int,
+    ) {
+        setWaterColorPreviewColor(preview, argb, opacityPercent)
+        hexText.text = formatWaterColorSummary(argb, opacityPercent)
+    }
+
+    private fun formatWaterColorSummary(argb: Int, opacityPercent: Int): String =
+        "${formatWaterColorHex(argb)} · ${opacityPercent}%"
+
+    private fun formatWaterColorHex(argb: Int): String =
+        String.format("#%06X", argb and 0xFFFFFF)
+
+    private fun setWaterColorPreviewColor(view: View, argb: Int, opacityPercent: Int = 100) {
+        val alpha = (255f * opacityPercent.coerceIn(0, 100) / 100f).toInt().coerceIn(0, 255)
+        val color = (argb and 0x00FFFFFF) or (alpha shl 24)
+        val bg = view.background?.mutate()
+        if (bg is GradientDrawable) {
+            bg.setColor(color)
+        } else {
+            view.setBackgroundColor(color)
+        }
+    }
+
+    private fun syncChargingWaterColorPreviewFromPrefs() {
+        val ctx = requireContext()
+        val color = ChargingAnimationPrefs.getWaterColor(ctx)
+        val opacity = ChargingAnimationPrefs.getWaterOpacityPercent(ctx)
+        setWaterColorPreviewColor(binding.viewChargingWaterColorPreview, color, opacity)
+        binding.textChargingWaterColorValue.text = formatWaterColorSummary(color, opacity)
+    }
+
+    private fun syncChargingWaterColorUiFromPrefs() {
+        syncChargingWaterColorPreviewFromPrefs()
+    }
+
     private fun syncChargingAlwaysOnUiFromPrefs() {
         binding.switchChargingAlwaysOn.isChecked =
             ChargingAnimationPrefs.isAlwaysOn(requireContext())
     }
 
-    private fun setChargingFillSpeedSectionVisible(enabled: Boolean) {
+    private fun setChargingSubSectionVisible(enabled: Boolean) {
         val v = if (enabled) View.VISIBLE else View.GONE
         binding.textChargingFillSpeedValue.visibility = v
         binding.composeChargingFillSpeedSlider.visibility = v
+        binding.layoutChargingBackground.visibility = v
+        binding.layoutChargingWaterColor.visibility = v
+        binding.textChargingFloatingTitle.visibility = v
+        binding.toggleChargingFloating.visibility = v
+        if (enabled) {
+            updateChargingMascotRowVisibility()
+        } else {
+            binding.layoutChargingMascot.visibility = View.GONE
+        }
+    }
+
+    private fun syncChargingBackgroundStatusText() {
+        val ctx = requireContext()
+        val textRes = when {
+            ChargingAnimationPrefs.hasCustomBackgroundVideo(ctx) ->
+                R.string.features_charging_background_video
+            ChargingAnimationPrefs.hasCustomBackground(ctx) ->
+                R.string.features_charging_background_custom
+            else -> R.string.features_charging_background_default
+        }
+        binding.textChargingBackgroundStatus.text = getString(textRes)
+    }
+
+    private fun updateChargingMascotRowVisibility() {
+        val show = binding.switchChargingAnimation.isChecked &&
+            binding.buttonChargingFloatingImage.isChecked
+        binding.layoutChargingMascot.visibility = if (show) View.VISIBLE else View.GONE
+    }
+
+    private fun syncChargingMascotStatusText() {
+        binding.textChargingMascotStatus.text = getString(
+            if (ChargingAnimationPrefs.hasCustomMascot(requireContext())) {
+                R.string.features_charging_mascot_custom
+            } else {
+                R.string.features_charging_mascot_unselected
+            },
+        )
     }
 
     private fun setupChargingFillSpeedSliderCompose() {
@@ -632,10 +862,16 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
 
     private fun syncChargingAnimationUiFromPrefs() {
         suppressChargingAnimationCallbacks = true
-        val enabled = ChargingAnimationPrefs.isEnabled(requireContext())
+        val ctx = requireContext()
+        val enabled = ChargingAnimationPrefs.isEnabled(ctx)
         binding.switchChargingAnimation.isChecked = enabled
+        syncChargingFloatingDisplayUiFromPrefs()
         suppressChargingAnimationCallbacks = false
-        setChargingFillSpeedSectionVisible(enabled)
+        setChargingSubSectionVisible(enabled)
+        syncChargingBackgroundStatusText()
+        syncChargingWaterColorUiFromPrefs()
+        syncChargingMascotStatusText()
+        updateChargingMascotRowVisibility()
         val fillP = ChargingAnimationPrefs.getFillRiseSpeedPercent(requireContext())
         chargingFillSpeedStepState.intValue = fillSpeedStepFromPercent(fillP)
         binding.textChargingFillSpeedValue.text =

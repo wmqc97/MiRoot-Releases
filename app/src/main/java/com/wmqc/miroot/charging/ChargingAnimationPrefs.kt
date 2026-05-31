@@ -1,6 +1,7 @@
 package com.wmqc.miroot.charging
 
 import android.content.Context
+import java.io.File
 import kotlin.jvm.JvmStatic
 import kotlin.math.roundToInt
 
@@ -22,6 +23,28 @@ object ChargingAnimationPrefs {
      * - 40% ≈ 8s（更慢）
      */
     const val KEY_FILL_RISE_SPEED_PERCENT: String = "charging_fill_rise_speed_percent"
+
+    /** 充电动画漂浮物：none=无，image=自定义图片，battery=电量百分比浮于水中。 */
+    const val KEY_FLOATING_DISPLAY: String = "charging_floating_display"
+    const val FLOATING_NONE: String = "none"
+    const val FLOATING_IMAGE: String = "image"
+    const val FLOATING_BATTERY: String = "battery"
+
+    /** @deprecated 已由 [KEY_FLOATING_DISPLAY] 与水体透明度替代，仅作迁移读取。 */
+    const val KEY_LIQUID_STYLE: String = "charging_liquid_style"
+    private const val LIQUID_STYLE_TRANSPARENT: String = "transparent"
+
+    private const val CHARGING_FILES_DIR: String = "charging"
+    private const val MASCOT_FILE_NAME: String = "mascot.png"
+    private const val BACKGROUND_FILE_NAME: String = "background.png"
+    private const val BACKGROUND_VIDEO_FILE_NAME: String = "background.mp4"
+
+    const val KEY_WATER_COLOR: String = "charging_water_color"
+    const val KEY_WATER_OPACITY: String = "charging_water_opacity_percent"
+
+    const val MIN_WATER_OPACITY_PERCENT: Int = 10
+    const val MAX_WATER_OPACITY_PERCENT: Int = 100
+    private const val DEFAULT_WATER_OPACITY_PERCENT: Int = 100
 
     /** 背屏充电信息栏显示项配置（逗号分隔的 item ID 列表，按显示顺序）。 */
     const val KEY_INFO_ITEMS: String = "charging_info_items"
@@ -74,6 +97,20 @@ object ChargingAnimationPrefs {
      * 实际动画：`duration ∝ targetLevel * FILL_MS_FOR_FULL_SCALE * 100 / speedPercent`。
      */
     const val FILL_MS_FOR_FULL_SCALE: Int = 3200
+
+    /** 涨水动画结束后背屏继续展示的时长（与 [com.wmqc.miroot.charging.RearScreenChargingActivity] 一致）。 */
+    const val CHARGING_AUTO_FINISH_HOLD_MS: Long = 10_000L
+
+    /**
+     * 预估一次充电动画在背屏的总可见时长（涨水 + 停留），用于功能页预览提示。
+     * 与 Activity 内涨水时长、自动关闭逻辑使用同一套偏好。
+     */
+    @JvmStatic
+    fun estimateChargingVisibleDurationMs(context: Context, batteryPercent: Int): Long {
+        val level = batteryPercent.coerceIn(0, 100)
+        val fillMs = fillDurationMsForFullFill(getFillRiseSpeedPercent(context)).toLong() * level / 100L
+        return fillMs + CHARGING_AUTO_FINISH_HOLD_MS
+    }
 
     private fun prefs(context: Context) =
         context.applicationContext
@@ -147,5 +184,104 @@ object ChargingAnimationPrefs {
             .edit()
             .putInt(KEY_FILL_RISE_SPEED_PERCENT, p)
             .apply()
+    }
+
+    @JvmStatic
+    fun getFloatingDisplay(context: Context): String {
+        migrateFromCredentialProtectedIfNeeded(context)
+        val prefs = prefs(context)
+        val raw = prefs.getString(KEY_FLOATING_DISPLAY, null)
+        if (raw != null) {
+            return when (raw) {
+                FLOATING_IMAGE, FLOATING_BATTERY -> raw
+                else -> FLOATING_NONE
+            }
+        }
+        // 旧版「透明液体」迁移：有自定义形象则保留图片模式，否则无漂浮物
+        if (prefs.getString(KEY_LIQUID_STYLE, null) == LIQUID_STYLE_TRANSPARENT) {
+            return if (hasCustomMascot(context)) FLOATING_IMAGE else FLOATING_NONE
+        }
+        return FLOATING_NONE
+    }
+
+    @JvmStatic
+    fun setFloatingDisplay(context: Context, mode: String) {
+        migrateFromCredentialProtectedIfNeeded(context)
+        val m = when (mode) {
+            FLOATING_IMAGE, FLOATING_BATTERY -> mode
+            else -> FLOATING_NONE
+        }
+        prefs(context).edit().putString(KEY_FLOATING_DISPLAY, m).apply()
+    }
+
+    @JvmStatic
+    fun customMascotFile(context: Context): File {
+        val root = context.applicationContext.createDeviceProtectedStorageContext().filesDir
+        return File(File(root, CHARGING_FILES_DIR), MASCOT_FILE_NAME)
+    }
+
+    @JvmStatic
+    fun hasCustomMascot(context: Context): Boolean {
+        val f = customMascotFile(context)
+        return f.isFile && f.length() > 0L
+    }
+
+    @JvmStatic
+    fun customBackgroundFile(context: Context): File {
+        val root = context.applicationContext.createDeviceProtectedStorageContext().filesDir
+        return File(File(root, CHARGING_FILES_DIR), BACKGROUND_FILE_NAME)
+    }
+
+    @JvmStatic
+    fun hasCustomBackground(context: Context): Boolean {
+        val f = customBackgroundFile(context)
+        return f.isFile && f.length() > 0L
+    }
+
+    @JvmStatic
+    fun customBackgroundVideoFile(context: Context): File {
+        val root = context.applicationContext.createDeviceProtectedStorageContext().filesDir
+        return File(File(root, CHARGING_FILES_DIR), BACKGROUND_VIDEO_FILE_NAME)
+    }
+
+    @JvmStatic
+    fun hasCustomBackgroundVideo(context: Context): Boolean {
+        val f = customBackgroundVideoFile(context)
+        return f.isFile && f.length() > 0L
+    }
+
+    /** 旧版默认亮绿色，读取时迁移为 [ChargingWaterColor.DEFAULT_ARGB] 深绿。 */
+    private const val LEGACY_DEFAULT_WATER_COLOR: Int = 0xFF30FF8A.toInt()
+
+    @JvmStatic
+    fun getWaterColor(context: Context): Int {
+        migrateFromCredentialProtectedIfNeeded(context)
+        val raw = prefs(context).getInt(KEY_WATER_COLOR, ChargingWaterColor.DEFAULT_ARGB)
+        val color = raw or 0xFF000000.toInt()
+        return if (color == LEGACY_DEFAULT_WATER_COLOR) {
+            ChargingWaterColor.DEFAULT_ARGB
+        } else {
+            color
+        }
+    }
+
+    @JvmStatic
+    fun setWaterColor(context: Context, argb: Int) {
+        migrateFromCredentialProtectedIfNeeded(context)
+        prefs(context).edit().putInt(KEY_WATER_COLOR, argb or 0xFF000000.toInt()).apply()
+    }
+
+    @JvmStatic
+    fun getWaterOpacityPercent(context: Context): Int {
+        migrateFromCredentialProtectedIfNeeded(context)
+        val raw = prefs(context).getInt(KEY_WATER_OPACITY, DEFAULT_WATER_OPACITY_PERCENT)
+        return raw.coerceIn(MIN_WATER_OPACITY_PERCENT, MAX_WATER_OPACITY_PERCENT)
+    }
+
+    @JvmStatic
+    fun setWaterOpacityPercent(context: Context, percent: Int) {
+        migrateFromCredentialProtectedIfNeeded(context)
+        val p = percent.coerceIn(MIN_WATER_OPACITY_PERCENT, MAX_WATER_OPACITY_PERCENT)
+        prefs(context).edit().putInt(KEY_WATER_OPACITY, p).apply()
     }
 }

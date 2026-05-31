@@ -575,6 +575,164 @@
                     android:minHeight="@dimen/mi_features_compose_slider_min_height" />
 
                 <LinearLayout
+                    android:id="@+id/layout_charging_background"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/text_charging_background_status"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:textAppearance="?attr/textAppearanceBodyMedium"
+                        android:textColor="@color/miuix_primary"
+                        tools:text="场景背景：纯黑" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_charging_pick_background"
+                        style="@style/Widget.MiRoot.Button.Text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/features_charging_pick_background" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_charging_reset_background"
+                        style="@style/Widget.MiRoot.Button.Text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:minWidth="0dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/features_charging_reset_background" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/layout_charging_water_color"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+                    <View
+                        android:id="@+id/view_charging_water_color_preview"
+                        android:layout_width="32dp"
+                        android:layout_height="32dp"
+                        android:background="@drawable/charging_water_color_preview_bg" />
+
+                    <TextView
+                        android:id="@+id/text_charging_water_color_value"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:layout_weight="1"
+                        android:fontFamily="monospace"
+                        android:textAppearance="?attr/textAppearanceBodyMedium"
+                        android:textColor="@color/miuix_primary"
+                        tools:text="#30FF8A" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_charging_pick_water_color"
+                        style="@style/Widget.MiRoot.Button.Text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/features_charging_water_color_pick" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/text_charging_floating_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:text="@string/features_charging_floating_title"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSliderLabel" />
+
+                <com.google.android.material.button.MaterialButtonToggleGroup
+                    android:id="@+id/toggle_charging_floating"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    app:selectionRequired="true"
+                    app:singleSelection="true">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_charging_floating_none"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minHeight="40dp"
+                        android:text="@string/features_charging_floating_none"
+                        android:textSize="12sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_charging_floating_image"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minHeight="40dp"
+                        android:text="@string/features_charging_floating_image"
+                        android:textSize="12sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_charging_floating_battery"
+                        style="?attr/materialButtonOutlinedStyle"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minHeight="40dp"
+                        android:text="@string/features_charging_floating_battery"
+                        android:textSize="12sp" />
+                </com.google.android.material.button.MaterialButtonToggleGroup>
+
+                <LinearLayout
+                    android:id="@+id/layout_charging_mascot"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/text_charging_mascot_status"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:textAppearance="?attr/textAppearanceBodyMedium"
+                        android:textColor="@color/miuix_primary"
+                        tools:text="漂浮图片：未选择" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_charging_pick_mascot"
+                        style="@style/Widget.MiRoot.Button.Text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minWidth="0dp"
+                        android:paddingStart="8dp"
+                        android:paddingEnd="8dp"
+                        android:text="@string/features_charging_pick_mascot" />
+                </LinearLayout>
+
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="@dimen/mi_features_section_gap"
