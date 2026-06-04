@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="TextAppearance.MiRoot.Title" parent="TextAppearance.Material3.TitleMedium">
+    <!-- 二级页 Toolbar：与主 Tab 页标题 [PageTitle] 同字号 -->
+    <style name="TextAppearance.MiRoot.Title" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textSize">@dimen/mi_page_title_text_size</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textColor">@color/mi_text_primary</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
     </style>
 
     <style name="TextAppearance.MiRoot.Body" parent="TextAppearance.Material3.BodyMedium">
@@ -53,6 +56,16 @@
     <style name="TextAppearance.MiRoot.CardSliderLabel" parent="TextAppearance.Material3.BodySmall">
         <item name="android:textSize">12sp</item>
         <item name="android:textColor">@color/mi_text_secondary</item>
+    </style>
+
+    <!-- 二级页顶栏：与页面底 [mi_page_bg]、状态栏区域同色，无阴影避免「白条」 -->
+    <style name="Widget.MiRoot.Toolbar" parent="Widget.Material3.Toolbar">
+        <item name="android:background">@color/mi_page_bg</item>
+        <item name="backgroundTint">@color/mi_page_bg</item>
+        <item name="android:elevation">0dp</item>
+        <item name="elevation">0dp</item>
+        <item name="titleTextAppearance">@style/TextAppearance.MiRoot.Title</item>
+        <item name="navigationIconTint">?attr/colorOnSurface</item>
     </style>
 
     <!-- 与音乐页 Miuix Card 一致：@color/mi_card_surface、圆角、无描边、无阴影 -->

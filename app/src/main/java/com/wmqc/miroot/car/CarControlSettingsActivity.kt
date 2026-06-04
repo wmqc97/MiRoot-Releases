@@ -11,6 +11,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.lifecycle.lifecycleScope
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -55,6 +56,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.MutableState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,8 +79,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.wmqc.miroot.R
+import com.wmqc.miroot.ui.applyMiRootSecondarySystemBars
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -100,6 +104,8 @@ import kotlin.math.roundToInt
  */
 class CarControlSettingsActivity : ComponentActivity() {
 
+    private val carModelBitmapState: MutableState<Bitmap?> = mutableStateOf(null)
+
     private val pickCarModel = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode != RESULT_OK || result.data == null) return@registerForActivityResult
         val uri = result.data!!.data ?: return@registerForActivityResult
@@ -113,11 +119,17 @@ class CarControlSettingsActivity : ComponentActivity() {
             finish()
             return
         }
+        applyMiRootSecondarySystemBars()
         enableEdgeToEdge()
+        lifecycleScope.launch(Dispatchers.IO) {
+            carModelBitmapState.value = CarModelImageLoader.load(applicationContext)
+        }
         setContent {
+            val carModelBitmap by carModelBitmapState
             val dark = isSystemInDarkTheme()
             MiuixTheme(colors = if (dark) darkColorScheme() else lightColorScheme()) {
                 CarControlSettingsScreen(
+                    carModelBitmap = carModelBitmap,
                     onReLogin = {
                         startActivity(
                             Intent(this, CarControlLoginActivity::class.java).apply {
@@ -164,6 +176,10 @@ class CarControlSettingsActivity : ComponentActivity() {
                     if (ok) getString(R.string.car_control_car_model_saved) else getString(R.string.car_control_car_model_failed),
                     Toast.LENGTH_LONG,
                 )
+                if (ok) {
+                    reloadCarModelBitmap()
+                    CarControlWidgetUpdater.refreshAll(this@CarControlSettingsActivity)
+                }
             }
         }.start()
     }
@@ -174,7 +190,16 @@ class CarControlSettingsActivity : ComponentActivity() {
             .apply()
         val f = File(filesDir, "car_model.png")
         if (f.exists()) f.delete()
+        reloadCarModelBitmap()
+        CarControlWidgetUpdater.refreshAll(this)
         MainDisplayUi.showToast(this, R.string.car_control_car_model_reset, Toast.LENGTH_LONG)
+    }
+
+    private fun reloadCarModelBitmap() {
+        Thread {
+            val bitmap = CarModelImageLoader.load(applicationContext)
+            runOnUiThread { carModelBitmapState.value = bitmap }
+        }.start()
     }
 
     private fun performLogout() {
@@ -216,12 +241,14 @@ class CarControlSettingsActivity : ComponentActivity() {
 
 @Composable
 private fun CarControlSettingsScreen(
+    carModelBitmap: Bitmap?,
     onReLogin: () -> Unit,
     onPickCarModel: () -> Unit,
     onResetCarModel: () -> Unit,
     onLogout: () -> Unit,
 ) {
     DashboardScreen(
+        carModelBitmap = carModelBitmap,
         onReLogin = onReLogin,
         onPickCarModel = onPickCarModel,
         onResetCarModel = onResetCarModel,
@@ -233,6 +260,7 @@ private fun CarControlSettingsScreen(
 
 @Composable
 private fun DashboardScreen(
+    carModelBitmap: Bitmap?,
     onReLogin: () -> Unit,
     onPickCarModel: () -> Unit,
     onResetCarModel: () -> Unit,
@@ -245,11 +273,18 @@ private fun DashboardScreen(
     val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
     val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
 
-    var vehicleUi by remember { mutableStateOf<CarVehicleDisplayUi?>(null) }
-    var vehicleStatus by remember { mutableStateOf<VehicleStatusService.VehicleStatusInfo?>(null) }
-
-    // 车模图片 bitmap
-    var carModelBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    val initialCachedStatus = remember { CarVehicleDisplayCache.loadStatus(appCtx) }
+    var vehicleUi by remember {
+        mutableStateOf(
+            CarVehicleDisplayHelper.loadCached(appCtx)
+                ?: if (!VehicleControlService.extractVehicleParams(appCtx).isValid) {
+                    CarVehicleDisplayHelper.emptyUi(appCtx, needBind = true)
+                } else {
+                    null
+                },
+        )
+    }
+    var vehicleStatus by remember { mutableStateOf(initialCachedStatus) }
 
     // 底部按钮配置
     var rearButtons by remember { mutableStateOf(defaultRearButtonsForFirstInstall()) }
@@ -264,29 +299,52 @@ private fun DashboardScreen(
     var seatHeatingLevel by remember { mutableStateOf(1) }
 
     // 车辆位置（高德地图）
-    var vehicleLng by remember { mutableStateOf(Double.NaN) }
-    var vehicleLat by remember { mutableStateOf(Double.NaN) }
+    var vehicleLng by remember {
+        mutableStateOf(VehiclePositionHelper.loadCache(appCtx)?.lng ?: Double.NaN)
+    }
+    var vehicleLat by remember {
+        mutableStateOf(VehiclePositionHelper.loadCache(appCtx)?.lat ?: Double.NaN)
+    }
     var mapRefreshKey by remember { mutableIntStateOf(0) }
     var showButtonEditDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
-    // 加载车辆数据（后台静默刷新，避免频闪）
+    // 先展示缓存，再在后台静默刷新（避免进入页空白）
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            vehicleUi = CarVehicleDisplayHelper.load(appCtx)
-            vehicleStatus = VehicleStatusService.getVehicleStatus(appCtx)
-            carModelBitmap = loadCarModelBitmap(appCtx)
-            loadVehiclePosition(appCtx) { lng, lat ->
-                vehicleLng = lng; vehicleLat = lat
+        initialCachedStatus?.let { cached ->
+            CarControlVehiclePrefsSync.applyFromStatus(appCtx, cached)
+            VehiclePositionHelper.fromStatus(cached)?.let { c ->
+                vehicleLng = c.lng
+                vehicleLat = c.lat
+            } ?: VehiclePositionHelper.loadCache(appCtx)?.let { c ->
+                vehicleLng = c.lng
+                vehicleLat = c.lat
             }
         }
-        refreshVehicleStatePrefs(ctx)
+        withContext(Dispatchers.IO) {
+            try {
+                val (ui, status) = CarVehicleDisplayHelper.loadWithStatus(appCtx)
+                withContext(Dispatchers.Main) {
+                    vehicleUi = ui
+                    vehicleStatus = status
+                }
+                val coords = VehiclePositionHelper.fromStatus(status)
+                    ?: VehiclePositionHelper.loadFromVehicle(appCtx)
+                withContext(Dispatchers.Main) {
+                    coords?.let {
+                        vehicleLng = it.lng
+                        vehicleLat = it.lat
+                        mapRefreshKey++
+                    }
+                }
+            } catch (_: Exception) { }
+        }
     }
 
     // 加载底部按钮配置
     LaunchedEffect(Unit) {
         val p = ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
-        val saved = loadRearButtonsForDashboard(p.getString(KEY_DASHBOARD_REAR_BUTTONS, null))
-        rearButtons = saved
+        rearButtons = CarRearButtonsConfig.load(ctx)
     }
 
     // 加载空调 & 座椅加热状态
@@ -303,21 +361,30 @@ private fun DashboardScreen(
     // 计算总页数（每页4个按钮，2列2行）
     val totalPages = ((rearButtons.size + 3) / 4).coerceIn(1, 2)
 
-    val scope = rememberCoroutineScope()
     var isRefreshing by remember { mutableStateOf(false) }
     fun refreshVehicleData() {
         isRefreshing = true
         scope.launch(Dispatchers.IO) {
-            val ui = CarVehicleDisplayHelper.load(appCtx)
+            var ui: CarVehicleDisplayUi? = null
             var vs: VehicleStatusService.VehicleStatusInfo? = null
             try {
-                vs = VehicleStatusService.getVehicleStatus(appCtx)
-                refreshVehicleStatePrefs(ctx)
+                val loaded = CarVehicleDisplayHelper.loadWithStatus(appCtx)
+                ui = loaded.first
+                vs = loaded.second
             } catch (_: Exception) { }
             withContext(Dispatchers.Main) {
-                vehicleUi = ui
-                vehicleStatus = vs
+                ui?.let { vehicleUi = it }
+                vs?.let { vehicleStatus = it }
                 isRefreshing = false
+            }
+            val coords = VehiclePositionHelper.fromStatus(vs)
+                ?: VehiclePositionHelper.loadFromVehicle(appCtx)
+            coords?.let { c ->
+                withContext(Dispatchers.Main) {
+                    vehicleLng = c.lng
+                    vehicleLat = c.lat
+                    mapRefreshKey++
+                }
             }
         }
     }
@@ -379,14 +446,20 @@ private fun DashboardScreen(
                 title = "星瑞",
                 onLogout = onLogout,
                 onLongPressTitle = onReLogin,
+                onOpenWidgetSettings = {
+                    ctx.startActivity(CarControlWidgetConfigureActivity.intentForSettings(ctx))
+                },
+                onOpenVehicleHistory = {
+                    ctx.startActivity(Intent(ctx, VehicleHistoryActivity::class.java))
+                },
             )
 
             // ── 现代化车控仪表盘 ──
             // 燃油表弧 + 车模 + 续航（合并版）
             CarImageAndGaugesSection(
                 vehicleUi = vehicleUi,
+                vehicleStatus = vehicleStatus,
                 carModelBitmap = carModelBitmap,
-                loading = false,
                 onPickCarModel = onPickCarModel,
                 onResetCarModel = onResetCarModel,
                 modifier = Modifier
@@ -497,16 +570,6 @@ private fun DashboardScreen(
                     .padding(horizontal = scrollPad),
             )
 
-            Spacer(Modifier.size(12.dp))
-
-            // 车辆详细数据（折叠式，默认收起）
-            VehicleDetailCard(
-                vehicleStatus = vehicleStatus,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = scrollPad),
-            )
-
             Spacer(Modifier.size(24.dp))
         }
         // 按钮排列编辑弹窗
@@ -517,9 +580,10 @@ private fun DashboardScreen(
                 onConfirm = { newList ->
                     val normalized = normalizeValidRearButtons(newList)
                     ctx.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
-                        .putString(KEY_DASHBOARD_REAR_BUTTONS, encodeRearButtons(normalized))
+                        .putString(CarRearButtonsConfig.PREFS_KEY, encodeRearButtons(normalized))
                         .apply()
                     rearButtons = normalized
+                    CarControlWidgetUpdater.refreshAll(ctx)
                     showButtonEditDialog = false
                 },
             )
@@ -674,6 +738,8 @@ private fun TopBar(
     title: String,
     onLogout: () -> Unit,
     onLongPressTitle: (() -> Unit)? = null,
+    onOpenWidgetSettings: () -> Unit,
+    onOpenVehicleHistory: () -> Unit,
 ) {
     val scrollPad = dimensionResource(R.dimen.mi_page_scroll_padding)
     val ctx = LocalContext.current
@@ -715,6 +781,20 @@ private fun TopBar(
                 expanded = expanded,
                 onDismissRequest = { expanded = false },
             ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.car_control_widget_menu)) },
+                    onClick = {
+                        expanded = false
+                        onOpenWidgetSettings()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.car_control_vehicle_history_menu)) },
+                    onClick = {
+                        expanded = false
+                        onOpenVehicleHistory()
+                    },
+                )
                 DropdownMenuItem(
                     text = { Text("注销登录") },
                     onClick = {
@@ -1146,8 +1226,8 @@ private fun RearButtonCell(
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val isDark = isSystemInDarkTheme()
-    val displayText = resolveDisplayTextV2(text, vehicleStatus, acStatus, seatHeatingStatus)
-    val isAlert = isButtonAlertStateV2(text, vehicleStatus, acStatus, seatHeatingStatus)
+    val displayText = resolveDisplayTextV2(ctx, text, vehicleStatus, acStatus, seatHeatingStatus)
+    val isAlert = isButtonAlertStateV2(ctx, text, vehicleStatus, acStatus, seatHeatingStatus)
 
     val bg = if (isAlert) {
         if (isDark) Color(0xFF5A5A5A) else Color(0xFF81D4FA)
@@ -1268,13 +1348,20 @@ private fun RearButtonCell(
  * 使用 VehicleStatusInfo 直接判断，与背屏按钮同步逻辑一致。
  */
 private fun resolveDisplayTextV2(
+    context: Context,
     text: String,
     vehicleStatus: VehicleStatusService.VehicleStatusInfo?,
     acStatus: Boolean,
     seatHeatingStatus: Boolean,
 ): String {
+    val isLocked = when {
+        vehicleStatus != null ->
+            "已锁" == VehicleStatusService.translateDoorLockStatus(vehicleStatus.doorLockStatusDriver)
+        else ->
+            CarControlVehiclePrefsSync.carPrefs(context).getBoolean(CarControlVehiclePrefsSync.KEY_IS_LOCKED, false)
+    }
     return when (text) {
-        "锁车/解锁" -> if (vehicleStatus?.let { "已锁" == VehicleStatusService.translateDoorLockStatus(it.doorLockStatusDriver) } == true) "解锁" else "锁车"
+        "锁车/解锁" -> if (isLocked) "解锁" else "锁车"
         "点火/熄火" -> if (vehicleStatus?.let { "运行中" == VehicleStatusService.translateEngineStatus(it.engineStatus) } == true) "熄火" else "点火"
         "开窗/关窗" -> if (vehicleStatus?.let { "已开" == it.winStatusDriver } == true) "关窗" else "开窗"
         "空调" -> if (acStatus) "关闭空调" else "打开空调"
@@ -1293,14 +1380,16 @@ private fun resolveDisplayTextV2(
  * 与 CarButtonStateManager.extractStateFromStatus 逻辑一致。
  */
 private fun isButtonAlertStateV2(
+    context: Context,
     text: String,
     vehicleStatus: VehicleStatusService.VehicleStatusInfo?,
     acStatus: Boolean,
     seatHeatingStatus: Boolean,
 ): Boolean {
     if (vehicleStatus == null) {
-        // Fallback to local state when vehicle status unavailable
+        val prefs = CarControlVehiclePrefsSync.carPrefs(context)
         return when (text) {
+            "锁车/解锁" -> !prefs.getBoolean(CarControlVehiclePrefsSync.KEY_IS_LOCKED, false)
             "空调" -> acStatus
             "座椅加热", "主驾加热", "副驾加热" -> seatHeatingStatus
             else -> false
@@ -1308,7 +1397,8 @@ private fun isButtonAlertStateV2(
     }
     return when (text) {
         "寻车" -> false
-        "锁车/解锁" -> "已锁" != VehicleStatusService.translateDoorLockStatus(vehicleStatus.doorLockStatusDriver)
+        // 与背屏一致：已锁→灰底「解锁」；未锁→蓝底「锁车」
+        "锁车/解锁" -> !("已锁" == VehicleStatusService.translateDoorLockStatus(vehicleStatus.doorLockStatusDriver))
         "点火/熄火" -> "运行中" == VehicleStatusService.translateEngineStatus(vehicleStatus.engineStatus)
         "开窗/关窗" -> "已开" == vehicleStatus.winStatusDriver
         "空调" -> acStatus
@@ -1324,43 +1414,6 @@ private fun isButtonAlertStateV2(
 
 
 
-// ─── Car Model Image Loading (ported from RearScreenCarControlActivity) ────────
-
-/**
- * 加载车模图片：自定义路径 → assets/car/xingrui.webp → drawable xingrui → null。
- * 与 [RearScreenCarControlActivity.loadCarModelImage] 逻辑一致。
- */
-private fun loadCarModelBitmap(context: Context): Bitmap? {
-    val prefs = context.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE)
-
-    // 1) 自定义车模
-    val customPath = prefs.getString(KEY_CAR_MODEL_PATH, null)
-    if (customPath != null) {
-        val f = File(customPath)
-        if (f.exists()) {
-            return try {
-                BitmapFactory.decodeStream(FileInputStream(f))
-            } catch (_: Exception) { null }
-        }
-    }
-
-    // 2) assets/car/xingrui.webp
-    val assetPath = CarControlAssets.webpPath("xingrui")
-    if (CarControlAssets.exists(context, assetPath)) {
-        return CarControlAssets.decodeBitmap(context, assetPath)
-    }
-
-    // 3) drawable xingrui
-    val resId = context.resources.getIdentifier("xingrui", "drawable", context.packageName)
-    if (resId != 0) {
-        return try {
-            BitmapFactory.decodeResource(context.resources, resId)
-        } catch (_: Exception) { null }
-    }
-
-    return null
-}
-
 private const val KEY_CAR_MODEL_PATH = "car_model_path"
 
 // ─── Buttons helpers (same as CarControlSettingsActivity original) ─────────────
@@ -1369,18 +1422,6 @@ private const val KEY_AC_DURATION = "ac_duration"
 private const val KEY_AC_TEMPERATURE = "ac_temperature"
 private const val KEY_SEAT_HEATING_DURATION = "seat_heating_duration"
 private const val KEY_SEAT_HEATING_LEVEL = "seat_heating_level"
-private const val KEY_DASHBOARD_REAR_BUTTONS = "rear_buttons_order"
-
-private fun loadRearButtonsForDashboard(raw: String?): List<String> {
-    if (raw.isNullOrBlank()) return defaultRearButtonsForFirstInstall()
-    return runCatching {
-        val arr = org.json.JSONArray(raw)
-        buildList {
-            for (i in 0 until arr.length()) add(arr.getString(i))
-        }
-    }.getOrElse { defaultRearButtonsForFirstInstall() }.ifEmpty { defaultRearButtonsForFirstInstall() }
-}
-
 private fun encodeRearButtons(buttons: List<String>): String = org.json.JSONArray(buttons).toString()
 
 private fun normalizeValidRearButtons(buttons: List<String>): List<String> {
@@ -1510,24 +1551,5 @@ private fun executeByText(context: Context, text: String) {
  * 同步车辆状态到 SharedPreferences（车门锁、发动机、车窗、后备箱、透气等）
  */
 private fun refreshVehicleStatePrefs(context: Context) {
-    val appCtx = context.applicationContext
-    try {
-        val status = VehicleStatusService.getVehicleStatus(appCtx)
-        context.getSharedPreferences(CarControlPrefsHelper.PREFS_NAME, Context.MODE_PRIVATE).edit()
-            .putBoolean("is_locked", "已锁" == VehicleStatusService.translateDoorLockStatus(status.doorLockStatusDriver))
-            .putBoolean("is_engine_on", "运行中" == VehicleStatusService.translateEngineStatus(status.engineStatus))
-            .putBoolean("is_window_open", "已开" == status.winStatusDriver)
-            .putBoolean("is_trunk_open", "已开" == VehicleStatusService.translateTrunkStatus(status.trunkOpenStatus))
-            .putBoolean("is_vent_mode", isVentPosition(status.winPosDriver))
-            .apply()
-    } catch (_: Exception) { }
-}
-
-/** 判断车窗位置值是否处于透气模式（一条缝）：0=关闭，1~50=透气，>50=全开 */
-private fun isVentPosition(winPosDriver: String?): Boolean {
-    if (winPosDriver.isNullOrEmpty() || winPosDriver == "未知") return false
-    return try {
-        val pos = winPosDriver.toInt()
-        pos > 0 && pos <= 50
-    } catch (_: NumberFormatException) { false }
+    CarControlVehiclePrefsSync.refreshFromVehicleStatus(context)
 }

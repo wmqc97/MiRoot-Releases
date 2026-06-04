@@ -10,13 +10,10 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.updatePadding
 import com.wmqc.miroot.R
 import com.wmqc.miroot.car.CarControlDeviceGate
 import com.wmqc.miroot.databinding.ActivityRearGestureConfigBinding
+import com.wmqc.miroot.ui.applyMiRootSecondarySystemBars
 import com.wmqc.miroot.rear.RearGestureAction
 import com.wmqc.miroot.rear.RearGestureInjectSpec
 import com.wmqc.miroot.rear.RearGesturePrefs
@@ -27,8 +24,6 @@ class RearGestureConfigActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityRearGestureConfigBinding
 
-    private var insetsBound = false
-
     private var selUp: RearGestureAction = RearGestureAction.NONE
     private var selLeft: RearGestureAction = RearGestureAction.NONE
     private var selRight: RearGestureAction = RearGestureAction.NONE
@@ -38,24 +33,12 @@ class RearGestureConfigActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyMiRootSecondarySystemBars()
         binding = ActivityRearGestureConfigBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        WindowCompat.setDecorFitsSystemWindows(window, false)
         ensureSafeWindowSize()
-        val pagePad = resources.getDimensionPixelSize(R.dimen.mi_page_scroll_padding)
-        ViewCompat.setOnApplyWindowInsetsListener(binding.root) { _, windowInsets ->
-            val bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
-            binding.nestedScrollRearGestureConfig.updatePadding(
-                top = bars.top + pagePad,
-                bottom = bars.bottom + pagePad,
-                left = pagePad,
-                right = pagePad,
-            )
-            windowInsets
-        }
-        insetsBound = true
-        ViewCompat.requestApplyInsets(binding.root)
+        binding.toolbarRearGesture.setNavigationOnClickListener { finish() }
 
         loadFromPrefs()
         setupDropdown(binding.dropdownGestureUp, binding.layoutGestureUp, 1) { selUp = it }
@@ -68,14 +51,6 @@ class RearGestureConfigActivity : AppCompatActivity() {
 
         binding.buttonSaveRearGesture.setOnClickListener { saveAll() }
         refreshAppRows()
-    }
-
-    override fun onDestroy() {
-        if (insetsBound) {
-            ViewCompat.setOnApplyWindowInsetsListener(binding.root, null)
-            insetsBound = false
-        }
-        super.onDestroy()
     }
 
     private fun ensureSafeWindowSize() {
@@ -112,6 +87,7 @@ class RearGestureConfigActivity : AppCompatActivity() {
             RearGestureAction.CAR_CONTROL -> getString(R.string.rear_gesture_action_car)
             RearGestureAction.LAUNCH_APP -> getString(R.string.rear_gesture_action_app)
             RearGestureAction.FOREGROUND_APP_TO_REAR -> getString(R.string.rear_gesture_action_foreground_to_rear)
+            RearGestureAction.CHARGING_PREVIEW -> getString(R.string.rear_gesture_action_charging)
         }
 
     private fun actionChoices(): List<Pair<RearGestureAction, String>> {
@@ -125,6 +101,7 @@ class RearGestureConfigActivity : AppCompatActivity() {
             }
             add(RearGestureAction.LAUNCH_APP to getString(R.string.rear_gesture_action_app))
             add(RearGestureAction.FOREGROUND_APP_TO_REAR to getString(R.string.rear_gesture_action_foreground_to_rear))
+            add(RearGestureAction.CHARGING_PREVIEW to getString(R.string.rear_gesture_action_charging))
         }
     }
 

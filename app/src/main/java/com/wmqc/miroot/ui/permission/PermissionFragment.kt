@@ -46,6 +46,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.wmqc.miroot.backup.WebDavBackupPrefs
+import com.wmqc.miroot.backup.WebDavCloudBackupActivity
 import com.wmqc.miroot.record.SaveStrategyTestActivity
 
 class PermissionFragment : Fragment(R.layout.fragment_permission) {
@@ -140,6 +142,11 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
                 .setPositiveButton(android.R.string.ok, null)
                 .show()
         }
+
+        binding.cardWebdavBackup.setOnClickListener {
+            startActivity(Intent(requireContext(), WebDavCloudBackupActivity::class.java))
+        }
+        bindWebDavBackupCard()
 
         binding.buttonCheckUpdate.setOnClickListener {
             if (isDownloading) {
@@ -333,6 +340,17 @@ class PermissionFragment : Fragment(R.layout.fragment_permission) {
         viewModel.refresh()
         scheduleBindRuntimeAuthRows()
         scheduleDeferredPrivilegeRefresh()
+        bindWebDavBackupCard()
+    }
+
+    private fun bindWebDavBackupCard() {
+        if (!isAdded || _binding == null) return
+        val configured = WebDavBackupPrefs.isConfigured(requireContext())
+        binding.textWebdavBackupStatus.text = if (configured) {
+            getString(R.string.perm_webdav_backup_configured)
+        } else {
+            getString(R.string.perm_webdav_backup_subtitle)
+        }
     }
 
     /**

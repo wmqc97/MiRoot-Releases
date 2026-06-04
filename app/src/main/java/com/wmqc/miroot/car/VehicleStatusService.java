@@ -66,6 +66,8 @@ public class VehicleStatusService {
         public String speed = "未知";
         public String latitude = "未知";
         public String longitude = "未知";
+        /** 是否为火星坐标（GCJ-02）；false 表示 WGS-84，见 basicVehicleStatus.marsCoordinates */
+        public String marsCoordinates = "未知";
         public String distanceToEmpty = "未知";
         public String updateTime = "未知";
         public String updateDateTime = "未知";
@@ -287,33 +289,36 @@ public class VehicleStatusService {
                         status.posCanBeTrusted = extractField(basicStatus, "posCanBeTrusted");
                     status.distanceToEmpty = extractField(basicStatus, "distanceToEmpty");
                     
+                    status.marsCoordinates = extractField(basicStatus, "marsCoordinates");
                     // 位置信息在 basicVehicleStatus.position 中
                     JSONObject position = basicStatus.optJSONObject("position");
                     if (position != null) {
                         status.latitude = extractField(position, "latitude");
                         status.longitude = extractField(position, "longitude");
+                        String marsInPos = extractField(position, "marsCoordinates");
+                        if (!"未知".equals(marsInPos) && !marsInPos.isEmpty()) {
+                            status.marsCoordinates = marsInPos;
+                        }
                     }
                 }
                 
-                // 2. 更新时间：data.vehicleStatus.updateTime（在vehicleStatus对象的根级别）
-                status.updateTime = extractField(vehicleStatusObj, "updateTime");
-                
-                // 3. 配置信息：data.vehicleStatus.configuration（包含fuelType和vin）
                 JSONObject configuration = vehicleStatusObj.optJSONObject("configuration");
-                if (configuration != null) {
-                    // fuelType和vin在configuration中，但VehicleStatusInfo没有这些字段
-                    // 如果updateTime在vehicleStatus根级别没有找到，尝试从configuration中获取
-                    if (status.updateTime.equals("未知") || status.updateTime.isEmpty()) {
-                        status.updateTime = extractField(configuration, "updateTime");
-                    }
-                }
-                
-                // 转换时间戳为日期时间格式
-                if (!status.updateTime.equals("未知") && !status.updateTime.isEmpty()) {
-                    status.updateDateTime = timestampToDateTime(status.updateTime);
+
+                // 2. 更新时间：vehicleStatus / basicVehicleStatus / configuration（接口常为 JSON 数字）
+                status.updateTime = pickUpdateTimeRaw(vehicleStatusObj, basicStatus, configuration, dataObj);
+                long updateMillis = parseUpdateTimeMillis(status.updateTime);
+                if (updateMillis > 0L) {
+                    status.updateTime = String.valueOf(updateMillis);
+                    status.updateDateTime = formatUpdateMillisAsDateTime(updateMillis);
                     LogHelper.d(TAG, "✅ 更新时间解析: updateTime=" + status.updateTime + ", updateDateTime=" + status.updateDateTime);
                 } else {
-                    LogHelper.w(TAG, "⚠️ 未找到更新时间");
+                    LogHelper.w(TAG, "⚠️ 未找到有效更新时间, raw=" + status.updateTime);
+                    status.updateDateTime = "未知";
+                }
+                
+                // 3. 配置信息：data.vehicleStatus.configuration（包含fuelType和vin）
+                if (configuration != null) {
+                    // fuelType和vin在configuration中，但VehicleStatusInfo没有这些字段
                 }
                 
                 // 4. additionalVehicleStatus - 包含多个子对象
@@ -493,23 +498,147 @@ public class VehicleStatusService {
     }
     
     /**
+     * 从接口 JSON 中读取 updateTime 原始值（优先数值类型，避免 optString 产生科学计数法）。
+     */
+    private static String extractTimestampField(JSONObject json, String fieldName) {
+        if (json == null || !json.has(fieldName)) {
+            return "";
+        }
+        Object value = json.opt(fieldName);
+        if (value == null || value == JSONObject.NULL) {
+            return "";
+        }
+        if (value instanceof Number) {
+            return String.valueOf(((Number) value).longValue());
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isEmpty() || "null".equalsIgnoreCase(text)) {
+            return "";
+        }
+        return text;
+    }
+
+    private static boolean isKnownTimestampRaw(String raw) {
+        return raw != null && !raw.isEmpty() && !"未知".equals(raw) && !"null".equalsIgnoreCase(raw);
+    }
+
+    private static String pickUpdateTimeRaw(
+            JSONObject vehicleStatusObj,
+            JSONObject basicStatus,
+            JSONObject configuration,
+            JSONObject dataObj
+    ) {
+        String raw = extractTimestampField(vehicleStatusObj, "updateTime");
+        if (isKnownTimestampRaw(raw)) {
+            return raw;
+        }
+        if (basicStatus != null) {
+            raw = extractTimestampField(basicStatus, "updateTime");
+            if (isKnownTimestampRaw(raw)) {
+                return raw;
+            }
+        }
+        if (configuration != null) {
+            raw = extractTimestampField(configuration, "updateTime");
+            if (isKnownTimestampRaw(raw)) {
+                return raw;
+            }
+        }
+        if (dataObj != null) {
+            raw = extractTimestampField(dataObj, "updateTime");
+            if (isKnownTimestampRaw(raw)) {
+                return raw;
+            }
+        }
+        return "未知";
+    }
+
+    /**
+     * 解析车辆云端刷新时间（毫秒）。支持纯数字、10 位秒级、小数及科学计数法字符串。
+     */
+    public static long parseUpdateTimeMillis(String raw) {
+        if (raw == null) {
+            return -1L;
+        }
+        String cleaned = raw.trim();
+        if (cleaned.isEmpty() || "未知".equals(cleaned) || "null".equalsIgnoreCase(cleaned)) {
+            return -1L;
+        }
+        try {
+            if (cleaned.matches("\\d+")) {
+                long value = Long.parseLong(cleaned);
+                if (cleaned.length() == 10) {
+                    value *= 1000L;
+                }
+                return value > 0L ? value : -1L;
+            }
+            double parsed = Double.parseDouble(cleaned);
+            long value = (long) parsed;
+            if (value > 0L && value < 1_000_000_000_000L) {
+                value *= 1000L;
+            }
+            return value > 0L ? value : -1L;
+        } catch (Exception e) {
+            return -1L;
+        }
+    }
+
+    /** 从已解析的 {@link VehicleStatusInfo} 得到车辆刷新毫秒时间戳。 */
+    public static long resolveVehicleUpdateMillis(VehicleStatusInfo status) {
+        if (status == null) {
+            return -1L;
+        }
+        long millis = parseUpdateTimeMillis(status.updateTime);
+        if (millis > 0L) {
+            return millis;
+        }
+        String updateDateTime = status.updateDateTime;
+        if (updateDateTime != null
+                && !updateDateTime.isEmpty()
+                && !"未知".equals(updateDateTime)
+                && !"时间格式错误".equals(updateDateTime)) {
+            millis = parseUpdateDateTimeMillis(updateDateTime);
+            if (millis > 0L) {
+                return millis;
+            }
+        }
+        return -1L;
+    }
+
+    private static long parseUpdateDateTimeMillis(String dateTime) {
+        String[] patterns = {
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy/MM/dd HH:mm:ss",
+                "yyyy-MM-dd'T'HH:mm:ss",
+        };
+        for (String pattern : patterns) {
+            try {
+                Date parsed = new SimpleDateFormat(pattern, Locale.getDefault()).parse(dateTime.trim());
+                if (parsed != null && parsed.getTime() > 0L) {
+                    return parsed.getTime();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return -1L;
+    }
+
+    private static String formatUpdateMillisAsDateTime(long millis) {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+        return sdf.format(new Date(millis));
+    }
+
+    /**
      * 时间戳转换为日期时间
      * 支持10位秒级和13位毫秒级时间戳
      */
     private static String timestampToDateTime(String timestamp) {
-        try {
-            long ts = Long.parseLong(timestamp);
-            // 如果是10位秒级时间戳，转换为毫秒
-            if (timestamp.length() == 10) {
-                ts = ts * 1000;
-            }
-            // 如果是13位毫秒级时间戳，直接使用
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
-            return sdf.format(new Date(ts));
-        } catch (Exception e) {
-            LogHelper.e(TAG, "时间戳转换失败: " + timestamp, e);
+        long millis = parseUpdateTimeMillis(timestamp);
+        if (millis <= 0L) {
+            LogHelper.e(TAG, "时间戳转换失败: " + timestamp);
             return "时间格式错误";
         }
+        return formatUpdateMillisAsDateTime(millis);
     }
     
     /**

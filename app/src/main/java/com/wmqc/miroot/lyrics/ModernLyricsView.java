@@ -312,6 +312,8 @@ public class ModernLyricsView extends View {
     private float shuffleSplitTiltRatio = 5f; // 0..20: 最大倾斜角度（度）
     private float shuffleSplitScaleVariance = 0.22f; // 0..0.4: 词组大小正负浮动强度
     private String stableShuffleSignature = "";
+    /** 不含宽高/字号，仅用于性能降级时判断「同一句」是否可跳过布局重建。 */
+    private String lastStableShuffleContentSig = "";
     private List<ShuffleToken> stableShuffleTokens = new ArrayList<>();
     private int lastShuffleLineCount = 0;
     private int lastShuffleTokenCount = 0;
@@ -1092,6 +1094,8 @@ public class ModernLyricsView extends View {
         // 若之前为空或只有 1 个 token，而新结果拆分为多个 token，则认为是有意义升级
         if (before == null || before.isEmpty()) return true;
         if (before.size() <= 1 && after.size() > 1) return true;
+        // 同数量但切分边界变化（词典兜底 → Jieba）也需升级，否则两套路词布局会交替闪烁
+        if (before.size() == after.size()) return true;
         // 常规情况下：token 数变化较大才认为值得刷新，避免频繁重排造成抖动
         int delta = Math.abs(after.size() - before.size());
         return delta >= 2;
@@ -1166,8 +1170,9 @@ public class ModernLyricsView extends View {
             if (resolveShuffleSplitMode(null) != ShuffleSplitMode.WORD) {
                 return;
             }
+            // 仅失效布局签名，保留上一帧 token 直至本帧内重建完成，避免空列表导致跳帧闪烁。
             stableShuffleSignature = "";
-            stableShuffleTokens.clear();
+            lastStableShuffleContentSig = "";
             postShuffleInvalidateIfNeeded();
         });
     }
@@ -1358,14 +1363,15 @@ public class ModernLyricsView extends View {
             return;
         }
         ShuffleSplitMode mode = resolveShuffleSplitMode(sourceText);
+        String contentSig = line.time + "|" + sourceText + "|" + mode.name();
         String signature =
-            line.time + "|" + sourceText + "|" + mode.name() + "|" + getWidth() + "|" + getHeight() +
+            contentSig + "|" + getWidth() + "|" + getHeight() +
                 "|" + CURRENT_TEXT_SIZE + "|" + shuffleSplitScaleVariance;
         long nowMs = System.currentTimeMillis();
         if (shufflePerformanceGuardEnabled && enableShuffleSplitEffect && shuffleLayoutBuildIntervalMs > 0L) {
-            boolean sameSignature = signature.equals(stableShuffleSignature);
             boolean withinCooldown = (nowMs - shuffleLastLayoutBuildMs) < shuffleLayoutBuildIntervalMs;
-            if (!sameSignature && withinCooldown && !stableShuffleTokens.isEmpty()) {
+            // 仅在同一句歌词且冷却期内跳过重建；切句或分词结果变化必须立即重排，否则会沿用上一句布局造成帧间闪烁。
+            if (contentSig.equals(lastStableShuffleContentSig) && withinCooldown && !stableShuffleTokens.isEmpty()) {
                 return;
             }
         }
@@ -1381,6 +1387,7 @@ public class ModernLyricsView extends View {
             return;
         }
         stableShuffleSignature = signature;
+        lastStableShuffleContentSig = contentSig;
 
         float w = Math.max(1f, getWidth());
         float h = Math.max(1f, getHeight());
@@ -3427,7 +3434,7 @@ public class ModernLyricsView extends View {
             lastAutoCenterAnimatedLineIndex = -1;
             lastLineChangedAtMs = System.currentTimeMillis();
             stableShuffleSignature = "";
-            stableShuffleTokens.clear();
+            lastStableShuffleContentSig = "";
             // 切句时保留当前呼吸相位，避免重置到固定缩放值导致视觉突变。
             applyPowerSavingLineColorIfNeeded(/*force*/ true);
             if (!isSuperLyricSingleLineMode()) {
@@ -3611,7 +3618,7 @@ public class ModernLyricsView extends View {
         long nowMs = System.currentTimeMillis();
         if (lineChanged) {
             stableShuffleSignature = "";
-            stableShuffleTokens.clear();
+            lastStableShuffleContentSig = "";
             lastWordProgressLineKey = "";
             lastWordProgressValue = 0f;
             lastWordProgressSampleUptimeMs = 0L;
@@ -4223,6 +4230,7 @@ public class ModernLyricsView extends View {
         this.enableShuffleSplitEffect = enable;
         if (!enable) {
             stableShuffleSignature = "";
+            lastStableShuffleContentSig = "";
             stableShuffleTokens.clear();
             lastShuffleLineCount = 0;
             lastShuffleTokenCount = 0;
@@ -4242,6 +4250,7 @@ public class ModernLyricsView extends View {
         tokenCache.clear();
         pendingTokenTasks.clear();
         stableShuffleSignature = "";
+        lastStableShuffleContentSig = "";
         stableShuffleTokens.clear();
         lastShuffleLineCount = 0;
         lastShuffleTokenCount = 0;

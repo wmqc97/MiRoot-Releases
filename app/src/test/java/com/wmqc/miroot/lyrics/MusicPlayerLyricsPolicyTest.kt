@@ -101,27 +101,36 @@ class MusicPlayerLyricsPolicyTest {
     }
 
     @Test
-    fun netease_prefersKugou() {
+    fun netease_prefersKugouStrategyButNeteasePlatformApi() {
         assertEquals(
             MusicPlayerLyricsPolicy.PrimaryStrategy.PREFER_KUGOU,
             MusicPlayerLyricsPolicy.resolvePrimaryStrategy("com.netease.cloudmusic"),
         )
+        assertEquals(
+            LyricsApiEndpoints.PROVIDER_NETEASE,
+            MusicPlayerLyricsPolicy.resolvePlatformProvider("com.netease.cloudmusic"),
+        )
     }
 
     @Test
-    fun kugouKuwoQq_prefersKugou() {
+    fun kugouKuwoQq_resolvePlatformProvider() {
         assertEquals(
-            MusicPlayerLyricsPolicy.PrimaryStrategy.PREFER_KUGOU,
-            MusicPlayerLyricsPolicy.resolvePrimaryStrategy("com.kugou.android"),
+            LyricsApiEndpoints.PROVIDER_KUGOU,
+            MusicPlayerLyricsPolicy.resolvePlatformProvider("com.kugou.android"),
         )
         assertEquals(
-            MusicPlayerLyricsPolicy.PrimaryStrategy.PREFER_KUGOU,
-            MusicPlayerLyricsPolicy.resolvePrimaryStrategy("cn.kuwo.kwmusiccar"),
+            LyricsApiEndpoints.PROVIDER_KUWO,
+            MusicPlayerLyricsPolicy.resolvePlatformProvider("cn.kuwo.kwmusiccar"),
         )
         assertEquals(
-            MusicPlayerLyricsPolicy.PrimaryStrategy.PREFER_KUGOU,
-            MusicPlayerLyricsPolicy.resolvePrimaryStrategy("com.tencent.qqmusic"),
+            LyricsApiEndpoints.PROVIDER_QQ,
+            MusicPlayerLyricsPolicy.resolvePlatformProvider("com.tencent.qqmusic"),
         )
+    }
+
+    @Test
+    fun kuwoCar_stillIdentifiedAsKuwoPackage() {
+        assertTrue(MusicPlayerLyricsPolicy.isKuwoCarPackage("cn.kuwo.kwmusiccar"))
     }
 
     @Test

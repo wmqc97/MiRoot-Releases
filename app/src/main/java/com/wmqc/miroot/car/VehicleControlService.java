@@ -45,8 +45,8 @@ public class VehicleControlService {
     private static final String CONTENT_TYPE = "application/json; charset=utf-8";
     private static final String OPERATOR_CODE = "GEELY";
     
-    // 高德地图API Key
-    private static final String AMAP_API_KEY = "d8d772c43a33e003b5c77d12e6a52e09";
+    // 高德地图 API Key（与 [AmapApiService.AMAP_KEY] 一致）
+    private static final String AMAP_API_KEY = AmapApiService.AMAP_KEY;
     
     /**
      * 提取车辆参数（从0.json文件）
@@ -527,40 +527,22 @@ public class VehicleControlService {
                 return result;
             }
             
-            // 3. 转换经纬度（API返回的是毫秒单位，需要除以3600000转换为度）
-            double lat, lon;
-            try {
-                // 尝试解析为数字（可能是毫秒单位）
-                double latMs = Double.parseDouble(status.latitude);
-                double lonMs = Double.parseDouble(status.longitude);
-                
-                // 如果数值很大（超过360），说明是毫秒单位，需要转换
-                if (latMs > 360 || lonMs > 360) {
-                    lat = latMs / 3600000.0;
-                    lon = lonMs / 3600000.0;
-                    LogHelper.d(TAG, "📍 位置转换（毫秒->度）: lat=" + latMs + " -> " + lat + ", lon=" + lonMs + " -> " + lon);
-                } else {
-                    // 已经是度单位
-                    lat = latMs;
-                    lon = lonMs;
-                    LogHelper.d(TAG, "📍 位置已是度单位: lat=" + lat + ", lon=" + lon);
-                }
-            } catch (NumberFormatException e) {
+            // 3. 解析坐标：星瑞 marsCoordinates=false 为 WGS，展示/导航高德需 GCJ（dev=0）
+            VehiclePositionHelper.Coordinates gcj = VehiclePositionHelper.fromStatus(status);
+            if (gcj == null) {
                 result.success = false;
-                result.message = "位置信息格式错误: " + e.getMessage();
-                LogHelper.e(TAG, "❌ 位置信息解析失败", e);
+                result.message = "位置信息格式错误";
+                LogHelper.e(TAG, "❌ 车辆位置解析失败: lat=" + status.latitude + ", lon=" + status.longitude);
                 return result;
             }
+            String latStr = String.format("%.6f", gcj.getLat());
+            String lonStr = String.format("%.6f", gcj.getLng());
+            LogHelper.d(TAG, "🚗 寻车(GCJ): lat=" + latStr + ", lon=" + lonStr
+                + ", mars=" + status.marsCoordinates);
             
-            // 4. 格式化经纬度为6位小数
-            String latStr = String.format("%.6f", lat);
-            String lonStr = String.format("%.6f", lon);
-            
-            LogHelper.d(TAG, "🚗 寻车功能: 车辆位置 lat=" + latStr + ", lon=" + lonStr);
-            
-            // 5. 优先使用 amapuri:// 直接唤起高德 APP
+            // 4. 优先使用 amapuri://（dev=0 表示坐标已是 GCJ）
             String navUrl = String.format(
-                "amapuri://route/plan/?dlon=%s&dlat=%s&dname=车辆位置&dev=1&t=2",
+                "amapuri://route/plan/?dlon=%s&dlat=%s&dname=车辆位置&dev=0&t=2",
                 lonStr, latStr
             );
             Intent intent = new Intent(Intent.ACTION_VIEW);

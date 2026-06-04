@@ -4,9 +4,6 @@ import android.content.Context
 import android.media.MediaScannerConnection
 import android.os.Handler
 import android.os.Looper
-import android.content.ContentValues
-import android.os.Build
-import android.provider.MediaStore
 import com.wmqc.miroot.AppExecutors
 import com.wmqc.miroot.R
 import com.wmqc.miroot.capability.PrivilegedShell
@@ -83,6 +80,7 @@ object RearScreenshotCoordinator {
             File(tempPath).delete()
             return false to app.getString(R.string.screenshot_fail_cap)
         }
+        PublicMediaExport.ensureAppReadable(tempPath)
         val tempFile = File(tempPath)
         if (!tempFile.isFile || tempFile.length() == 0L) {
             tempFile.delete()
@@ -90,15 +88,16 @@ object RearScreenshotCoordinator {
         }
 
         val finalName = "RD_$ts.png"
-        val finalPath = "/storage/emulated/0/Pictures/RearDisplay/$finalName"
 
         if (!composite) {
-            if (!copyImageToPublicStorage(app, tempFile, finalPath)) {
-                tempFile.delete()
+            val saved = PublicMediaExport.saveImageToRearDisplay(app, tempFile, finalName)
+            tempFile.delete()
+            if (!saved.ok) {
                 return false to app.getString(R.string.screenshot_fail_save)
             }
-            tempFile.delete()
-            scan(app, finalPath)
+            if (!saved.viaContentResolver) {
+                scan(app, "/storage/emulated/0/Pictures/RearDisplay/$finalName")
+            }
             return true to app.getString(R.string.screenshot_ok_saved)
         }
 
@@ -117,54 +116,19 @@ object RearScreenshotCoordinator {
         }
         deleteQuietly(tempFile)
 
-        if (!copyImageToPublicStorage(app, compositeOut, finalPath)) {
-            deleteQuietly(compositeOut)
+        val saved = PublicMediaExport.saveImageToRearDisplay(app, compositeOut, finalName)
+        deleteQuietly(compositeOut)
+        if (!saved.ok) {
             return false to app.getString(R.string.screenshot_fail_save)
         }
-        deleteQuietly(compositeOut)
-        scan(app, finalPath)
+        if (!saved.viaContentResolver) {
+            scan(app, "/storage/emulated/0/Pictures/RearDisplay/$finalName")
+        }
         return true to app.getString(R.string.screenshot_ok_saved)
     }
 
-
-    /**
-     * Shell cp first, then ContentResolver fallback for Shizuku+SELinux.
-     */
-    private fun copyImageToPublicStorage(context: Context, src: File, dstPath: String): Boolean {
-        val dst = File(dstPath)
-        // 1) Try shell cp
-        try {
-            dst.parentFile?.mkdirs()
-            if (PrivilegedShell.execCmd("cp \"${src.absolutePath}\" \"$dstPath\" && sync")) {
-                if (dst.isFile && dst.length() > 0L) return true
-            }
-        } catch (_: Exception) { }
-        // 2) ContentResolver fallback (Shizuku SELinux-safe)
-        return try {
-            val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, dst.name)
-                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/RearDisplay")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Images.Media.IS_PENDING, 0)
-                }
-            }
-            val uri = context.contentResolver.insert(
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values
-            ) ?: return false
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                src.inputStream().use { it.copyTo(out) }
-            } ?: run { context.contentResolver.delete(uri, null, null); return false }
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
     private fun deleteQuietly(f: File) {
-        try {
-            if (f.exists()) f.delete()
-        } catch (_: Exception) {
-        }
+        PublicMediaExport.deleteQuietly(f)
     }
 
     /** 仅扫描成品路径；临时文件须先 [deleteQuietly] 再调用本方法，避免相册扫到中间文件。 */

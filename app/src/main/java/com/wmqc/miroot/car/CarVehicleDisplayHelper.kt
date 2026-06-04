@@ -34,17 +34,41 @@ object CarVehicleDisplayHelper {
 
     private const val UNKNOWN_ZH = "未知"
 
-    fun load(context: Context): CarVehicleDisplayUi {
-        val dash = context.getString(R.string.car_control_vehicle_dash)
+    fun load(context: Context): CarVehicleDisplayUi = loadWithStatus(context).first
+
+    /** 拉取车况并返回 UI 与完整状态（供芯片、地图等直接绑定，避免缓存字段缺失）。 */
+    fun loadWithStatus(context: Context): Pair<CarVehicleDisplayUi, VehicleStatusService.VehicleStatusInfo> {
         val params = VehicleControlService.extractVehicleParams(context)
         if (!params.isValid) {
-            return emptyUi(context, needBind = true)
+            val empty = emptyUi(context, needBind = true)
+            return empty to VehicleStatusService.VehicleStatusInfo()
         }
 
         val basic = VehicleStatusService.getVehicleBasicInfo(context)
         val status = VehicleStatusService.getVehicleStatus(context)
-        val loginInvalid = LoginService.isLoginMarkedInvalid(context)
+        CarVehicleDisplayCache.save(context, status)
+        return buildUi(context, basic, status) to status
+    }
 
+    /** 进入车控页时同步读取上次成功刷新的展示数据（不发起网络请求）。 */
+    fun loadCached(context: Context): CarVehicleDisplayUi? {
+        val status = CarVehicleDisplayCache.loadStatus(context) ?: return null
+        val dash = context.getString(R.string.car_control_vehicle_dash)
+        val basic = try {
+            VehicleStatusService.getVehicleBasicInfo(context)
+        } catch (_: Exception) {
+            VehicleStatusService.VehicleBasicInfo()
+        }
+        return buildUi(context, basic, status, loginInvalid = LoginService.isLoginMarkedInvalid(context))
+    }
+
+    fun buildUi(
+        context: Context,
+        basic: VehicleStatusService.VehicleBasicInfo,
+        status: VehicleStatusService.VehicleStatusInfo,
+        loginInvalid: Boolean = LoginService.isLoginMarkedInvalid(context),
+    ): CarVehicleDisplayUi {
+        val dash = context.getString(R.string.car_control_vehicle_dash)
         val json = try {
             VehicleStatusService.buildVehicleQueryBroadcastJson(status)
         } catch (e: JSONException) {
@@ -83,7 +107,7 @@ object CarVehicleDisplayHelper {
         )
     }
 
-    private fun emptyUi(context: Context, needBind: Boolean): CarVehicleDisplayUi {
+    fun emptyUi(context: Context, needBind: Boolean): CarVehicleDisplayUi {
         val dash = context.getString(R.string.car_control_vehicle_dash)
         return CarVehicleDisplayUi(
             plateNo = dash,

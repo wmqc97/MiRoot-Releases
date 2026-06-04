@@ -1,5 +1,8 @@
 package com.wmqc.miroot.car
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import com.wmqc.miroot.BuildConfig
 import com.wmqc.miroot.lyrics.LogHelper
 import org.json.JSONArray
 import org.json.JSONObject
@@ -15,12 +18,44 @@ import java.net.URLEncoder
  * - 逆地理编码（regeo）  —  坐标 → 结构化地址
  * - 静态地图（staticmap）  —  URL 构建
  * - 驾车路径规划（direction/driving） — 距离/时间
+ *
+ * 高德规定 **1 个 Key 只绑定 1 种服务平台**：
+ * - [AMAP_KEY]：Android 平台（包名 + SHA1），用于 Manifest / 3D 地图 SDK / 搜索 SDK
+ * - [webServiceKey]：Web 服务（HTTP restapi.amap.com），用于逆地理、静态地图
+ *
+ * 若仅配置 Android Key 却调用 Web 服务，会返回 `USERKEY_PLAT_NOMATCH`（10009）。
+ * 请在 `local.properties` 增加 `AMAP_WEB_SERVICE_KEY=`（控制台单独创建 Web 服务 Key）。
  */
 object AmapApiService {
 
     private const val TAG = "AmapApiService"
-    const val AMAP_KEY = "d8d772c43a33e003b5c77d12e6a52e09"
+    /** Android 平台 Key（包名 com.wmqc.miroot + Debug/Release SHA1） */
+    const val AMAP_KEY = "55b0d5e5d6ba59b9de9e5945a547deb9"
+
+    /** Web 服务 Key：优先 BuildConfig，未配置时回退 [AMAP_KEY]（通常会平台不匹配） */
+    val webServiceKey: String
+        get() = BuildConfig.AMAP_WEB_SERVICE_KEY.trim().ifEmpty { AMAP_KEY }
+
     private const val BASE_URL = "https://restapi.amap.com/v3"
+
+    /** 解析 Web 服务 JSON 错误，便于 Logcat 排查。 */
+    fun describeApiError(responseBody: String?): String? {
+        if (responseBody.isNullOrBlank()) return null
+        return try {
+            val root = JSONObject(responseBody.trim())
+            if (root.optInt("status", 1) == 1) return null
+            val info = root.optString("info", "UNKNOWN")
+            val code = root.optString("infocode", "")
+            when (code) {
+                "10009" -> "$info ($code)：Key 平台不匹配，请使用 Web 服务 Key，见 docs/高德地图Key配置.md"
+                "10001" -> "$info ($code)：Key 无效或未启用对应服务"
+                "10003" -> "$info ($code)：访问已超出日配额"
+                else -> if (code.isNotEmpty()) "$info ($code)" else info
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     // ── 逆地理编码 ────────────────────────────────────────────────────────────
 
@@ -41,15 +76,27 @@ object AmapApiService {
         val nearbyPoi: String?,
     )
 
+    /** 返回简洁的可展示地址短文本（优先街道+门牌，其次区+街道，最后城市+区）。 */
+    fun shortDisplayAddress(regeo: RegeoResult): String? {
+        return when {
+            regeo.street.isNotEmpty() -> regeo.street
+            regeo.district.isNotEmpty() && regeo.township.isNotEmpty() -> "${regeo.district}${regeo.township}"
+            regeo.city.isNotEmpty() && regeo.district.isNotEmpty() -> "${regeo.city}${regeo.district}"
+            regeo.province.isNotEmpty() && regeo.city.isNotEmpty() -> "${regeo.province}${regeo.city}"
+            regeo.formattedAddress.isNotBlank() -> regeo.formattedAddress
+            else -> null
+        }
+    }
+
     /** 坐标逆地理编码（extensions=base）。失败返回 null。 */
     fun regeo(lng: Double, lat: Double): RegeoResult? {
         return try {
             val loc = "${lng},${lat}"
-            val url = "$BASE_URL/geocode/regeo?key=$AMAP_KEY&location=${URLEncoder.encode(loc, "UTF-8")}&extensions=base"
+            val url = "$BASE_URL/geocode/regeo?key=$webServiceKey&location=${URLEncoder.encode(loc, "UTF-8")}&extensions=base"
             val resp = httpGet(url) ?: return null
             val root = JSONObject(resp)
             if (root.optInt("status") != 1) {
-                LogHelper.w(TAG, "regeo status != 1: $resp")
+                LogHelper.w(TAG, "regeo failed: ${describeApiError(resp) ?: resp}")
                 return null
             }
             val regeo = root.optJSONObject("regeocode") ?: return null
@@ -75,13 +122,7 @@ object AmapApiService {
     /** 返回简洁的可展示地址短文本（优先街道+门牌，其次区+街道，最后城市+区）。 */
     fun regeoShortAddress(lng: Double, lat: Double): String? {
         val r = regeo(lng, lat) ?: return null
-        return when {
-            r.street.isNotEmpty() -> r.street
-            r.district.isNotEmpty() && r.township.isNotEmpty() -> "${r.district}${r.township}"
-            r.city.isNotEmpty() && r.district.isNotEmpty() -> "${r.city}${r.district}"
-            r.province.isNotEmpty() && r.city.isNotEmpty() -> "${r.province}${r.city}"
-            else -> r.formattedAddress
-        }
+        return shortDisplayAddress(r)
     }
 
     // ── 驾车路径规划 ──────────────────────────────────────────────────────────
@@ -102,7 +143,7 @@ object AmapApiService {
         return try {
             val origin = "${originLng},${originLat}"
             val dest = "${destLng},${destLat}"
-            val url = "$BASE_URL/direction/driving?key=$AMAP_KEY" +
+            val url = "$BASE_URL/direction/driving?key=$webServiceKey" +
                 "&origin=${URLEncoder.encode(origin, "UTF-8")}" +
                 "&destination=${URLEncoder.encode(dest, "UTF-8")}" +
                 "&strategy=0&extensions=base"
@@ -141,12 +182,70 @@ object AmapApiService {
 
     // ── 静态地图 URL ──────────────────────────────────────────────────────────
 
-    /** 构建静态地图图片 URL（尺寸单位 px）。 */
+    /** 构建静态地图图片 URL（尺寸单位 px，需 Web 服务 Key）。 */
     fun staticMapUrl(lng: Double, lat: Double, width: Int = 600, height: Int = 300, zoom: Int = 15): String {
-        return "$BASE_URL/staticmap?location=$lng,$lat&zoom=$zoom" +
-            "&size=${width}*${height}" +
-            "&markers=mid,,A:$lng,$lat" +
-            "&key=$AMAP_KEY"
+        val lngStr = "%.6f".format(lng)
+        val latStr = "%.6f".format(lat)
+        val location = "$lngStr,$latStr"
+        val size = "${width.coerceIn(1, 1024)}*${height.coerceIn(1, 1024)}"
+        val markers = "mid,,A:$location"
+        return buildString {
+            append(BASE_URL)
+            append("/staticmap?location=")
+            append(URLEncoder.encode(location, "UTF-8"))
+            append("&zoom=").append(zoom.coerceIn(3, 18))
+            append("&size=").append(URLEncoder.encode(size, "UTF-8"))
+            append("&scale=2")
+            append("&markers=").append(URLEncoder.encode(markers, "UTF-8"))
+            append("&key=").append(webServiceKey)
+        }
+    }
+
+    /**
+     * 拉取静态地图位图。失败时返回 null（常见：Key 未开通 Web 服务 → USERKEY_PLAT_NOMATCH JSON）。
+     */
+    fun fetchStaticMapBitmap(
+        lng: Double,
+        lat: Double,
+        width: Int = 480,
+        height: Int = 240,
+        zoom: Int = 15,
+    ): Bitmap? {
+        val url = staticMapUrl(lng, lat, width, height, zoom)
+        return try {
+            val conn = URL(url).openConnection() as HttpURLConnection
+            conn.connectTimeout = 15_000
+            conn.readTimeout = 15_000
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "MiRoot-CarControl/1.0")
+            conn.doInput = true
+            conn.connect()
+            val code = conn.responseCode
+            val contentType = conn.contentType?.lowercase().orEmpty()
+            val bytes = if (code == 200) {
+                conn.inputStream.use { it.readBytes() }
+            } else {
+                conn.errorStream?.use { it.readBytes() } ?: ByteArray(0)
+            }
+            if (bytes.isEmpty()) {
+                LogHelper.w(TAG, "staticmap empty body HTTP $code")
+                return null
+            }
+            if (contentType.contains("json") || (bytes.size < 4096 && bytes.firstOrNull() == '{'.code.toByte())) {
+                val msg = String(bytes, Charsets.UTF_8)
+                LogHelper.w(TAG, "staticmap API error: ${describeApiError(msg) ?: msg}")
+                return null
+            }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.also {
+                if (it.width < 32 || it.height < 32) {
+                    LogHelper.w(TAG, "staticmap decoded too small: ${it.width}x${it.height}")
+                    return null
+                }
+            }
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "fetchStaticMapBitmap: ${e.message}")
+            null
+        }
     }
 
     // ── HTTP 工具 ─────────────────────────────────────────────────────────────
@@ -158,14 +257,20 @@ object AmapApiService {
             conn.connectTimeout = 15_000
             conn.readTimeout = 15_000
             conn.requestMethod = "GET"
+            conn.setRequestProperty("User-Agent", "MiRoot-CarControl/1.0")
             conn.doInput = true
             conn.connect()
             val code = conn.responseCode
+            val body = if (code == 200) {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }
             if (code != 200) {
-                LogHelper.w(TAG, "HTTP $code for $urlString")
+                LogHelper.w(TAG, "HTTP $code: ${describeApiError(body) ?: body.take(200)}")
                 return null
             }
-            conn.inputStream.bufferedReader().use { it.readText() }
+            body
         } catch (e: Exception) {
             LogHelper.w(TAG, "httpGet error: ${e.message}")
             null

@@ -1,6 +1,8 @@
 package com.wmqc.miroot.charging
 
 import android.content.Context
+import android.graphics.Typeface
+import com.wmqc.miroot.lyrics.LyricsFontHelper
 import java.io.File
 import kotlin.jvm.JvmStatic
 import kotlin.math.roundToInt
@@ -64,8 +66,60 @@ object ChargingAnimationPrefs {
 
     const val MAX_INFO_ITEMS: Int = 4
 
+    /** 充电动画中央电量 / 漂浮电量字体（独立于背屏歌词字体）。 */
+    const val KEY_FONT: String = "charging_font"
+    const val KEY_FONT_CUSTOM_PATH: String = "charging_font_custom_path"
+    const val DEFAULT_FONT: String = LyricsFontHelper.ID_MFGEHEI
+
     @JvmStatic
     fun getAllInfoItems(): LinkedHashMap<String, String> = ALL_INFO_ITEMS
+
+    @JvmStatic
+    fun getFontId(context: Context): String {
+        migrateFromCredentialProtectedIfNeeded(context)
+        var fontId = LyricsFontHelper.normalizeFontId(
+            prefs(context).getString(KEY_FONT, null),
+        )
+        if (fontId == LyricsFontHelper.ID_CUSTOM) {
+            val path = getCustomFontPath(context)
+            if (path.isNullOrEmpty() || !File(path).isFile) {
+                fontId = DEFAULT_FONT
+            }
+        }
+        return fontId
+    }
+
+    @JvmStatic
+    fun getCustomFontPath(context: Context): String? {
+        migrateFromCredentialProtectedIfNeeded(context)
+        val path = prefs(context).getString(KEY_FONT_CUSTOM_PATH, null)?.trim().orEmpty()
+        return path.ifEmpty { null }
+    }
+
+    @JvmStatic
+    fun setFont(context: Context, fontId: String, customFontPath: String?) {
+        migrateFromCredentialProtectedIfNeeded(context)
+        val id = LyricsFontHelper.normalizeFontId(fontId)
+        val path = if (id == LyricsFontHelper.ID_CUSTOM) {
+            customFontPath?.trim()?.takeIf { it.isNotEmpty() && File(it).isFile }
+        } else {
+            null
+        }
+        val finalId = if (id == LyricsFontHelper.ID_CUSTOM && path == null) DEFAULT_FONT else id
+        prefs(context).edit()
+            .putString(KEY_FONT, finalId)
+            .putString(KEY_FONT_CUSTOM_PATH, path)
+            .apply()
+    }
+
+    /** 解析充电动画显示字体（电量、底部信息、漂浮信息等全文案）。 */
+    @JvmStatic
+    fun resolveTypeface(context: Context): Typeface {
+        val app = context.applicationContext
+        val fontId = getFontId(app)
+        val customPath = if (fontId == LyricsFontHelper.ID_CUSTOM) getCustomFontPath(app) else null
+        return LyricsFontHelper.resolveTypeface(app, fontId, customPath)
+    }
 
     private fun parseInfoItems(raw: String): List<String> {
         val items = raw.split(",").map { it.trim() }.filter { it in ALL_INFO_ITEMS }

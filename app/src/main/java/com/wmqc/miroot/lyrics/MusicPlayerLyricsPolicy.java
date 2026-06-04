@@ -11,9 +11,10 @@ import com.wmqc.miroot.service.MiRootNotificationListenerService;
 import java.util.List;
 
 /**
- * 按正在播放的 App 包名，决定网络歌词主源（汽水 qsgc 或酷狗曲库）。
+ * 按正在播放的 App 包名，决定网络歌词主源（汽水 qsgc、各平台曲库或酷狗兜底）。
  * <p>
- * 智能切换 / 网络歌词：汽水音乐先汽水 API；网易云、酷狗、酷我、QQ 及其他先酷狗 API。
+ * 智能切换 / 网络歌词：汽水先 qsgc；网易 / QQ / 酷我先各自官方接口再酷狗；酷我车机版
+ * {@code cn.kuwo.kwmusiccar} 仍优先广播 / AUDIO_LYRIC，网络 API 仅作兜底。
  */
 public final class MusicPlayerLyricsPolicy {
     /** 汽水音乐：优先 qsgc（汽水 API）精确直连 */
@@ -21,17 +22,61 @@ public final class MusicPlayerLyricsPolicy {
         "com.luna.music",
     };
 
-    /** 网易云、酷狗、酷我、QQ 等：优先酷狗搜歌 + krc */
-    private static final String[] KUGOU_PRIORITY_PREFIXES = {
+    private static final String[] NETEASE_PACKAGE_PREFIXES = {
         "com.netease.cloudmusic",
-        "com.kugou.android",
-        "cn.kuwo.",
+    };
+
+    private static final String[] QQ_PACKAGE_PREFIXES = {
         "com.tencent.qqmusic",
+    };
+
+    /** 酷我手机版等（不含车机包名，车机走广播优先） */
+    private static final String[] KUWO_PACKAGE_PREFIXES = {
+        "cn.kuwo.",
+    };
+
+    private static final String[] KUGOU_PACKAGE_PREFIXES = {
+        "com.kugou.android",
     };
 
     public enum PrimaryStrategy {
         PREFER_QSGC,
         PREFER_KUGOU
+    }
+
+    /**
+     * 与播放 App 同源的平台曲库（搜歌 + 取词）。车机版酷我返回 {@link LyricsApiEndpoints#PROVIDER_KUWO}
+     * 仅用于网络兜底，实时歌词仍走广播 / MediaSession。
+     */
+    public static String resolvePlatformProvider(String packageName) {
+        if (packageName == null || packageName.trim().isEmpty()) {
+            return "";
+        }
+        String pkg = packageName.trim().toLowerCase();
+        for (String prefix : NETEASE_PACKAGE_PREFIXES) {
+            if (matchesPackagePrefix(pkg, prefix)) {
+                return LyricsApiEndpoints.PROVIDER_NETEASE;
+            }
+        }
+        for (String prefix : QQ_PACKAGE_PREFIXES) {
+            if (matchesPackagePrefix(pkg, prefix)) {
+                return LyricsApiEndpoints.PROVIDER_QQ;
+            }
+        }
+        for (String prefix : KUWO_PACKAGE_PREFIXES) {
+            if (matchesPackagePrefix(pkg, prefix)) {
+                return LyricsApiEndpoints.PROVIDER_KUWO;
+            }
+        }
+        for (String prefix : KUGOU_PACKAGE_PREFIXES) {
+            if (matchesPackagePrefix(pkg, prefix)) {
+                return LyricsApiEndpoints.PROVIDER_KUGOU;
+            }
+        }
+        if (pkg.contains("kugou")) {
+            return LyricsApiEndpoints.PROVIDER_KUGOU;
+        }
+        return "";
     }
 
     /**
@@ -162,22 +207,32 @@ public final class MusicPlayerLyricsPolicy {
                 return PrimaryStrategy.PREFER_QSGC;
             }
         }
-        for (String prefix : KUGOU_PRIORITY_PREFIXES) {
-            if (matchesPackagePrefix(pkg, prefix)) {
-                return PrimaryStrategy.PREFER_KUGOU;
-            }
-        }
-        if (pkg.contains("kugou")) {
+        if (!resolvePlatformProvider(pkg).isEmpty()) {
             return PrimaryStrategy.PREFER_KUGOU;
         }
         return PrimaryStrategy.PREFER_KUGOU;
     }
 
-    public static String strategyDisplayLabel(PrimaryStrategy strategy) {
+    public static String strategyDisplayLabel(PrimaryStrategy strategy, String packageName) {
         if (strategy == PrimaryStrategy.PREFER_QSGC) {
             return "汽水优先";
         }
+        String platform = resolvePlatformProvider(packageName);
+        if (LyricsApiEndpoints.PROVIDER_NETEASE.equals(platform)) {
+            return "网易优先";
+        }
+        if (LyricsApiEndpoints.PROVIDER_QQ.equals(platform)) {
+            return "QQ优先";
+        }
+        if (LyricsApiEndpoints.PROVIDER_KUWO.equals(platform)) {
+            return "酷我优先";
+        }
         return "酷狗优先";
+    }
+
+    /** @deprecated 使用 {@link #strategyDisplayLabel(PrimaryStrategy, String)} */
+    public static String strategyDisplayLabel(PrimaryStrategy strategy) {
+        return strategyDisplayLabel(strategy, "");
     }
 
     private static String queryActiveMediaPackageName(Context context) {

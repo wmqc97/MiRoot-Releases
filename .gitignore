@@ -57,3 +57,19 @@ _tmp_old*
 
 # Generated skill lock file
 skills-lock.json
+
+# Local release / debug artifacts
+build_log.txt
+car_vehicle_history_sample.db
+assets/car.zip
+screen_main.png
+test_activity.png
+temp_backup_inspect/
+temp_kt_snippet.txt
+temp_script.py
+test_import.py
+fix_*.py
+.codex/
+
+# Vehicle API scripts (local only, not for public repo)
+星瑞车控/

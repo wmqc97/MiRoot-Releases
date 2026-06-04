@@ -117,6 +117,7 @@ public class VehicleStatusQueryService extends IntentService {
                 sCachedStatusJson = statusJson;
                 sLastStatusFetchEndMs = System.currentTimeMillis();
             }
+            CarVehicleDisplayCache.save(this, status);
         } catch (Exception e) {
             LogHelper.e(TAG, "查询车辆状态异常", e);
             success = false;

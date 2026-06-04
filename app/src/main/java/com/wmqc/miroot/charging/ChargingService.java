@@ -49,6 +49,9 @@ public class ChargingService extends Service {
 
     private static volatile ChargingService instance;
 
+    /** 背屏前台检测间隔：约 5 次 × 800ms ≈ 4s（原 50 次 ≈ 40s，结束投屏后停常亮过慢）。 */
+    private static final int WAKEUP_REAR_FG_CHECK_INTERVAL = 5;
+
     private ITaskService taskService;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -583,27 +586,11 @@ public class ChargingService extends Service {
                     return;
                 }
                 chargingCheckCounter++;
-                if (chargingCheckCounter >= 50) {
+                if (chargingCheckCounter >= WAKEUP_REAR_FG_CHECK_INTERVAL) {
                     chargingCheckCounter = 0;
-                    if (taskService != null) {
-                        try {
-                            String rearFg = taskService.getForegroundAppOnDisplay(REAR_DISPLAY_ID);
-                            if (rearFg == null || !rearFg.contains("RearScreenChargingActivity")) {
-                                boolean chargingSessionActive =
-                                    RearChargingAnimationCoordinator.isAnimationPlaying()
-                                        || RearChargingAnimationCoordinator.isChargingProtectionActive()
-                                        || RearScreenChargingActivity.getCurrentInstance() != null;
-                                if (chargingSessionActive) {
-                                    LogHelper.d(TAG, "背屏息屏/前台暂不可见，充电会话仍活跃，继续常亮循环");
-                                } else {
-                                    LogHelper.d(TAG, "背屏非充电动画，停止常亮循环");
-                                    stopWakeupLoop();
-                                    return;
-                                }
-                            }
-                        } catch (Exception e) {
-                            LogHelper.w(TAG, "检查充电动画状态失败: " + e.getMessage());
-                        }
+                    maybeStopWakeupLoopIfChargingOverlayInactive();
+                    if (!isWakeupRunning) {
+                        return;
                     }
                 }
                 try {
@@ -633,5 +620,46 @@ public class ChargingService extends Service {
         if (wakeupHandler != null && wakeupRunnable != null) {
             wakeupHandler.removeCallbacks(wakeupRunnable);
         }
+    }
+
+    /** 充电动画结束或界面被关掉时，显式停止常亮唤醒循环（包内广播，与 Activity onDestroy 一致）。 */
+    public static void requestStopWakeupLoop(Context context) {
+        if (context == null) {
+            return;
+        }
+        try {
+            Intent stopWakeup = new Intent(ChargingIntents.ACTION_STOP_CHARGING_WAKEUP);
+            stopWakeup.setPackage(context.getPackageName());
+            context.sendBroadcast(stopWakeup);
+        } catch (Exception e) {
+            LogHelper.w(TAG, "requestStopWakeupLoop failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 背屏已无充电动画且 Activity 实例不存活时，结束唤醒循环并清理协调器残留。
+     * 避免用户手动结束投屏后 {@link RearChargingAnimationCoordinator} 仍为 CHARGING 导致循环不停。
+     */
+    private void maybeStopWakeupLoopIfChargingOverlayInactive() {
+        if (RearScreenChargingActivity.isChargingOverlayAlive()) {
+            return;
+        }
+        if (taskService != null) {
+            try {
+                String rearFg = taskService.getForegroundAppOnDisplay(REAR_DISPLAY_ID);
+                if (rearFg != null && rearFg.contains("RearScreenChargingActivity")) {
+                    return;
+                }
+            } catch (Exception e) {
+                LogHelper.w(TAG, "maybeStopWakeup: rear fg check failed: " + e.getMessage());
+            }
+        }
+        if (RearChargingAnimationCoordinator.getCurrentAnimation()
+            == RearChargingAnimationCoordinator.AnimationType.CHARGING) {
+            RearChargingAnimationCoordinator.endAnimation(
+                RearChargingAnimationCoordinator.AnimationType.CHARGING);
+            LogHelper.d(TAG, "背屏充电动画已不在前台，清理协调器并停止常亮循环");
+        }
+        stopWakeupLoop();
     }
 }

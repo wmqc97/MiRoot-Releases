@@ -9,19 +9,20 @@
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
+        style="@style/Widget.MiRoot.Toolbar"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
-        android:background="@color/mi_card_surface"
         app:navigationIcon="@drawable/ic_arrow_back"
-        app:navigationIconTint="?attr/colorOnSurface"
-        app:title="@string/shizuku_manage_title"
-        app:titleTextAppearance="@style/TextAppearance.MiRoot.Title" />
+        app:title="@string/shizuku_manage_title" />
 
     <androidx.core.widget.NestedScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:padding="@dimen/mi_page_scroll_padding">
+        android:paddingStart="@dimen/mi_page_scroll_padding"
+        android:paddingTop="@dimen/mi_page_content_padding_top"
+        android:paddingEnd="@dimen/mi_page_scroll_padding"
+        android:paddingBottom="@dimen/mi_page_scroll_padding">
 
         <LinearLayout
             android:layout_width="match_parent"

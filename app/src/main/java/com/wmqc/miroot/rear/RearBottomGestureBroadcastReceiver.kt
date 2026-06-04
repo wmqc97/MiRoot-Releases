@@ -3,8 +3,11 @@ package com.wmqc.miroot.rear
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import androidx.core.content.ContextCompat
 import com.wmqc.miroot.car.CarControlDeviceGate
 import com.wmqc.miroot.car.CarControlIntents
+import com.wmqc.miroot.charging.ChargingPreviewLauncher
+import com.wmqc.miroot.charging.ChargingService
 import com.wmqc.miroot.car.CarControlProjectionService
 import com.wmqc.miroot.lyrics.LogHelper
 import com.wmqc.miroot.lyrics.LyricsIntents
@@ -57,6 +60,7 @@ class RearBottomGestureBroadcastReceiver : BroadcastReceiver() {
                 }
             }
             RearGestureAction.FOREGROUND_APP_TO_REAR -> startForegroundAppProjectionLikeTile(app)
+            RearGestureAction.CHARGING_PREVIEW -> startChargingPreview(app)
         }
     }
 
@@ -101,6 +105,21 @@ class RearBottomGestureBroadcastReceiver : BroadcastReceiver() {
             )
         } catch (e: Exception) {
             LogHelper.e(TAG, "rear desktop launch failed", e)
+        }
+    }
+
+    /** 与功能页长按预览一致：需 [ChargingService] 处理广播，不强制充电动画总开关开启。 */
+    private fun startChargingPreview(app: Context) {
+        try {
+            val svc = Intent(app, ChargingService::class.java)
+            try {
+                ContextCompat.startForegroundService(app, svc)
+            } catch (_: Exception) {
+                app.startService(svc)
+            }
+            ChargingPreviewLauncher.requestPreview(app)
+        } catch (e: Exception) {
+            LogHelper.e(TAG, "charging preview failed", e)
         }
     }
 

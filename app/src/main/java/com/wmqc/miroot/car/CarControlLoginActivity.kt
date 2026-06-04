@@ -72,6 +72,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.wmqc.miroot.R
+import com.wmqc.miroot.ui.applyMiRootSecondarySystemBars
+import com.wmqc.miroot.ui.miRootPageTitleTextUnit
+import com.wmqc.miroot.ui.miRootPageTopPadding
 import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -106,6 +109,7 @@ class CarControlLoginActivity : ComponentActivity() {
             return
         }
 
+        applyMiRootSecondarySystemBars()
         enableEdgeToEdge()
         setContent {
             val dark = isSystemInDarkTheme()
@@ -150,6 +154,7 @@ private fun CarControlLoginScreenContent(
 ) {
     val ctx = LocalContext.current
     val scrollPad = dimensionResource(R.dimen.mi_page_scroll_padding)
+    val padTop = miRootPageTopPadding()
     val pageBg = Color(ContextCompat.getColor(ctx, R.color.mi_page_bg))
     val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
     val onPageSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
@@ -203,12 +208,10 @@ private fun CarControlLoginScreenContent(
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .windowInsetsPadding(WindowInsets.navigationBars)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = scrollPad, vertical = scrollPad),
+                    .padding(start = scrollPad, top = padTop, end = scrollPad, bottom = scrollPad),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(scrollPad),
             ) {
-                Spacer(modifier = Modifier.height(8.dp))
-
                 // Logo 区域
                 Box(
                     modifier = Modifier
@@ -229,7 +232,7 @@ private fun CarControlLoginScreenContent(
 
                 Text(
                     text = stringResource(R.string.car_control_login_title),
-                    fontSize = pageTitleTextUnit(),
+                    fontSize = miRootPageTitleTextUnit(),
                     fontWeight = FontWeight.SemiBold,
                     color = onPagePrimary,
                 )
@@ -416,11 +419,3 @@ private fun CarControlLoginScreenContent(
     }
 }
 
-/** 与 `TextAppearance.MiRoot.PageTitle` / 音乐页主标题一致。 */
-@Composable
-private fun pageTitleTextUnit(): TextUnit {
-    val ctx = androidx.compose.ui.platform.LocalContext.current
-    val d = LocalDensity.current
-    val px = ctx.resources.getDimension(R.dimen.mi_page_title_text_size)
-    return (px / (d.density * d.fontScale)).sp
-}

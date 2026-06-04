@@ -53,6 +53,10 @@ import com.wmqc.miroot.R
 import com.wmqc.miroot.rear.AppProjectionOfficialGesturePolicy
 import com.wmqc.miroot.rear.OfficialSubscreenServiceGate
 import com.wmqc.miroot.ui.apps.AppsFragment
+import com.wmqc.miroot.ui.MiRootSecondaryToolbar
+import com.wmqc.miroot.ui.applyMiRootSecondarySystemBars
+import com.wmqc.miroot.ui.miRootPageHorizontalPadding
+import com.wmqc.miroot.ui.miRootPageTopPadding
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -68,6 +72,7 @@ class RearDesktopSettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ensureSafeWindowSize()
+        applyMiRootSecondarySystemBars()
         enableEdgeToEdge()
         setContent {
             val dark = isSystemInDarkTheme()
@@ -96,7 +101,8 @@ class RearDesktopSettingsActivity : ComponentActivity() {
 @Composable
 private fun RearDesktopSettingsScreen() {
     val ctx = LocalContext.current
-    val padH = dimensionResource(R.dimen.mi_page_scroll_padding)
+    val padH = miRootPageHorizontalPadding()
+    val padTop = miRootPageTopPadding()
     val pageBg = Color(ContextCompat.getColor(ctx, R.color.mi_page_bg))
     val onPrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
     val onSecondary = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
@@ -123,29 +129,24 @@ private fun RearDesktopSettingsScreen() {
         AppProjectionOfficialGesturePolicy.setScope(ctx.applicationContext, scope)
     }
 
-    Box(
+    val activity = ctx as? ComponentActivity
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .background(pageBg)
             .windowInsetsPadding(WindowInsets.statusBars)
             .windowInsetsPadding(WindowInsets.navigationBars),
     ) {
+        MiRootSecondaryToolbar(
+            title = stringResource(R.string.rear_desktop_settings_title),
+            onNavigateBack = { activity?.finish() },
+        )
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = padH, vertical = padH),
+                .padding(start = padH, top = padTop, end = padH, bottom = padH),
         ) {
-            // ── Title ──
-            Text(
-                text = stringResource(R.string.rear_desktop_settings_title),
-                fontSize = 22.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = onPrimary,
-            )
-
-            Spacer(Modifier.height(20.dp))
-
             // ── Desktop Mode ──
             SectionHeader("桌面模式")
             Spacer(Modifier.height(4.dp))

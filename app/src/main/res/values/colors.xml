@@ -24,6 +24,8 @@
     <color name="mi_card_surface">#FFFFFFFF</color>
     <color name="mi_text_primary">#FF1A1C1E</color>
     <color name="mi_text_secondary">#FF5F6368</color>
+    <!-- 车控刷新按钮（浅色底上深色图标） -->
+    <color name="car_control_refresh_icon">#FF374151</color>
     <color name="mi_divider">#14000000</color>
 
     <!-- 外框颜色 Chip：未选中文案色；选中时底图与此色相同 -->

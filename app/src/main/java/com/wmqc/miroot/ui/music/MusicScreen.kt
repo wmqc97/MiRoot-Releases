@@ -62,6 +62,9 @@ import top.yukonga.miuix.kmp.theme.lightColorScheme
 import androidx.compose.ui.res.stringResource
 import com.wmqc.miroot.R
 import com.wmqc.miroot.lyrics.LyricsFontHelper
+import com.wmqc.miroot.ui.miRootPageHorizontalPadding
+import com.wmqc.miroot.ui.miRootPageTitleTextUnit
+import com.wmqc.miroot.ui.miRootPageTopPadding
 
 /**
  * 音乐投屏设置页：遵循 [Miuix](https://github.com/compose-miuix-ui/miuix) 与 README 中的 `MiuixTheme` 用法，
@@ -97,8 +100,9 @@ fun MusicScreen(
         MaterialTheme(colorScheme = materialScheme) {
         var showLyricsDictFormatDialog by remember { mutableStateOf(false) }
         val scheme = MiuixTheme.colorScheme
-        val padH = dimensionResource(R.dimen.mi_music_page_padding_horizontal)
-        val padV = dimensionResource(R.dimen.mi_music_page_padding_vertical)
+        val padH = miRootPageHorizontalPadding()
+        val padTop = miRootPageTopPadding()
+        val padBottom = dimensionResource(R.dimen.mi_music_page_padding_vertical)
         val cardGap = dimensionResource(R.dimen.mi_music_card_spacing)
         val pageBg = Color(ContextCompat.getColor(ctx, R.color.mi_page_bg))
         val onPagePrimary = Color(ContextCompat.getColor(ctx, R.color.mi_text_primary))
@@ -113,12 +117,12 @@ fun MusicScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(horizontal = padH, vertical = padV),
+                        .padding(start = padH, top = padTop, end = padH, bottom = padBottom),
                     verticalArrangement = Arrangement.spacedBy(cardGap),
                 ) {
                     Text(
                         text = stringResource(R.string.music_title),
-                        fontSize = pageTitleTextUnit(),
+                        fontSize = miRootPageTitleTextUnit(),
                         fontWeight = FontWeight.SemiBold,
                         color = onPagePrimary,
                     )
@@ -501,15 +505,6 @@ private fun LyricsDictFormatDialog(onDismiss: () -> Unit) {
             }
         },
     )
-}
-
-/** 页标题字号：与 `TextAppearance.MiRoot.PageTitle` / `@dimen/mi_page_title_text_size` 一致。 */
-@Composable
-private fun pageTitleTextUnit(): TextUnit {
-    val ctx = LocalContext.current
-    val d = LocalDensity.current
-    val px = ctx.resources.getDimension(R.dimen.mi_page_title_text_size)
-    return (px / (d.density * d.fontScale)).sp
 }
 
 /**

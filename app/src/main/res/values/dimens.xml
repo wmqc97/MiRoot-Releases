@@ -2,8 +2,10 @@
 <resources>
     <dimen name="mi_corner_radius">20dp</dimen>
     <dimen name="mi_card_stroke">0dp</dimen>
-    <!-- 各页可滚动内容与音乐页一致的边距；改此处即可全局同步 -->
+    <!-- 各页可滚动内容水平边距；改此处即可全局同步 -->
     <dimen name="mi_page_scroll_padding">16dp</dimen>
+    <!-- 主 Tab 内容区顶边距（状态栏 inset 之外的统一留白，与音乐页一致） -->
+    <dimen name="mi_page_content_padding_top">12dp</dimen>
     <!-- 功能页等与音乐页 Miuix title3 对齐的顶栏主标题字号 -->
     <dimen name="mi_page_title_text_size">22sp</dimen>
     <!-- 各卡片首行区块标题（大于 TitleMedium / 二级说明） -->
@@ -12,16 +14,16 @@
     <dimen name="mi_card_section_title_to_hint">4dp</dimen>
     <dimen name="mi_card_hint_after_control">2dp</dimen>
     <dimen name="mi_card_hint_paragraph_gap">8dp</dimen>
-    <!-- 音乐页 Compose：略收紧边距与卡片内行距以缩短可滚动高度（功能不变） -->
-    <dimen name="mi_music_page_padding_horizontal">14dp</dimen>
-    <dimen name="mi_music_page_padding_vertical">12dp</dimen>
+    <!-- 音乐页 Compose：水平与全局一致；垂直顶边与 mi_page_content_padding_top 一致 -->
+    <dimen name="mi_music_page_padding_horizontal">@dimen/mi_page_scroll_padding</dimen>
+    <dimen name="mi_music_page_padding_vertical">@dimen/mi_page_content_padding_top</dimen>
     <dimen name="mi_music_card_spacing">10dp</dimen>
     <dimen name="mi_music_card_inner_padding">12dp</dimen>
     <dimen name="mi_music_card_row_spacing">8dp</dimen>
     <dimen name="mi_music_font_choice_gap">4dp</dimen>
     <dimen name="mi_music_card_corner_radius">16dp</dimen>
     <!-- 功能页：垂直外边距与卡片间距略小于音乐页，卡片内边距略收紧，缩短可滚动高度 -->
-    <dimen name="mi_features_page_padding_vertical">8dp</dimen>
+    <dimen name="mi_features_page_padding_vertical">@dimen/mi_page_content_padding_top</dimen>
     <dimen name="mi_features_card_spacing">8dp</dimen>
     <dimen name="mi_features_card_inner_padding">10dp</dimen>
     <dimen name="mi_features_section_gap">8dp</dimen>

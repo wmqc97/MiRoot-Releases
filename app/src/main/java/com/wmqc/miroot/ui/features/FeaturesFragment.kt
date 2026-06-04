@@ -55,6 +55,8 @@ import com.wmqc.miroot.charging.ChargingMascotLoader
 import com.wmqc.miroot.charging.ChargingPreviewLauncher
 import com.wmqc.miroot.charging.ChargingServiceSync
 import com.wmqc.miroot.charging.RearScreenChargingActivity
+import com.wmqc.miroot.lyrics.LyricsFontHelper
+import com.wmqc.miroot.ui.music.LyricsFontImporter
 import com.wmqc.miroot.databinding.DialogCompositeXyBinding
 import com.wmqc.miroot.databinding.DialogStickerOverlayBinding
 import com.wmqc.miroot.databinding.FragmentFeaturesBinding
@@ -139,6 +141,30 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
             sendReloadChargingSettingsBroadcast(ctx)
         } else {
             MainDisplayUi.showToast(ctx, R.string.features_charging_mascot_copy_fail, Toast.LENGTH_LONG)
+        }
+    }
+
+    private val pickChargingFontLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (!isAdded) return@registerForActivityResult
+        val ctx = requireContext()
+        if (uri == null) {
+            syncChargingFontUiFromPrefs()
+            return@registerForActivityResult
+        }
+        val path = LyricsFontImporter.copyImportedFont(
+            ctx,
+            uri,
+            LyricsFontImporter.Slot.CHARGING,
+        )
+        if (path != null) {
+            ChargingAnimationPrefs.setFont(ctx, LyricsFontHelper.ID_CUSTOM, path)
+            sendReloadChargingSettingsBroadcast(ctx)
+            syncChargingFontUiFromPrefs()
+        } else {
+            MainDisplayUi.showToast(ctx, R.string.music_font_import_failed, Toast.LENGTH_SHORT)
+            syncChargingFontUiFromPrefs()
         }
     }
 
@@ -615,6 +641,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         setupChargingFillSpeedSliderCompose()
         setupChargingWaterColorSection()
         setupChargingFloatingDisplayToggle()
+        setupChargingFontToggle()
         syncChargingAnimationUiFromPrefs()
         binding.switchChargingAnimation.setOnCheckedChangeListener { _, checked ->
             if (suppressChargingAnimationCallbacks) return@setOnCheckedChangeListener
@@ -675,6 +702,33 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
             updateChargingMascotRowVisibility()
             sendReloadChargingSettingsBroadcast(ctx)
         }
+    }
+
+    private fun setupChargingFontToggle() {
+        binding.toggleChargingFont.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked || suppressChargingAnimationCallbacks) return@addOnButtonCheckedListener
+            val ctx = requireContext()
+            when (checkedId) {
+                R.id.button_charging_font_system -> {
+                    ChargingAnimationPrefs.setFont(ctx, LyricsFontHelper.ID_SYSTEM, null)
+                    sendReloadChargingSettingsBroadcast(ctx)
+                }
+                R.id.button_charging_font_mfgehei -> {
+                    ChargingAnimationPrefs.setFont(ctx, LyricsFontHelper.ID_MFGEHEI, null)
+                    sendReloadChargingSettingsBroadcast(ctx)
+                }
+                R.id.button_charging_font_import -> {
+                    pickChargingFontLauncher.launch(arrayOf("font/*", "application/x-font-ttf", "application/x-font-otf"))
+                }
+            }
+        }
+    }
+
+    private fun syncChargingFontUiFromPrefs() {
+        val fontId = ChargingAnimationPrefs.getFontId(requireContext())
+        binding.buttonChargingFontSystem.isChecked = fontId == LyricsFontHelper.ID_SYSTEM
+        binding.buttonChargingFontMfgehei.isChecked = fontId == LyricsFontHelper.ID_MFGEHEI
+        binding.buttonChargingFontImport.isChecked = fontId == LyricsFontHelper.ID_CUSTOM
     }
 
     private fun syncChargingFloatingDisplayUiFromPrefs() {
@@ -777,6 +831,8 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         binding.layoutChargingWaterColor.visibility = v
         binding.textChargingFloatingTitle.visibility = v
         binding.toggleChargingFloating.visibility = v
+        binding.textChargingFontTitle.visibility = v
+        binding.toggleChargingFont.visibility = v
         if (enabled) {
             updateChargingMascotRowVisibility()
         } else {
@@ -866,6 +922,7 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         val enabled = ChargingAnimationPrefs.isEnabled(ctx)
         binding.switchChargingAnimation.isChecked = enabled
         syncChargingFloatingDisplayUiFromPrefs()
+        syncChargingFontUiFromPrefs()
         suppressChargingAnimationCallbacks = false
         setChargingSubSectionVisible(enabled)
         syncChargingBackgroundStatusText()

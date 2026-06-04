@@ -42,7 +42,6 @@ import androidx.core.view.WindowInsetsCompat;
 
 import com.wmqc.miroot.R;
 import com.wmqc.miroot.RearDisplayInputHelper;
-import com.wmqc.miroot.lyrics.LyricsFontHelper;
 import com.wmqc.miroot.lyrics.DisplayInfoCache;
 import com.wmqc.miroot.lyrics.ITaskService;
 import com.wmqc.miroot.lyrics.LogHelper;
@@ -88,7 +87,7 @@ public class RearScreenChargingActivity extends ComponentActivity {
     private GyroWaterRippleView waterView;
     private ChargingBackgroundVideoPlayer backgroundVideoPlayer;
     private TextView batteryTextView;
-    private Typeface lyricsTypeface;
+    private Typeface chargingDisplayTypeface;
     private ImageView lightningIcon;
     private LinearLayout chargingInfoBar;
     private ValueAnimator lightningPulseAnimator;
@@ -145,6 +144,7 @@ public class RearScreenChargingActivity extends ComponentActivity {
                 runOnUiThread(() -> {
                     if (chargingUiInflated) {
                         applyChargingLiquidStyleFromPrefs();
+                        applyChargingDisplayFont();
                     }
                 });
             }
@@ -167,7 +167,8 @@ public class RearScreenChargingActivity extends ComponentActivity {
 
     @Override
     public void finish() {
-        if (finishRequestedByMiRoot) {
+        if (this == currentInstance) {
+            ChargingService.requestStopWakeupLoop(getApplicationContext());
         }
         prepareRearProjectionVisibleBeforeFinish();
         super.finish();
@@ -201,6 +202,21 @@ public class RearScreenChargingActivity extends ComponentActivity {
     /** 供背屏唤醒等链路检测充电动画实例是否存活。 */
     public static RearScreenChargingActivity getCurrentInstance() {
         return currentInstance;
+    }
+
+    /** 当前充电动画 Activity 是否仍存活（非 finishing/destroyed）。 */
+    public static boolean isChargingOverlayAlive() {
+        RearScreenChargingActivity inst = currentInstance;
+        if (inst == null) {
+            return false;
+        }
+        if (inst.isFinishing()) {
+            return false;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && inst.isDestroyed()) {
+            return false;
+        }
+        return true;
     }
 
     @Override
@@ -566,7 +582,7 @@ public class RearScreenChargingActivity extends ComponentActivity {
         rebuildInfoBar();
         updateChargingInfoVisibility();
         applyFloatingInfoSafeInsetsToWaterView();
-        applyLyricsFontToChargingUi();
+        applyChargingDisplayFont();
         // 延迟 1s 等 UI 稳定后开始读取电池信息
         mainHandler.postDelayed(this::queryAndUpdateBatteryInfo, 1000L);
     }
@@ -713,17 +729,20 @@ public class RearScreenChargingActivity extends ComponentActivity {
         initialFillAnimator.start();
 
         if (isCenterBatteryVisible()) {
-            batteryTextView.setAlpha(0f);
-            batteryTextView.setScaleX(0.8f);
-            batteryTextView.setScaleY(0.8f);
-            batteryTextView.animate()
-                .alpha(1f)
-                .scaleX(1f)
-                .scaleY(1f)
-                .setDuration(800)
-                .setStartDelay(600)
-                .setInterpolator(new DecelerateInterpolator(2.0f))
-                .start();
+            View center = findViewById(R.id.center_content);
+            if (center != null) {
+                center.setAlpha(0f);
+                center.setScaleX(0.8f);
+                center.setScaleY(0.8f);
+                center.animate()
+                    .alpha(1f)
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(800)
+                    .setStartDelay(600)
+                    .setInterpolator(new DecelerateInterpolator(2.0f))
+                    .start();
+            }
         }
 
         View container = findViewById(R.id.charging_container);
@@ -814,26 +833,21 @@ public class RearScreenChargingActivity extends ComponentActivity {
         lightningPulseAnimator.start();
     }
 
-    /** 中央电量与底部信息卡使用音乐页「背屏歌词字体」。 */
-    private void applyLyricsFontToChargingUi() {
-        lyricsTypeface = LyricsFontHelper.resolveProjectionLyricsTypeface(this);
+    /** 充电动画全部文案（中央电量、底部信息、漂浮信息）统一使用功能页所选字体。 */
+    private void applyChargingDisplayFont() {
+        chargingDisplayTypeface = ChargingAnimationPrefs.resolveTypeface(this);
         if (batteryTextView != null) {
-            batteryTextView.setTypeface(lyricsTypeface, Typeface.NORMAL);
+            batteryTextView.setTypeface(chargingDisplayTypeface, Typeface.NORMAL);
         }
         if (waterView != null) {
-            waterView.setLyricsTypeface(lyricsTypeface);
+            waterView.setChargingDisplayTypeface(chargingDisplayTypeface);
         }
-        applyLyricsFontToInfoBar();
-    }
-
-    private void applyLyricsFontToInfoBar() {
-        if (chargingInfoBar == null || lyricsTypeface == null) {
-            return;
-        }
-        for (int i = 0; i < chargingInfoBar.getChildCount(); i++) {
-            View child = chargingInfoBar.getChildAt(i);
-            if (child instanceof TextView) {
-                ((TextView) child).setTypeface(lyricsTypeface, Typeface.NORMAL);
+        if (chargingInfoBar != null) {
+            for (int i = 0; i < chargingInfoBar.getChildCount(); i++) {
+                View child = chargingInfoBar.getChildAt(i);
+                if (child instanceof TextView) {
+                    ((TextView) child).setTypeface(chargingDisplayTypeface, Typeface.NORMAL);
+                }
             }
         }
     }
@@ -873,7 +887,7 @@ public class RearScreenChargingActivity extends ComponentActivity {
             tv.setText("--");
             chargingInfoBar.addView(tv);
         }
-        applyLyricsFontToInfoBar();
+        applyChargingDisplayFont();
         chargingInfoBar.setVisibility(View.VISIBLE);
     }
 
@@ -958,6 +972,25 @@ public class RearScreenChargingActivity extends ComponentActivity {
         return propertyValue != Integer.MIN_VALUE;
     }
 
+    /**
+     * 统一电流符号：充电流入为正、放电流出为负。
+     * 部分机型（含小米/HyperOS）{@link BatteryManager#BATTERY_PROPERTY_CURRENT_NOW}
+     * 与 AOSP 约定相反（插电为负、未插为正）。
+     */
+    private static int normalizeCurrentMicroA(int currentMicroA, int plugged) {
+        if (!isBatteryPropertyAvailable(currentMicroA) || currentMicroA == 0) {
+            return currentMicroA;
+        }
+        boolean pluggedIn = plugged != 0;
+        if (pluggedIn && currentMicroA < 0) {
+            return -currentMicroA;
+        }
+        if (!pluggedIn && currentMicroA > 0) {
+            return -currentMicroA;
+        }
+        return currentMicroA;
+    }
+
     /** 电流 µA：充电为正、放电为负，原样显示符号。 */
     private static String formatSignedCurrent(int currentMicroA) {
         if (!isBatteryPropertyAvailable(currentMicroA)) {
@@ -1004,8 +1037,9 @@ public class RearScreenChargingActivity extends ComponentActivity {
                 chargeCounterMicroAh = bm.getIntProperty(
                         BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER);
             }
+            current = normalizeCurrentMicroA(current, plugged);
 
-            // 功率 W = V × I（系统约定：充电为正、放电为负，单位 µA）
+            // 功率 W = V × I（充电为正、放电为负，单位 µA）
             boolean currentValid = isBatteryPropertyAvailable(current);
             float powerW = 0f;
             if (currentValid && voltage > 0) {
@@ -1227,19 +1261,25 @@ public class RearScreenChargingActivity extends ComponentActivity {
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ? getCurrentDisplayIdSafe() : Display.DEFAULT_DISPLAY;
         super.onDestroy();
 
-        if (this != currentInstance) {
+        final boolean ownsSession = (this == currentInstance);
+        boolean shouldRestore = false;
+        if (ownsSession) {
+            currentInstance = null;
+            shouldRestore = RearChargingAnimationCoordinator.endAnimation(
+                RearChargingAnimationCoordinator.AnimationType.CHARGING);
+            ChargingService.requestStopWakeupLoop(getApplicationContext());
+        } else if (!isChargingOverlayAlive()
+            && RearChargingAnimationCoordinator.getCurrentAnimation()
+                == RearChargingAnimationCoordinator.AnimationType.CHARGING) {
+            LogHelper.w(TAG, "非当前实例 onDestroy，协调器仍为 CHARGING，补清理常亮");
+            RearChargingAnimationCoordinator.endAnimation(
+                RearChargingAnimationCoordinator.AnimationType.CHARGING);
+            ChargingService.requestStopWakeupLoop(getApplicationContext());
+            return;
+        } else {
             LogHelper.w(TAG, "旧实例 onDestroy，跳过协调器与恢复");
             return;
         }
-
-        boolean shouldRestore = RearChargingAnimationCoordinator.endAnimation(
-            RearChargingAnimationCoordinator.AnimationType.CHARGING);
-        currentInstance = null;
-
-        // 充电动画已结束，通知 ChargingService 停止常亮唤醒循环
-        Intent stopWakeup = new Intent(ChargingIntents.ACTION_STOP_CHARGING_WAKEUP);
-        stopWakeup.setPackage(getPackageName());
-        sendBroadcast(stopWakeup);
 
         if (!shouldRestore) {
             LogHelper.d(TAG, "充电动画被打断，跳过恢复背屏");

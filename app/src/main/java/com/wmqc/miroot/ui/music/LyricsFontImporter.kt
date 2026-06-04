@@ -14,6 +14,7 @@ object LyricsFontImporter {
     enum class Slot(val destBaseName: String) {
         PROJECTION("projection_lyrics"),
         ABYSSAL("abyssal_lyrics"),
+        CHARGING("charging_display"),
     }
 
     fun copyImportedFont(context: Context, uri: Uri, slot: Slot): String? {

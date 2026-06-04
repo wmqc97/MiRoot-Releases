@@ -14,6 +14,8 @@
     <color name="mi_card_surface">#FF1E1F22</color>
     <color name="mi_text_primary">#FFE8EAED</color>
     <color name="mi_text_secondary">#FF9AA0A6</color>
+    <!-- 车控刷新按钮（深色底上浅色图标） -->
+    <color name="car_control_refresh_icon">#FFE8EAED</color>
     <color name="mi_divider">#22FFFFFF</color>
 
     <color name="shell_chip_white">#FFB0BEC5</color>

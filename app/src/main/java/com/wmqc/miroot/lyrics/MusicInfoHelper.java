@@ -264,8 +264,8 @@ public class MusicInfoHelper {
 
     /**
      * 按播放器来源选择歌词匹配方案：
-     * - 酷我：背屏优先专用解析链（AUDIO_LYRIC）；网络兜底按包名走酷狗优先策略
-     * - 汽水：先 qsgc 再酷狗；网易云/酷狗/酷我/QQ/其他：先酷狗再 qsgc；均失败再走 lrclib / lyrics.ovh
+     * - 酷我车机：背屏优先广播 / AUDIO_LYRIC；网络兜底走酷我 API → 酷狗 → qsgc
+     * - 汽水：先 qsgc 再酷狗；网易 / QQ / 酷我 / 酷狗：先各平台 API 再酷狗再 qsgc；均失败再走 lrclib / lyrics.ovh
      */
     public static String getLyricsFromAPI(Context context, String title, String artist, long durationMs, String musixmatchApiKey, String sourcePackageName) {
         return getLyricsFromAPI(context, title, artist, durationMs, musixmatchApiKey, sourcePackageName, false, true);

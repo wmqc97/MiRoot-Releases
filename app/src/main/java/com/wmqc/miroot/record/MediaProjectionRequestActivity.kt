@@ -70,7 +70,12 @@ class MediaProjectionRequestActivity : ComponentActivity() {
             i.action = RearScreenRecordService.ACTION_PROJECTION_CANCELLED
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(i)
+            try {
+                startForegroundService(i)
+            } catch (t: Throwable) {
+                RecordSynthDebugLog.diagW("notifyService startForegroundService failed: ${t.message}", t)
+                startService(i)
+            }
         } else {
             startService(i)
         }

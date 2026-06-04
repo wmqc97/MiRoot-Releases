@@ -644,6 +644,7 @@ public class CarButtonStateManager {
             try {
                 VehicleStatusService.VehicleStatusInfo status =
                         VehicleStatusService.getVehicleStatus(context);
+                CarVehicleDisplayCache.save(context, status);
                 // 只检查当前轮询的按钮，不触碰其他按钮以防串扰
                 pollSlot(slotIndex, status, prefs);
             } catch (Exception e) {

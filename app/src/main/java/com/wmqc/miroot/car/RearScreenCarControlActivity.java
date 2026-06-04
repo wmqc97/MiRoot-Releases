@@ -1253,8 +1253,16 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         if (refreshIcon == null) {
             return;
         }
-        int c = isCarControlNightUi() ? 0xFFFFFFFF : 0xFF424242;
-        refreshIcon.setColorFilter(c, PorterDuff.Mode.SRC_IN);
+        android.graphics.drawable.Drawable dr = refreshIcon.getDrawable();
+        if (dr == null) {
+            return;
+        }
+        dr = androidx.core.graphics.drawable.DrawableCompat.wrap(dr.mutate());
+        androidx.core.graphics.drawable.DrawableCompat.setTint(
+            dr,
+            androidx.core.content.ContextCompat.getColor(this, R.color.car_control_refresh_icon));
+        refreshIcon.setImageDrawable(dr);
+        refreshIcon.clearColorFilter();
     }
 
     /** 初始油量区配色（无接口数据时）；有 PNG 油量图标时尽量不加滤镜。 */
@@ -1565,7 +1573,18 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
         
         // 1. 刷新按钮（第一个，放在更新文本左边，距离15px，水平居中对齐）
         refreshIcon = new ImageView(this);
-        refreshIcon.setImageResource(R.drawable.ic_car_control_refresh);
+        int refreshIconDrawPx = (int) (24 * density);
+        android.graphics.drawable.Drawable refreshDr =
+            androidx.appcompat.content.res.AppCompatResources.getDrawable(this, R.drawable.ic_car_control_refresh);
+        if (refreshDr != null) {
+            refreshDr = androidx.core.graphics.drawable.DrawableCompat.wrap(refreshDr.mutate());
+            androidx.core.graphics.drawable.DrawableCompat.setTint(
+                refreshDr,
+                androidx.core.content.ContextCompat.getColor(this, R.color.car_control_refresh_icon));
+            refreshDr.setBounds(0, 0, refreshIconDrawPx, refreshIconDrawPx);
+            refreshIcon.setImageDrawable(refreshDr);
+            refreshIcon.clearColorFilter();
+        }
         refreshIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
         refreshIcon.setContentDescription(getString(R.string.car_control_vehicle_refresh));
         int tap = (int) (36 * density);
@@ -1740,6 +1759,8 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
 
         // 设置ViewPager2（必须在loadButtonConfig之后）
         setupViewPager();
+
+        applyCachedCarInfoFromPrefs();
 
         applyCarControlUiMode();
         
@@ -2657,6 +2678,31 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
     }
 
     /**
+     * 进入背屏车控时先展示上次成功刷新的 HUD 数据，避免等待网络时空白。
+     */
+    private void applyCachedCarInfoFromPrefs() {
+        if (!CarVehicleDisplayCache.hasCache(this)) {
+            return;
+        }
+        CarVehicleDisplayCache.HudSnapshot snap = CarVehicleDisplayCache.loadHudSnapshot(this);
+        if (snap == null) {
+            return;
+        }
+        int range = snap.getRangeKm() >= 0 ? snap.getRangeKm() : 0;
+        int fuel = snap.getFuelPercent() >= 0 ? snap.getFuelPercent() : 0;
+        updateCarInfo(
+                range,
+                fuel,
+                snap.getOdometer(),
+                snap.getInteriorTemp(),
+                snap.getExteriorTemp(),
+                snap.getUpdateTime(),
+                snap.getLockStatus(),
+                snap.getWindowStatus());
+        LogHelper.d(TAG, "✓ 已应用车辆信息缓存 range=" + range + " fuel=" + fuel);
+    }
+
+    /**
      * 初始化车辆信息
      */
     private void initCarInfo() {
@@ -2746,6 +2792,7 @@ public class RearScreenCarControlActivity extends androidx.fragment.app.Fragment
                             }
 
                             updateCarInfo(range, fuel, odometerStr, interiorTempStr, exteriorTempStr, updateTime, lockStatus, windowStatus);
+                            CarVehicleDisplayCache.save(RearScreenCarControlActivity.this, finalStatusInfo);
                         }
                     });
                 } else {

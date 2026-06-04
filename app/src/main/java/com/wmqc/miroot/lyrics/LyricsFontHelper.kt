@@ -58,6 +58,28 @@ object LyricsFontHelper {
         return loadMfGeHeiTypeface(context) ?: Typeface.DEFAULT
     }
 
+    /** 读取音乐页「背屏歌词字体」偏好并解析为 [Typeface]（投屏/深渊镜共用）。 */
+    @JvmStatic
+    fun resolveProjectionLyricsTypeface(context: Context): Typeface {
+        val app = context.applicationContext
+        val p = app.getSharedPreferences(PREFS_LYRICS, Context.MODE_PRIVATE)
+        var fontId = normalizeFontId(p.getString(KEY_PROJECTION_FONT, null))
+        var customPath = p.getString(KEY_PROJECTION_CUSTOM_PATH, null)?.trim().orEmpty()
+        if (fontId == ID_CUSTOM) {
+            if (customPath.isEmpty() || !File(customPath).isFile) {
+                fontId = DEFAULT_ID
+                customPath = ""
+            }
+        } else {
+            customPath = ""
+        }
+        return resolveTypeface(app, fontId, customPath.ifEmpty { null })
+    }
+
+    private const val PREFS_LYRICS = "LyricsSettings"
+    private const val KEY_PROJECTION_FONT = "projectionLyricsFont"
+    private const val KEY_PROJECTION_CUSTOM_PATH = "projectionLyricsCustomPath"
+
     /**
      * MFGeHei：优先 [res/font/miroot_mfgehei.ttf]（可选打包），再尝试 assets。
      * 标准内置路径为 assets/MFGeHei-Regular.ttf（即 app/src/main/assets/MFGeHei-Regular.ttf），

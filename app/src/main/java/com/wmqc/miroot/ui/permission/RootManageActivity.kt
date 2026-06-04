@@ -8,6 +8,7 @@ import androidx.lifecycle.lifecycleScope
 import com.wmqc.miroot.R
 import com.wmqc.miroot.capability.EnvironmentProbe
 import com.wmqc.miroot.databinding.ActivityRootManageBinding
+import com.wmqc.miroot.ui.applyMiRootSecondarySystemBars
 import kotlinx.coroutines.launch
 
 class RootManageActivity : AppCompatActivity() {
@@ -16,6 +17,7 @@ class RootManageActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyMiRootSecondarySystemBars()
         binding = ActivityRootManageBinding.inflate(layoutInflater)
         setContentView(binding.root)
 

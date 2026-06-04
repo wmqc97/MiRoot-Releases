@@ -2,7 +2,7 @@ package com.wmqc.miroot.rear
 
 /**
  * 单个背屏底部手势可配置动作。
- * [REAR_DESKTOP]、[MUSIC_LYRICS]、[CAR_CONTROL]、[FOREGROUND_APP_TO_REAR] 为**互斥动作**：每种动作最多被一个槽位使用；
+ * [REAR_DESKTOP]、[MUSIC_LYRICS]、[CAR_CONTROL]、[FOREGROUND_APP_TO_REAR]、[CHARGING_PREVIEW] 为**互斥动作**：每种动作最多被一个槽位使用；
  * 其它槽的下拉中不再出现已被占用的该动作，避免两路手势唤起同一系统能力。由 [RearGesturePrefs] 与配置页共同约束。
  */
 enum class RearGestureAction {
@@ -13,6 +13,8 @@ enum class RearGestureAction {
     LAUNCH_APP,
     /** 同磁贴「切换至背屏」：前台应用迁背屏，Keeper 收口。 */
     FOREGROUND_APP_TO_REAR,
+    /** 功能页预览同款：背屏充电动画（涨水/常亮等读当前设置）。 */
+    CHARGING_PREVIEW,
     ;
 
     val isExclusive: Boolean
@@ -20,7 +22,8 @@ enum class RearGestureAction {
             this == REAR_DESKTOP ||
                 this == MUSIC_LYRICS ||
                 this == CAR_CONTROL ||
-                this == FOREGROUND_APP_TO_REAR
+                this == FOREGROUND_APP_TO_REAR ||
+                this == CHARGING_PREVIEW
 }
 
 /**
@@ -51,14 +54,14 @@ data class RearGestureInjectSpec(
         }.trim()
 
     companion object {
-        /** 与旧版「仅上滑音乐」接近的单一独占默认。 */
+        /** 默认：上滑音乐、左滑充电动画、右滑背屏桌面。 */
         fun defaultCompat(): RearGestureInjectSpec =
             RearGestureInjectSpec(
                 slot1Up = RearGestureAction.MUSIC_LYRICS,
                 slot1LaunchPackage = "",
-                slot2Left = RearGestureAction.NONE,
+                slot2Left = RearGestureAction.CHARGING_PREVIEW,
                 slot2LaunchPackage = "",
-                slot3Right = RearGestureAction.NONE,
+                slot3Right = RearGestureAction.REAR_DESKTOP,
                 slot3LaunchPackage = "",
             )
     }

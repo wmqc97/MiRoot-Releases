@@ -8,6 +8,7 @@
   （全屏背景已改为随系统深浅色的纯色底，不再读取 car_control_projection_bg）
   xingrui.png                    — 默认车模（优先于 res/drawable/xingrui 矢量占位）
   you.png                        — 油量小图标（可选；缺省用 res/drawable/you）
+  （刷新按钮使用 res/drawable/ic_car_control_refresh.xml 矢量，颜色随系统深浅色 car_control_refresh_icon）
 
 按钮图标（可选，文件名与 res/drawable 资源名一致）：
   ic_car_index_lock.png

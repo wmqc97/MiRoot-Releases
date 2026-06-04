@@ -35,6 +35,8 @@ val signLocal = loadSigningProperties()
 /** 爱发电开放接口（写入 local.properties 的 AFDIAN_USER_ID / AFDIAN_TOKEN，勿提交仓库）。 */
 val afdianUserId = signingProp("AFDIAN_USER_ID", signLocal) ?: ""
 val afdianToken = signingProp("AFDIAN_TOKEN", signLocal) ?: ""
+/** 高德 Web 服务 Key（逆地理/静态地图，与 Android 平台 Key 不同，见 docs/高德地图Key配置.md） */
+val amapWebServiceKey = signingProp("AMAP_WEB_SERVICE_KEY", signLocal) ?: ""
 fun escapeForBuildConfigValue(s: String): String =
     s.replace("\\", "\\\\").replace("\"", "\\\"")
 
@@ -52,6 +54,15 @@ fun sha256Hex(bytes: ByteArray): String {
     val digest = md.digest(bytes)
     return digest.joinToString("") { b -> "%02X".format(b) }
 }
+
+fun sha1Hex(bytes: ByteArray): String {
+    val md = MessageDigest.getInstance("SHA-1")
+    val digest = md.digest(bytes)
+    return digest.joinToString(":") { b -> "%02X".format(b) }
+}
+
+fun certFingerprints(certBytes: ByteArray): Pair<String, String> =
+    sha1Hex(certBytes) to sha256Hex(certBytes)
 
 /** 从 release keystore 计算证书 SHA-256（X509 证书编码）。 */
 val releaseCertSha256: String = runCatching {
@@ -119,8 +130,8 @@ android {
         // Android 16 = API 36；minSdk 勿与 target 相同，否则仅 16+ 设备可安装
         minSdk = 28
         targetSdk = 36
-        versionCode = 33
-        versionName = "1.9.8"
+        versionCode = 35
+        versionName = "2.1"
 
         manifestPlaceholders["superlyricApiVersionName"] = "3.4"
         manifestPlaceholders["superlyricApiVersionCode"] = "34"
@@ -133,6 +144,7 @@ android {
 
         buildConfigField("String", "AFDIAN_USER_ID", "\"${escapeForBuildConfigValue(afdianUserId)}\"")
         buildConfigField("String", "AFDIAN_TOKEN", "\"${escapeForBuildConfigValue(afdianToken)}\"")
+        buildConfigField("String", "AMAP_WEB_SERVICE_KEY", "\"${escapeForBuildConfigValue(amapWebServiceKey)}\"")
         // 正式包签名校检：运行时从已安装包取证书 SHA-256 与该常量比对；不一致直接退出。
         buildConfigField("String", "RELEASE_CERT_SHA256", "\"${releaseCertSha256}\"")
     }
@@ -260,6 +272,48 @@ afterEvaluate {
     }
     tasks.named("assembleDebug") { dependsOn("namedDebugApk") }
     tasks.named("assembleRelease") { dependsOn("namedReleaseApk") }
+
+    tasks.register("printSigningFingerprints") {
+        group = "help"
+        description = "打印 Release/Debug 证书 SHA1、SHA256（高德等平台安全码配置用）"
+        doLast {
+            val appId = android.defaultConfig.applicationId ?: "com.wmqc.miroot"
+            logger.lifecycle("")
+            logger.lifecycle("=== MiRoot 签名指纹（PackageName: $appId）===")
+            if (hasReleaseSigning) {
+                runCatching {
+                    val ks = KeyStore.getInstance(KeyStore.getDefaultType())
+                    ks.load(keystoreFile!!.inputStream(), keystoreStorePassword!!.toCharArray())
+                    val cert = ks.getCertificate(keystoreKeyAlias!!)?.encoded
+                    if (cert != null) {
+                        val (sha1, sha256) = certFingerprints(cert)
+                        logger.lifecycle("Release SHA1  : $sha1")
+                        logger.lifecycle("Release SHA256: $sha256")
+                    }
+                }.onFailure { logger.warn("Release 指纹读取失败: ${it.message}") }
+            } else {
+                logger.lifecycle("Release: 未配置 KEYSTORE_*（见 local.properties）")
+            }
+            val debugKs = File(System.getProperty("user.home"), ".android/debug.keystore")
+            if (debugKs.isFile) {
+                runCatching {
+                    val ks = KeyStore.getInstance(KeyStore.getDefaultType())
+                    ks.load(debugKs.inputStream(), "android".toCharArray())
+                    val cert = ks.getCertificate("androiddebugkey")?.encoded
+                    if (cert != null) {
+                        val (sha1, sha256) = certFingerprints(cert)
+                        logger.lifecycle("Debug SHA1   : $sha1")
+                        logger.lifecycle("Debug SHA256 : $sha256")
+                    }
+                }.onFailure { logger.warn("Debug 指纹读取失败: ${it.message}") }
+            } else {
+                logger.lifecycle("Debug: 未找到 ${debugKs.absolutePath}")
+            }
+            logger.lifecycle("高德控制台: https://console.amap.com/dev/key/app")
+            logger.lifecycle("详见 docs/高德地图Key配置.md")
+            logger.lifecycle("")
+        }
+    }
 }
 
 dependencies {
@@ -279,6 +333,7 @@ dependencies {
     implementation(libs.androidx.activity)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.androidx.appcompat)
+    implementation("androidx.webkit:webkit:1.12.1")
     implementation(libs.google.material)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.fragment.ktx)
@@ -290,6 +345,7 @@ dependencies {
     implementation(libs.shizuku.provider)
     implementation(libs.androidx.media3.transformer)
     implementation(libs.androidx.media3.common)
+    implementation(libs.androidx.media3.exoplayer)
     implementation(libs.okhttp)
     implementation(libs.jieba.android)
     implementation("com.github.HChenX:SuperLyricApi:3.4")

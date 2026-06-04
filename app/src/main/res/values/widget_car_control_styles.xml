@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 小组件文字：透明背景下高对比 + 阴影 -->
+    <style name="WidgetCarControlTextPrimary">
+        <item name="android:textColor">#FFFFFFFF</item>
+        <item name="android:shadowColor">#CC000000</item>
+        <item name="android:shadowRadius">3</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">1</item>
+    </style>
+    <style name="WidgetCarControlTextSecondary">
+        <item name="android:textColor">#FFEBEEF3</item>
+        <item name="android:shadowColor">#CC000000</item>
+        <item name="android:shadowRadius">2.5</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">1</item>
+    </style>
+    <style name="WidgetCarControlTextAccent">
+        <item name="android:textColor">#FF9EC9FF</item>
+        <item name="android:shadowColor">#CC000000</item>
+        <item name="android:shadowRadius">2.5</item>
+        <item name="android:shadowDx">0</item>
+        <item name="android:shadowDy">1</item>
+    </style>
+</resources>

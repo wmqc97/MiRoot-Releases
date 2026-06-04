@@ -180,7 +180,19 @@ final class NetworkLyricsOrchestrator {
             return joinPrimaryFailures(qsgcFail, kugou);
         }
 
-        LogHelper.d(TAG, "主源顺序: 酷狗 → qsgc → (开放兜底)");
+        String platformProvider = MusicPlayerLyricsPolicy.resolvePlatformProvider(sourcePackageName);
+        Payload platformFail = null;
+        if (platformProvider != null && !platformProvider.isEmpty()) {
+            LogHelper.d(TAG, "主源顺序: " + platformProvider + " → 酷狗 → qsgc → (开放兜底)");
+            Payload platform = tryPlatform(appContext, title, artist, durationSeconds,
+                musixmatchApiKey, strictTitleArtistMatch, platformProvider);
+            if (platform.success) {
+                return platform;
+            }
+            platformFail = platform;
+        } else {
+            LogHelper.d(TAG, "主源顺序: 酷狗 → qsgc → (开放兜底)");
+        }
         Payload kugou = tryKugou(appContext, title, artist, durationSeconds,
             musixmatchApiKey, strictTitleArtistMatch);
         if (kugou.success) {
@@ -195,16 +207,17 @@ final class NetworkLyricsOrchestrator {
                     LogHelper.d(TAG, "🚫 qsgc 次源严格匹配失败");
                     Payload qsgcFail = failedPayload(PROVIDER_QSGC,
                         "严格匹配失败（歌名/歌手元数据不一致）");
-                    return joinPrimaryFailures(kugou, qsgcFail);
+                    return joinPrimaryFailures(
+                        joinPrimaryFailures(platformFail, kugou), qsgcFail);
                 }
-                LogHelper.d(TAG, "✅ qsgc 次源命中（酷狗优先策略）, 耗时=" + qsgc.costMs + "ms");
+                LogHelper.d(TAG, "✅ qsgc 次源命中, 耗时=" + qsgc.costMs + "ms");
                 return toPayload(qsgc, PROVIDER_QSGC);
             }
             Payload qsgcFail = failedPayload(PROVIDER_QSGC,
                 qsgc != null && qsgc.error != null ? qsgc.error : "无结果");
-            return joinPrimaryFailures(kugou, qsgcFail);
+            return joinPrimaryFailures(joinPrimaryFailures(platformFail, kugou), qsgcFail);
         }
-        return kugou;
+        return joinPrimaryFailures(platformFail, kugou);
     }
 
     private static Payload joinPrimaryFailures(Payload first, Payload second) {
@@ -216,43 +229,71 @@ final class NetworkLyricsOrchestrator {
         return failed;
     }
 
+    private static Payload tryPlatform(Context context,
+                                       String title,
+                                       String artist,
+                                       double durationSeconds,
+                                       String musixmatchApiKey,
+                                       boolean strictTitleArtistMatch,
+                                       String provider) {
+        return trySearchAndFetch(context, title, artist, durationSeconds, musixmatchApiKey,
+            strictTitleArtistMatch, provider);
+    }
+
     private static Payload tryKugou(Context context,
                                     String title,
                                     String artist,
                                     double durationSeconds,
                                     String musixmatchApiKey,
                                     boolean strictTitleArtistMatch) {
+        return trySearchAndFetch(context, title, artist, durationSeconds, musixmatchApiKey,
+            strictTitleArtistMatch, PROVIDER_KUGOU);
+    }
+
+    private static Payload trySearchAndFetch(Context context,
+                                             String title,
+                                             String artist,
+                                             double durationSeconds,
+                                             String musixmatchApiKey,
+                                             boolean strictTitleArtistMatch,
+                                             String provider) {
         Payload payload = new Payload();
         List<LyricsMatcher.Candidate> candidates = LyricsAPIClient.searchLyrics(
-            context, title, artist, "", durationSeconds, musixmatchApiKey);
+            context, title, artist, "", durationSeconds, musixmatchApiKey, provider);
 
         if (candidates == null || candidates.isEmpty()) {
-            payload.error = "酷狗无候选";
+            payload.error = provider + " 无候选";
             return payload;
         }
 
         LyricsMatcher.Candidate best = candidates.get(0);
         if (strictTitleArtistMatch && !isStrictTitleArtistMatch(title, artist, best)) {
-            payload.error = "酷狗严格匹配失败";
-            LogHelper.w(TAG, "❌ 酷狗严格匹配失败: req=" + title + " - " + artist
+            payload.error = provider + " 严格匹配失败";
+            LogHelper.w(TAG, "❌ " + provider + " 严格匹配失败: req=" + title + " - " + artist
                 + ", hit=" + best.title + " - " + best.artist);
             return payload;
         }
 
         if (best.id == null || best.id.isEmpty()) {
-            payload.error = "酷狗候选 hash 为空";
+            payload.error = provider + " 候选 id 为空";
             return payload;
         }
 
+        String fetchProvider = best.provider != null && !best.provider.isEmpty()
+            ? best.provider
+            : provider;
         LyricsAPIClient.LyricsResult result = LyricsAPIClient.getLyricsById(
-            context, best.id, best.provider);
+            context, best.id, fetchProvider);
         if (!isUsable(result)) {
-            payload.error = result != null && result.error != null ? result.error : "酷狗拉词失败";
+            payload.error = result != null && result.error != null
+                ? result.error
+                : provider + " 拉词失败";
             return payload;
         }
 
-        LogHelper.d(TAG, "✅ 酷狗命中: " + best.title + " - " + best.artist);
-        return toPayload(result, PROVIDER_KUGOU);
+        LogHelper.d(TAG, "✅ " + provider + " 命中: " + best.title + " - " + best.artist);
+        String label = result.source != null && !result.source.isEmpty() ? result.source : provider;
+        return toPayload(result, label);
     }
 
     private static Payload fetchOpenFallbackParallel(Context context,

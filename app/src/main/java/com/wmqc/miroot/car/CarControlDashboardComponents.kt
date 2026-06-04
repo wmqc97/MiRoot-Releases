@@ -1,6 +1,5 @@
 package com.wmqc.miroot.car
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -20,19 +19,17 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import com.wmqc.miroot.R
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import com.wmqc.miroot.R
 import com.wmqc.miroot.car.VehicleStatusService.VehicleStatusInfo
 import kotlin.math.roundToInt
-import java.net.HttpURLConnection
-import java.net.URL
-import android.graphics.BitmapFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -121,126 +118,193 @@ fun CarUiColors(): CarColorPalette = carColors()
 private data class TireLabel(val label: String, val pressure: String?, val warning: String?)
 
 // ====================================================================
-//  1. Car Image & Gauges — fuel gauge arc + car model + range
+//  1. Car Image & Gauges — 左上续航/油量条/刷新时间 + 下方车模（无底框卡片）
 // ====================================================================
+private val CarModelImageHeight = 200.dp
+
+private fun parseRangeKmValue(rangeKmText: String): String {
+    val num = rangeKmText.replace(Regex("[^0-9]"), "")
+    return num.ifEmpty { "---" }
+}
+
+private fun formatCarHudUpdateLabel(updateTimeShort: String): String {
+    if (updateTimeShort.isBlank() || updateTimeShort == "---") return ""
+    val timePart = updateTimeShort.substringAfter(' ').trim().ifEmpty { updateTimeShort.trim() }
+    return "更新于 $timePart"
+}
+
 @Composable
 fun CarImageAndGaugesSection(
     vehicleUi: CarVehicleDisplayUi?,
+    vehicleStatus: VehicleStatusInfo?,
     carModelBitmap: Bitmap?,
-    loading: Boolean,
     onPickCarModel: (() -> Unit)? = null,
     onResetCarModel: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val ctx = LocalContext.current
     val CarUiColors = carColors()
     val fuelPct = vehicleUi?.fuelPercent ?: -1
-    val rangeText = vehicleUi?.rangeKmText ?: "---"
-    val updateTime = vehicleUi?.updateTimeShort ?: ""
+    val fuelPctText = if (fuelPct >= 0) "${fuelPct}%" else "---"
+    val rangeKmValue = parseRangeKmValue(vehicleUi?.rangeKmText ?: "---")
+    val updateLabel = formatCarHudUpdateLabel(vehicleUi?.updateTimeShort ?: "")
+    val statusLabel = vehicleStatus?.let {
+        when (VehicleStatusService.translateEngineStatus(it.engineStatus)) {
+            "运行中" -> ctx.getString(R.string.car_control_widget_status_running)
+            else -> ctx.getString(R.string.car_control_widget_status_parked)
+        }
+    } ?: ""
+    val metaLine = buildString {
+        if (updateLabel.isNotEmpty()) append(updateLabel)
+        if (updateLabel.isNotEmpty() && statusLabel.isNotEmpty()) append(" | ")
+        if (statusLabel.isNotEmpty()) append(statusLabel)
+    }
 
-    Card(
+    var showModelDialog by remember { mutableStateOf(false) }
+
+    Column(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = CarUiColors.bgCard)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            horizontalAlignment = Alignment.Start,
         ) {
-            // Left: circular fuel gauge with animated arc
-            Box(modifier = Modifier.size(80.dp), contentAlignment = Alignment.Center) {
-                Canvas(modifier = Modifier.size(80.dp)) {
-                    val sweep = 270f
-                    val start = 135f
-                    val strokeStyle = Stroke(8.dp.toPx(), cap = StrokeCap.Round)
-                    drawArc(CarUiColors.gaugeBg, start, sweep, useCenter = false, style = strokeStyle)
+            Text(
+                text = "剩余续航",
+                fontSize = 11.sp,
+                color = CarUiColors.textSecondary,
+            )
+            Spacer(Modifier.height(2.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = rangeKmValue,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = CarUiColors.textPrimary,
+                )
+                Text(
+                    text = " km",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = CarUiColors.textPrimary,
+                    modifier = Modifier.padding(bottom = 2.dp),
+                )
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.widthIn(max = 200.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val progress = if (fuelPct >= 0) (fuelPct / 100f).coerceIn(0f, 1f) else 0f
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(CarUiColors.gaugeBg),
+                ) {
                     if (fuelPct >= 0) {
-                        val pct = (fuelPct / 100f).coerceIn(0f, 1f)
-                        val c = when {
-                            fuelPct > 50 -> CarUiColors.accentGreen
-                            fuelPct > 20 -> CarUiColors.accentOrange
-                            else -> CarUiColors.accentRed
-                        }
-                        drawArc(c, start, sweep * pct, useCenter = false, style = strokeStyle)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(progress)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(CarUiColors.accentBlue),
+                        )
                     }
                 }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        if (fuelPct >= 0) "${fuelPct}%" else "---",
-                        fontSize = 18.sp, fontWeight = FontWeight.Bold, color = CarUiColors.textPrimary
-                    )
-                    Text("油量", fontSize = 9.sp, color = CarUiColors.textSecondary)
-                }
-            }
-
-            Spacer(Modifier.width(12.dp))
-
-            // Center: car model image (long press to change)
-            var showModelDialog by remember { mutableStateOf(false) }
-            Box(
-                modifier = Modifier.weight(1f).height(80.dp)
-                    .pointerInput(Unit) {
-                        detectTapGestures(onLongPress = { showModelDialog = true })
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                if (!loading && carModelBitmap != null) {
-                    Image(
-                        bitmap = carModelBitmap.asImageBitmap(),
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Fit
-                    )
-                } else if (loading) {
-                    CircularProgressIndicator(Modifier.size(24.dp), color = CarUiColors.accentBlue, strokeWidth = 2.dp)
-                } else {
-                    Text("🚗", fontSize = 48.sp)
-                }
-            }
-
-            // 车模选择弹窗
-            if (showModelDialog) {
-                AlertDialog(
-                    onDismissRequest = { showModelDialog = false },
-                    title = { Text("车模图片", fontWeight = FontWeight.SemiBold) },
-                    text = { Text("选择自定义图片或恢复默认车模") },
-                    confirmButton = {
-                        androidx.compose.material3.TextButton(onClick = {
-                            showModelDialog = false
-                            onPickCarModel?.invoke()
-                        }) { Text("选择图片") }
-                    },
-                    dismissButton = {
-                        androidx.compose.material3.TextButton(onClick = {
-                            showModelDialog = false
-                            onResetCarModel?.invoke()
-                        }) { Text("恢复默认") }
-                    },
-                )
-            }
-
-            Spacer(Modifier.width(12.dp))
-
-            // Right: range display
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(70.dp)) {
-                Text("续航", fontSize = 10.sp, color = CarUiColors.textSecondary)
+                Spacer(Modifier.width(8.dp))
                 Text(
-                    text = rangeText,
-                    fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                    color = CarUiColors.accentGreen,
-                    textAlign = TextAlign.Center
+                    text = fuelPctText,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = CarUiColors.textPrimary,
                 )
-                if (updateTime.isNotEmpty()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text("更新 ${updateTime}", fontSize = 8.sp, color = CarUiColors.textSecondary)
+            }
+
+            if (metaLine.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CarControlRefreshIcon.Icon(
+                        modifier = Modifier.size(12.dp),
+                        size = 12.dp,
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = metaLine,
+                        fontSize = 10.sp,
+                        color = CarUiColors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
         }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(CarModelImageHeight)
+                .pointerInput(Unit) {
+                    detectTapGestures(onLongPress = { showModelDialog = true })
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (carModelBitmap != null) {
+                Image(
+                    bitmap = carModelBitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(CarModelImageHeight),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+        }
+    }
+
+    if (showModelDialog) {
+        AlertDialog(
+            onDismissRequest = { showModelDialog = false },
+            title = { Text("车模图片", fontWeight = FontWeight.SemiBold) },
+            text = { Text("选择自定义图片或恢复默认车模") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    showModelDialog = false
+                    onPickCarModel?.invoke()
+                }) { Text("选择图片") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    showModelDialog = false
+                    onResetCarModel?.invoke()
+                }) { Text("恢复默认") }
+            },
+        )
     }
 }
 
 // ====================================================================
 //  2. Temperature & Battery Row
 // ====================================================================
+private fun mileageRowValue(rows: List<CarNamedDisplayRow>?, label: String): String? =
+    rows?.firstOrNull { it.label == label }?.value
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && it != "—" && it != "---" && it != "未知" }
+
+private fun formatVoltageForChip(raw: String): String {
+    val num = raw.replace(Regex("[^0-9.]"), "").toDoubleOrNull() ?: return raw.trim()
+    val volts = when {
+        num > 100 -> num / 1000.0
+        else -> num
+    }
+    return if (volts == volts.toLong().toDouble()) "${volts.toLong()}" else "%.1f".format(volts)
+}
+
 @Composable
 fun TempBatteryRow(
     vehicleUi: CarVehicleDisplayUi?,
@@ -248,21 +312,28 @@ fun TempBatteryRow(
     modifier: Modifier = Modifier,
 ) {
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val mileageRows = vehicleUi?.mileageEnergyRows
+
         // 电瓶电压 + 电量
-        val voltage = vehicleStatus?.voltage ?: ""
-        val charge = vehicleStatus?.stateOfCharge ?: ""
+        val voltageRaw = vehicleStatus?.voltage?.takeUnless { it.isBlank() || it == "未知" }
+            ?: mileageRowValue(mileageRows, "电瓶")?.replace(Regex("\\s*V$", RegexOption.IGNORE_CASE), "")
+        val charge = vehicleStatus?.stateOfCharge?.takeUnless { it.isBlank() || it == "未知" } ?: ""
         val batText = when {
-            voltage.isNotEmpty() && voltage != "未知" -> {
-                if (charge.isNotEmpty() && charge != "未知") "${voltage}V · ${charge}%"
-                else "${voltage}V"
+            !voltageRaw.isNullOrBlank() -> {
+                val v = formatVoltageForChip(voltageRaw)
+                if (charge.isNotEmpty()) "${v}V · ${charge}%"
+                else "${v}V"
             }
             else -> "---"
         }
 
         // 平均车速
-        val avgRaw = vehicleStatus?.avgSpeed ?: ""
-        val avgSpeedTxt = if (avgRaw.isNotEmpty() && avgRaw != "未知") {
-            runCatching { avgRaw.toDouble() }.getOrNull()?.let { "%.0f km/h".format(it) } ?: avgRaw
+        val avgRaw = vehicleStatus?.avgSpeed?.takeUnless { it.isBlank() || it == "未知" }
+            ?: mileageRowValue(mileageRows, "平均时速")?.replace(Regex("\\s*km/h$", RegexOption.IGNORE_CASE), "")
+        val avgSpeedTxt = if (!avgRaw.isNullOrBlank()) {
+            runCatching { avgRaw.replace(Regex("[^0-9.]"), "").toDouble() }.getOrNull()
+                ?.let { "%.0f km/h".format(it) }
+                ?: avgRaw
         } else "---"
 
         // 车内 + 车外温度合并
@@ -557,9 +628,8 @@ fun MileageEnergySection(
 }
 
 // ====================================================================
-//  7. Map Section - AMap WebView (使用 amap_map.html)
+//  7. Map Section - 静态地图（Web 服务）或 JS 交互地图（WebView 回退）
 // ====================================================================
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun MapSection(
     lng: Double, lat: Double, refreshKey: Int,
@@ -567,46 +637,61 @@ fun MapSection(
 ) {
     val CarUiColors = carColors()
     val ctx = LocalContext.current
-    val hasCoords = !lng.isNaN() && !lat.isNaN()
+    val hasCoords = !lng.isNaN() && !lat.isNaN() &&
+        lng in -180.0..180.0 && lat in -90.0..90.0 &&
+        !(lng == 0.0 && lat == 0.0)
 
     var addressText by remember { mutableStateOf("") }
     var addressLoading by remember { mutableStateOf(true) }
-    var webView by remember { mutableStateOf<android.webkit.WebView?>(null) }
+    var mapBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var mapUsesOsm by remember { mutableStateOf(false) }
+    var mapLoadFailed by remember { mutableStateOf(false) }
 
-    // Reverse geocoding for address
-    LaunchedEffect(lng, lat) {
-        if (!hasCoords) { addressLoading = false; return@LaunchedEffect }
+    LaunchedEffect(lng, lat, refreshKey) {
+        if (!hasCoords) {
+            addressLoading = false
+            addressText = ""
+            mapBitmap = null
+            mapUsesOsm = false
+            mapLoadFailed = false
+            return@LaunchedEffect
+        }
         addressLoading = true
+        mapLoadFailed = false
+        mapUsesOsm = false
+        mapBitmap = null
         withContext(Dispatchers.IO) {
-            val addr = AmapApiService.regeoShortAddress(lng, lat)
+            val addr = VehiclePositionHelper.resolveDisplayAddress(ctx, lng, lat)
+            var bmp = AmapApiService.fetchStaticMapBitmap(lng, lat, width = 480, height = 240, zoom = 15)
+            var osm = false
+            if (bmp == null) {
+                val (wgsLat, wgsLng) = GcjCoordinateConverter.gcj02ToWgs84(lat, lng)
+                bmp = OsmMapHelper.fetchMapBitmap(wgsLat, wgsLng, width = 480, height = 240)
+                osm = bmp != null
+            }
             withContext(Dispatchers.Main) {
-                addressText = addr ?: ""
+                addressText = addr.orEmpty()
                 addressLoading = false
+                mapBitmap = bmp
+                mapUsesOsm = osm
+                mapLoadFailed = bmp == null
             }
         }
     }
 
-    // Update WebView position when coords change
-    LaunchedEffect(lng, lat, refreshKey) {
-        if (!hasCoords || webView == null) return@LaunchedEffect
-        val js = "updatePosition($lng, $lat)"
-        webView?.evaluateJavascript(js, null)
-    }
-
-    // Navigation: try Amap app first, fall back to web URL
-    val openNavigation = {
-        try {
-            if (hasCoords) {
-                val uri = android.net.Uri.parse("amapuri://route/plan/?dlon=$lng&dlat=$lat&dname=车辆位置&dev=1&t=2")
-                val intent = Intent(Intent.ACTION_VIEW, uri).apply {
-                    setPackage("com.autonavi.minimap")
-                }
-                if (intent.resolveActivity(ctx.packageManager) != null) {
-                    ctx.startActivity(intent)
-                } else {
-                    val navUrl = "https://uri.amap.com/navigation?to=$lng,$lat,车辆位置&mode=car&callnative=1"
-                    ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(navUrl)))
-                }
+    val openNavigation: () -> Unit = {
+        if (hasCoords) try {
+            val uri = android.net.Uri.parse(
+                "amapuri://route/plan/?dlon=$lng&dlat=$lat&dname=车辆位置&dev=0&t=2",
+            )
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage("com.autonavi.minimap")
+            }
+            if (intent.resolveActivity(ctx.packageManager) != null) {
+                ctx.startActivity(intent)
+            } else {
+                val navUrl = "https://uri.amap.com/navigation?to=$lng,$lat,车辆位置&mode=car&callnative=1"
+                ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(navUrl)))
             }
         } catch (_: Exception) {
             try {
@@ -619,62 +704,71 @@ fun MapSection(
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = CarUiColors.bgCard)
+        colors = CardDefaults.cardColors(containerColor = CarUiColors.bgCard),
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Header row
             Row(
                 modifier = Modifier.fillMaxWidth().padding(12.dp, 12.dp, 12.dp, 0.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("车辆位置", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = CarUiColors.textPrimary)
                 Spacer(Modifier.weight(1f))
                 Text(
                     text = "导航到车",
-                    fontSize = 12.sp, color = CarUiColors.accentBlue,
+                    fontSize = 12.sp,
+                    color = CarUiColors.accentBlue,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
                         .background(CarUiColors.btnActiveBg)
-                        .clickable { openNavigation() }
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                        .clickable(enabled = hasCoords) { openNavigation() }
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
                 )
             }
 
-            // Address line
-            if (addressText.isNotEmpty()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("📍", fontSize = 11.sp)
-                    Spacer(Modifier.width(4.dp))
+            when {
+                addressText.isNotEmpty() -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("📍", fontSize = 11.sp)
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = addressText,
+                            fontSize = 11.sp,
+                            color = CarUiColors.textSecondary,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                hasCoords && addressLoading -> {
                     Text(
-                        text = addressText,
+                        "解析地址中…",
                         fontSize = 11.sp,
                         color = CarUiColors.textSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                     )
                 }
-            } else if (hasCoords && addressLoading) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("定位中...", fontSize = 11.sp, color = CarUiColors.textSecondary)
+                hasCoords && !addressLoading && addressText.isEmpty() -> {
+                    Text(
+                        "暂未解析到文字地址",
+                        fontSize = 11.sp,
+                        color = CarUiColors.textSecondary,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
                 }
             }
 
-            // Map WebView area
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp)
+                    .height(200.dp)
                     .padding(12.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(CarUiColors.mapBg),
-                contentAlignment = Alignment.Center
+                contentAlignment = Alignment.Center,
             ) {
                 if (!hasCoords) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -684,29 +778,61 @@ fun MapSection(
                             "暂无位置信息",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
-                            color = CarUiColors.textPrimary
+                            color = CarUiColors.textPrimary,
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            "获取车辆状态后自动更新",
+                            "刷新车况后将显示车辆位置",
                             fontSize = 11.sp,
-                            color = CarUiColors.textSecondary
+                            color = CarUiColors.textSecondary,
                         )
                     }
+                } else if (mapBitmap != null) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        Image(
+                            bitmap = mapBitmap!!.asImageBitmap(),
+                            contentDescription = null,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable { openNavigation() },
+                            contentScale = ContentScale.Crop,
+                        )
+                        if (mapUsesOsm) {
+                            Text(
+                                "© OpenStreetMap",
+                                fontSize = 8.sp,
+                                color = CarUiColors.textSecondary.copy(alpha = 0.9f),
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(4.dp)
+                                    .background(CarUiColors.bgCard.copy(alpha = 0.75f))
+                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                } else if (mapLoadFailed) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable { openNavigation() }
+                            .padding(horizontal = 12.dp),
+                    ) {
+                        Text("地图加载失败", fontSize = 13.sp, color = CarUiColors.textPrimary)
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            String.format(java.util.Locale.getDefault(), "%.5f, %.5f", lng, lat),
+                            fontSize = 10.sp,
+                            color = CarUiColors.textSecondary,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text("点击使用高德导航", fontSize = 11.sp, color = CarUiColors.accentBlue)
+                    }
                 } else {
-                    AndroidView(
-                        factory = { c ->
-                            android.webkit.WebView(c).apply {
-                                settings.javaScriptEnabled = true
-                                settings.domStorageEnabled = true
-                                settings.allowFileAccess = false
-                                setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                                setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-                                webView = this
-                                loadUrl("file:///android_asset/car/amap_map.html")
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize(),
+                    Text(
+                        "加载地图中…",
+                        fontSize = 12.sp,
+                        color = CarUiColors.textSecondary,
                     )
                 }
             }
@@ -725,7 +851,7 @@ fun isButtonAlertState(
     if (vehicleStatus == null) return false
     return when {
         text.contains("锁") || text.contains("解锁") ->
-            "已锁" == VehicleStatusService.translateDoorLockStatus(vehicleStatus.doorLockStatusDriver)
+            !("已锁" == VehicleStatusService.translateDoorLockStatus(vehicleStatus.doorLockStatusDriver))
         text.contains("点火") || text.contains("熄火") ->
             "运行中" == VehicleStatusService.translateEngineStatus(vehicleStatus.engineStatus)
         text.contains("窗") -> "已开" == vehicleStatus.winStatusDriver
@@ -748,7 +874,7 @@ fun resolveDisplayText(
 ): String {
     val active = isButtonAlertState(text, vehicleStatus, acStatus, seatHeatingStatus)
     return when {
-        text == "锁车/解锁" -> if (active) "解锁" else "锁车"
+        text == "锁车/解锁" -> if (!active) "解锁" else "锁车"
         text == "点火/熄火" -> if (active) "熄火" else "点火"
         text == "开窗/关窗" -> if (active) "关窗" else "开窗"
         text == "开后备箱" -> if (active) "尾箱已开" else "开尾箱"
@@ -818,103 +944,61 @@ private fun statusColor(value: String, colors: CarColorPalette): Color = when {
     else -> colors.textPrimary
 }
 
+/** 实时车辆详细状态（历史二级页或其它场景可复用）。 */
 @Composable
-fun VehicleDetailCard(
-    vehicleStatus: VehicleStatusInfo?,
+fun VehicleLiveStatusDetailContent(
+    vehicleStatus: VehicleStatusInfo,
     modifier: Modifier = Modifier,
 ) {
     val CarUiColors = carColors()
-    if (vehicleStatus == null) return
-
-    var expanded by remember { mutableStateOf(false) }
-
-    Card(
+    Column(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = CarUiColors.bgCard)
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Column(Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded }
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("📋 车辆详细数据", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = CarUiColors.textPrimary)
-                Spacer(Modifier.weight(1f))
-                Text(
-                    text = if (expanded) "收起 ▲" else "展开 ▼",
-                    fontSize = 11.sp,
-                    color = CarUiColors.accentBlue,
-                )
-            }
-
-            if (expanded) {
-                Box(Modifier.fillMaxWidth().height(0.5.dp).background(CarUiColors.divider))
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    // ── 门锁（双列：锁 | 开）──
-                    SectionLabel("🔒 门锁")
-                    TwoColRow(
-                        "主驾", translateLock(vehicleStatus.doorLockStatusDriver), translateDoorOpen(vehicleStatus.doorOpenStatusDriver), CarUiColors,
-                        "副驾", translateLock(vehicleStatus.doorLockStatusPassenger), translateDoorOpen(vehicleStatus.doorOpenStatusPassenger), CarUiColors,
-                    )
-                    TwoColRow(
-                        "左后", translateLock(vehicleStatus.doorLockStatusDriverRear), translateDoorOpen(vehicleStatus.doorOpenStatusDriverRear), CarUiColors,
-                        "右后", translateLock(vehicleStatus.doorLockStatusPassengerRear), translateDoorOpen(vehicleStatus.doorOpenStatusPassengerRear), CarUiColors,
-                    )
-
-                    // ── 车窗（双列）──
-                    SectionLabel("🪟 车窗")
-                    TwoColSimple("主驾", vehicleStatus.winStatusDriver, CarUiColors,
-                        "副驾", vehicleStatus.winStatusPassenger, CarUiColors)
-                    TwoColSimple("左后", vehicleStatus.winStatusDriverRear, CarUiColors,
-                        "右后", vehicleStatus.winStatusPassengerRear, CarUiColors)
-                    TwoColSimple("天窗", vehicleStatus.sunroofOpenStatus, CarUiColors,
-                        "后备箱锁", translateValue(vehicleStatus.trunkLockStatus), CarUiColors)
-
-                    // ── 安全（双列）──
-                    SectionLabel("🛡 安全")
-                    TwoColLabeled("安全带主", translateSeatbelt(vehicleStatus.seatBeltStatusDriver), CarUiColors,
-                        "安全带副", translateSeatbelt(vehicleStatus.seatBeltStatusPassenger), CarUiColors)
-                    TwoColLabeled("电子手刹", translateBrake(vehicleStatus.electricParkBrakeStatus), CarUiColors,
-                        "机械手刹", translateBrake(vehicleStatus.handBrakeStatus), CarUiColors)
-                    TwoColLabeled("制动踏板", translateValue(vehicleStatus.brakePedalDepressed), CarUiColors,
-                        "引擎盖", translateDoorOpen(vehicleStatus.engineHoodOpenStatus), CarUiColors)
-                    TwoColLabeled("防盗状态", translateTheft(vehicleStatus.theftActivated), CarUiColors,
-                        "车辆警报", translateValue(vehicleStatus.vehicleAlarm), CarUiColors)
-
-                    // ── 座椅加热（双列）──
-                    SectionLabel("🔥 座椅加热")
-                    TwoColLabeled("主驾", translateValue(vehicleStatus.drvHeatSts), CarUiColors,
-                        "副驾", translateValue(vehicleStatus.passHeatingSts), CarUiColors)
-                    TwoColLabeled("左后", translateValue(vehicleStatus.rlHeatingSts), CarUiColors,
-                        "右后", translateValue(vehicleStatus.rrHeatingSts), CarUiColors)
-
-                    // ── 驾驶 + 空调（双列混排）──
-                    SectionLabel("🚗 驾驶 · 空调")
-                    TwoColLabeled("变速箱档位", vehicleStatus.transimissionGearPostion, CarUiColors,
-                        "定速巡航", translateValue(vehicleStatus.cruiseControlStatus), CarUiColors)
-                    TwoColLabeled("机油压力", translateValue(vehicleStatus.engineOilPressureWarning), CarUiColors,
-                        "车窗未关提醒", translateValue(vehicleStatus.winCloseReminder), CarUiColors)
-                    TwoColLabeled("空气净化", translateValue(vehicleStatus.airCleanSts), CarUiColors,
-                        "预约空调", translateValue(vehicleStatus.preClimateActive), CarUiColors)
-                    TwoColLabeled("通风状态", translateValue(vehicleStatus.ventilateStatus), CarUiColors,
-                        "", "", CarUiColors)
-
-                    // ── 位置 ──
-                    SectionLabel("📍 位置")
-                    TwoColLabeled("海拔", fmtNum(vehicleStatus.altitude, "m"), CarUiColors,
-                        "方向", fmtNum(vehicleStatus.direction, "°"), CarUiColors)
-                    TwoColLabeled("定位可信", translateValue(vehicleStatus.posCanBeTrusted), CarUiColors,
-                        "", "", CarUiColors)
-                }
-                Spacer(Modifier.height(8.dp))
-            }
-        }
+        SectionLabel("🔒 门锁")
+        TwoColRow(
+            "主驾", translateLock(vehicleStatus.doorLockStatusDriver), translateDoorOpen(vehicleStatus.doorOpenStatusDriver), CarUiColors,
+            "副驾", translateLock(vehicleStatus.doorLockStatusPassenger), translateDoorOpen(vehicleStatus.doorOpenStatusPassenger), CarUiColors,
+        )
+        TwoColRow(
+            "左后", translateLock(vehicleStatus.doorLockStatusDriverRear), translateDoorOpen(vehicleStatus.doorOpenStatusDriverRear), CarUiColors,
+            "右后", translateLock(vehicleStatus.doorLockStatusPassengerRear), translateDoorOpen(vehicleStatus.doorOpenStatusPassengerRear), CarUiColors,
+        )
+        SectionLabel("🪟 车窗")
+        TwoColSimple("主驾", vehicleStatus.winStatusDriver, CarUiColors,
+            "副驾", vehicleStatus.winStatusPassenger, CarUiColors)
+        TwoColSimple("左后", vehicleStatus.winStatusDriverRear, CarUiColors,
+            "右后", vehicleStatus.winStatusPassengerRear, CarUiColors)
+        TwoColSimple("天窗", vehicleStatus.sunroofOpenStatus, CarUiColors,
+            "后备箱锁", translateValue(vehicleStatus.trunkLockStatus), CarUiColors)
+        SectionLabel("🛡 安全")
+        TwoColLabeled("安全带主", translateSeatbelt(vehicleStatus.seatBeltStatusDriver), CarUiColors,
+            "安全带副", translateSeatbelt(vehicleStatus.seatBeltStatusPassenger), CarUiColors)
+        TwoColLabeled("电子手刹", translateBrake(vehicleStatus.electricParkBrakeStatus), CarUiColors,
+            "机械手刹", translateBrake(vehicleStatus.handBrakeStatus), CarUiColors)
+        TwoColLabeled("制动踏板", translateValue(vehicleStatus.brakePedalDepressed), CarUiColors,
+            "引擎盖", translateDoorOpen(vehicleStatus.engineHoodOpenStatus), CarUiColors)
+        TwoColLabeled("防盗状态", translateTheft(vehicleStatus.theftActivated), CarUiColors,
+            "车辆警报", translateValue(vehicleStatus.vehicleAlarm), CarUiColors)
+        SectionLabel("🔥 座椅加热")
+        TwoColLabeled("主驾", translateValue(vehicleStatus.drvHeatSts), CarUiColors,
+            "副驾", translateValue(vehicleStatus.passHeatingSts), CarUiColors)
+        TwoColLabeled("左后", translateValue(vehicleStatus.rlHeatingSts), CarUiColors,
+            "右后", translateValue(vehicleStatus.rrHeatingSts), CarUiColors)
+        SectionLabel("🚗 驾驶 · 空调")
+        TwoColLabeled("变速箱档位", vehicleStatus.transimissionGearPostion, CarUiColors,
+            "定速巡航", translateValue(vehicleStatus.cruiseControlStatus), CarUiColors)
+        TwoColLabeled("机油压力", translateValue(vehicleStatus.engineOilPressureWarning), CarUiColors,
+            "车窗未关提醒", translateValue(vehicleStatus.winCloseReminder), CarUiColors)
+        TwoColLabeled("空气净化", translateValue(vehicleStatus.airCleanSts), CarUiColors,
+            "预约空调", translateValue(vehicleStatus.preClimateActive), CarUiColors)
+        TwoColLabeled("通风状态", translateValue(vehicleStatus.ventilateStatus), CarUiColors,
+            "", "", CarUiColors)
+        SectionLabel("📍 位置")
+        TwoColLabeled("海拔", fmtNum(vehicleStatus.altitude, "m"), CarUiColors,
+            "方向", fmtNum(vehicleStatus.direction, "°"), CarUiColors)
+        TwoColLabeled("定位可信", translateValue(vehicleStatus.posCanBeTrusted), CarUiColors,
+            "", "", CarUiColors)
     }
 }
 
@@ -992,14 +1076,6 @@ private fun LabeledCell(label: String, value: String, colors: CarColorPalette, m
 //  Helper: loadVehiclePosition from VehicleStatusService
 // ====================================================================
 fun loadVehiclePosition(context: Context, onResult: (lng: Double, lat: Double) -> Unit) {
-    try {
-        val s = VehicleStatusService.getVehicleStatus(context.applicationContext)
-        val latMs = s.latitude.toDoubleOrNull()
-        val lngMs = s.longitude.toDoubleOrNull()
-        if (latMs != null && lngMs != null) {
-            val lng = if (lngMs > 360) lngMs / 3600000.0 else lngMs
-            val lat = if (latMs > 360) latMs / 3600000.0 else latMs
-            onResult(lng, lat)
-        }
-    } catch (_: Exception) { }
+    val coords = VehiclePositionHelper.loadFromVehicle(context) ?: return
+    onResult(coords.lng, coords.lat)
 }

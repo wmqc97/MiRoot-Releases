@@ -17,7 +17,7 @@ object RearGesturePrefs {
     private const val K_S3 = "s3"
     private const val K_S3_PKG = "s3_pkg"
 
-    private const val VER = 1
+    private const val VER = 2
 
     fun readInjectSpec(context: Context): RearGestureInjectSpec {
         val app = context.applicationContext
@@ -32,11 +32,22 @@ object RearGesturePrefs {
             return RearGestureAction.entries.getOrNull(o) ?: def
         }
         var s1 = a(K_S1, RearGestureAction.MUSIC_LYRICS)
-        var s2 = a(K_S2, RearGestureAction.NONE)
-        var s3 = a(K_S3, RearGestureAction.NONE)
+        var s2 = a(K_S2, RearGestureAction.CHARGING_PREVIEW)
+        var s3 = a(K_S3, RearGestureAction.REAR_DESKTOP)
         var p1 = p.getString(K_S1_PKG, "").orEmpty().trim()
         var p2 = p.getString(K_S2_PKG, "").orEmpty().trim()
         var p3 = p.getString(K_S3_PKG, "").orEmpty().trim()
+        val storedVer = p.getInt(K_VER, 1)
+        if (storedVer < VER &&
+            s1 == RearGestureAction.MUSIC_LYRICS &&
+            s2 == RearGestureAction.NONE &&
+            s3 == RearGestureAction.NONE &&
+            p1.isEmpty() && p2.isEmpty() && p3.isEmpty()
+        ) {
+            val migrated = RearGestureInjectSpec.defaultCompat()
+            writeInjectSpec(app, migrated)
+            return migrated
+        }
         if (!CarControlDeviceGate.isAllowed(app)) {
             if (s1 == RearGestureAction.CAR_CONTROL) s1 = RearGestureAction.NONE
             if (s2 == RearGestureAction.CAR_CONTROL) s2 = RearGestureAction.NONE
@@ -72,7 +83,7 @@ object RearGesturePrefs {
     /**
      * 规范化：
      * 1. 未选包名的「指定应用」视为无动作。
-     * 2. 背屏桌面 / 音乐投屏 / 车控 **每种动作最多占一个槽位**；若多槽选了同一动作，按槽位优先级 **1（上滑）> 2（左滑）> 3（右滑）** 仅保留一处，其余清空为 [NONE]。
+     * 2. 背屏桌面 / 音乐投屏 / 车控 / 切换至背屏 / 充电动画 **每种动作最多占一个槽位**；若多槽选了同一动作，按槽位优先级 **1（上滑）> 2（左滑）> 3（右滑）** 仅保留一处，其余清空为 [NONE]。
      *    不同槽位可选用不同互斥动作（例如 1=音乐、2=车控、3=桌面）。
      */
     fun normalizeExclusive(spec: RearGestureInjectSpec): RearGestureInjectSpec {

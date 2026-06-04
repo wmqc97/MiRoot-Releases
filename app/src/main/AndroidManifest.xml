@@ -381,6 +381,49 @@
                 android:name="miui.rear.policy"
                 android:value="miui" />
         </activity>
+        <activity
+            android:name=".car.VehicleHistoryActivity"
+            android:exported="false"
+            android:label="@string/car_control_vehicle_history_title"
+            android:theme="@style/Theme.MiRoot"
+            android:enableOnBackInvokedCallback="false" />
+
+        <activity
+            android:name=".car.CarControlWidgetConfigureActivity"
+            android:exported="true"
+            android:label="@string/car_control_widget_configure_title"
+            android:theme="@style/Theme.MiRoot"
+            android:enableOnBackInvokedCallback="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".car.CarControlAppWidgetProvider"
+            android:exported="true"
+            android:label="@string/car_control_widget_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.CONFIGURATION_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/car_control_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".car.CarControlWidgetActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.wmqc.miroot.car.WIDGET_BUTTON" />
+                <action android:name="com.wmqc.miroot.car.WIDGET_CONFIRM" />
+                <action android:name="com.wmqc.miroot.car.WIDGET_CANCEL" />
+                <action android:name="com.wmqc.miroot.car.WIDGET_REFRESH" />
+            </intent-filter>
+        </receiver>
 
         <activity
             android:name=".car.RearScreenCarControlActivity"
@@ -509,6 +552,13 @@
             android:name=".ui.features.RearGestureConfigActivity"
             android:exported="false"
             android:label="@string/rear_gesture_config_title"
+            android:theme="@style/Theme.MiRoot"
+            android:enableOnBackInvokedCallback="true" />
+
+        <activity
+            android:name=".backup.WebDavCloudBackupActivity"
+            android:exported="false"
+            android:label="@string/webdav_backup_title"
             android:theme="@style/Theme.MiRoot"
             android:enableOnBackInvokedCallback="true" />
 

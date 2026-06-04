@@ -430,8 +430,8 @@ public class GyroWaterRippleView extends View implements SensorEventListener {
         }
     }
 
-    /** 与背屏歌词共用字体（MFGeHei / 系统 / 自定义）。 */
-    public void setLyricsTypeface(@Nullable android.graphics.Typeface typeface) {
+    /** 漂浮电量与漂浮信息参数共用充电动画字体。 */
+    public void setChargingDisplayTypeface(@Nullable android.graphics.Typeface typeface) {
         if (typeface != null) {
             floatingBatteryPaint.setTypeface(typeface);
             floatingBatteryPaint.setFakeBoldText(false);

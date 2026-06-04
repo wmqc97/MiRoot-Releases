@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.wmqc.miroot.R
 import com.wmqc.miroot.databinding.ActivityShizukuManageBinding
+import com.wmqc.miroot.ui.applyMiRootSecondarySystemBars
 import rikka.shizuku.Shizuku
 
 private const val SHIZUKU_REQ = 8722
@@ -18,6 +19,7 @@ class ShizukuManageActivity : AppCompatActivity(), Shizuku.OnRequestPermissionRe
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applyMiRootSecondarySystemBars()
         try {
             Shizuku.addRequestPermissionResultListener(this)
         } catch (t: Throwable) {

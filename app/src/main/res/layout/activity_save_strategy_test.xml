@@ -11,7 +11,7 @@
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="录制存储方案测试"
+        android:text="@string/save_strategy_test_title"
         android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle"
         android:layout_marginBottom="4dp"/>
 
