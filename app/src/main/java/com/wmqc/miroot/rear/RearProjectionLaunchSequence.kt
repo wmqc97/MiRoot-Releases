@@ -231,6 +231,7 @@ object RearProjectionLaunchSequence {
         componentName: String,
         isBroadcastExtra: Boolean = false,
         rearDisplayId: Int = REAR_DISPLAY_ID,
+        alwaysSendWakeup: Boolean = false,
     ): RearActivityLaunchSpec {
         val mainPlaceholderCmd =
             if (isBroadcastExtra) {
@@ -246,9 +247,26 @@ object RearProjectionLaunchSequence {
             isBroadcastExtra = isBroadcastExtra,
             rearDisplayId = rearDisplayId,
             disableMode = OfficialDisableAfterLaunch.MIROOT_PROJECTION_SESSION,
-            alwaysSendWakeup = false,
+            alwaysSendWakeup = alwaysSendWakeup,
         )
     }
+
+    /** 功能页/设置页「在背屏打开」：启动前始终 KEYCODE_WAKEUP 点亮背屏。 */
+    @JvmStatic
+    @JvmOverloads
+    fun openOnRearLaunchSpec(
+        grepActivityName: String,
+        componentName: String,
+        isBroadcastExtra: Boolean = false,
+        rearDisplayId: Int = REAR_DISPLAY_ID,
+    ): RearActivityLaunchSpec =
+        mirootProjectionLaunchSpec(
+            grepActivityName = grepActivityName,
+            componentName = componentName,
+            isBroadcastExtra = isBroadcastExtra,
+            rearDisplayId = rearDisplayId,
+            alwaysSendWakeup = true,
+        )
 
     @JvmStatic
     fun buildRearStartCmd(

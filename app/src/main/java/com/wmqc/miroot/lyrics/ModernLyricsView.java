@@ -1115,6 +1115,21 @@ public class ModernLyricsView extends View {
         return true;
     }
 
+    private String buildTokenChunksSig(List<TokenChunk> chunks) {
+        if (chunks == null || chunks.isEmpty()) {
+            return "";
+        }
+        StringBuilder sig = new StringBuilder(chunks.size() * 8);
+        for (TokenChunk chunk : chunks) {
+            if (chunk == null || chunk.text == null) {
+                sig.append('#');
+            } else {
+                sig.append(chunk.text).append('|');
+            }
+        }
+        return sig.toString();
+    }
+
     private boolean containsHan(String text) {
         if (text == null) return false;
         for (int i = 0; i < text.length(); i++) {
@@ -1256,6 +1271,9 @@ public class ModernLyricsView extends View {
     public void setShuffleSplitTiltRatio(float ratio) {
         if (ratio < 0f) ratio = 0f;
         if (ratio > 20f) ratio = 20f;
+        if (Math.abs(this.shuffleSplitTiltRatio - ratio) < 0.001f) {
+            return;
+        }
         this.shuffleSplitTiltRatio = ratio;
         this.stableShuffleSignature = "";
         this.stableShuffleTokens.clear();
@@ -1267,6 +1285,9 @@ public class ModernLyricsView extends View {
     public void setShuffleSplitScaleVariance(float variance) {
         if (variance < 0f) variance = 0f;
         if (variance > 0.4f) variance = 0.4f;
+        if (Math.abs(this.shuffleSplitScaleVariance - variance) < 0.001f) {
+            return;
+        }
         this.shuffleSplitScaleVariance = variance;
         this.stableShuffleSignature = "";
         this.stableShuffleTokens.clear();
@@ -1275,6 +1296,9 @@ public class ModernLyricsView extends View {
     }
 
     public void setShufflePerformanceGuardEnabled(boolean enabled) {
+        if (this.shufflePerformanceGuardEnabled == enabled) {
+            return;
+        }
         this.shufflePerformanceGuardEnabled = enabled;
         this.shufflePerfLevel = 0;
         this.shuffleLayoutBuildIntervalMs = 0L;
@@ -1363,7 +1387,13 @@ public class ModernLyricsView extends View {
             return;
         }
         ShuffleSplitMode mode = resolveShuffleSplitMode(sourceText);
-        String contentSig = line.time + "|" + sourceText + "|" + mode.name();
+        List<TokenChunk> chunks = splitLyricTokens(sourceText, mode);
+        if (chunks.isEmpty()) {
+            postShuffleInvalidateIfNeeded();
+            return;
+        }
+        String tokenSig = buildTokenChunksSig(chunks);
+        String contentSig = line.time + "|" + sourceText + "|" + mode.name() + "|" + tokenSig;
         String signature =
             contentSig + "|" + getWidth() + "|" + getHeight() +
                 "|" + CURRENT_TEXT_SIZE + "|" + shuffleSplitScaleVariance;
@@ -1378,14 +1408,7 @@ public class ModernLyricsView extends View {
         if (signature.equals(stableShuffleSignature)) {
             return;
         }
-        stableShuffleTokens = new ArrayList<>();
-
-        List<TokenChunk> chunks = splitLyricTokens(sourceText, mode);
-        if (chunks.isEmpty()) {
-            // 避免“构建失败但签名已更新”导致后续帧永远不再重建，从而出现空白不显示。
-            stableShuffleSignature = "";
-            return;
-        }
+        ArrayList<ShuffleToken> rebuiltTokens = new ArrayList<>();
         stableShuffleSignature = signature;
         lastStableShuffleContentSig = contentSig;
 
@@ -1496,11 +1519,12 @@ public class ModernLyricsView extends View {
                 float offsetY = stableFloat(seed + 11L, SHUFFLE_MAX_OFFSET_Y * (twoLineLayout ? 0.08f : 0.03f));
                 float rotation = chooseRotation(seed + 23L);
                 float scale = chooseScale(seed + 37L, tokenText);
-                stableShuffleTokens.add(new ShuffleToken(tokenText, width, x + offsetX, finalY + offsetY, rotation, scale, baseShuffleTextSize));
+                rebuiltTokens.add(new ShuffleToken(tokenText, width, x + offsetX, finalY + offsetY, rotation, scale, baseShuffleTextSize));
 
                 cursorX += width + spacing;
             }
         }
+        stableShuffleTokens = rebuiltTokens;
         shuffleLastLayoutBuildMs = nowMs;
     }
 
@@ -1819,11 +1843,8 @@ public class ModernLyricsView extends View {
             entranceFade = Math.max(0f, Math.min(1f, entranceFade));
         }
 
-        float lineProgress = resolveLineProgress(line);
-
-        // 新句子入场淡入：避免刚切行时“整句瞬间出现”
-        // 同时避免逐字时间戳存在且当前进度 < 首词时间时 lineProgress=0 导致整行完全透明（看起来像“不显示”）。
-        float visibleProgress = 0.22f + 0.78f * lineProgress; // 即使进度为0，也保留少量可见度
+        // 分词模式与逐字互斥：不按逐字进度调制透明度，避免 SuperLyric 刷新词轴时整句明暗来回跳。
+        float visibleProgress = 1.0f;
         int tokenAlpha = (int) (visibleProgress * entranceFade * 255f);
         tokenAlpha = Math.max(0, Math.min(255, tokenAlpha));
         shufflePaint.setAlpha(tokenAlpha);
@@ -4227,6 +4248,9 @@ public class ModernLyricsView extends View {
 
     public void setEnableShuffleSplitEffect(boolean enable) {
         boolean oldValue = this.enableShuffleSplitEffect;
+        if (oldValue == enable) {
+            return;
+        }
         this.enableShuffleSplitEffect = enable;
         if (!enable) {
             stableShuffleSignature = "";
@@ -4292,6 +4316,9 @@ public class ModernLyricsView extends View {
 
     public void setShuffleLayoutRebuildIntervalMs(long intervalMs) {
         long clamped = Math.max(0L, Math.min(SHUFFLE_LAYOUT_REBUILD_INTERVAL_MAX_MS, intervalMs));
+        if (this.shuffleLayoutBuildIntervalOverrideMs == clamped) {
+            return;
+        }
         this.shuffleLayoutBuildIntervalOverrideMs = clamped;
         this.shuffleLayoutBuildIntervalMs = clamped;
         this.shuffleLastLayoutBuildMs = 0L;
@@ -4299,7 +4326,11 @@ public class ModernLyricsView extends View {
 
     public void setShuffleSplitMode(String mode) {
         if (mode == null || mode.trim().isEmpty()) return;
-        this.shuffleSplitMode = mode.trim().toUpperCase();
+        String normalized = mode.trim().toUpperCase();
+        if (normalized.equals(this.shuffleSplitMode)) {
+            return;
+        }
+        this.shuffleSplitMode = normalized;
         if ("WORD".equals(this.shuffleSplitMode)) {
             clearTokenizationCache();
         }
@@ -4311,6 +4342,9 @@ public class ModernLyricsView extends View {
     }
 
     public void setShuffleOnlyCurrentLine(boolean onlyCurrentLine) {
+        if (this.shuffleOnlyCurrentLine == onlyCurrentLine) {
+            return;
+        }
         this.shuffleOnlyCurrentLine = onlyCurrentLine;
         notifyShuffleDebugInfo();
         postInvalidate();

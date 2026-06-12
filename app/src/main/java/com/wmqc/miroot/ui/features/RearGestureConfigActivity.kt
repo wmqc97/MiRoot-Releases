@@ -88,6 +88,9 @@ class RearGestureConfigActivity : AppCompatActivity() {
             RearGestureAction.LAUNCH_APP -> getString(R.string.rear_gesture_action_app)
             RearGestureAction.FOREGROUND_APP_TO_REAR -> getString(R.string.rear_gesture_action_foreground_to_rear)
             RearGestureAction.CHARGING_PREVIEW -> getString(R.string.rear_gesture_action_charging)
+            RearGestureAction.BALANCE_GAME -> getString(R.string.rear_gesture_action_balance_game)
+            RearGestureAction.TRUTH_DARE_WHEEL -> getString(R.string.rear_gesture_action_truth_dare_wheel)
+            RearGestureAction.HEART_RATE -> getString(R.string.rear_gesture_action_heart_rate)
         }
 
     private fun actionChoices(): List<Pair<RearGestureAction, String>> {
@@ -102,6 +105,9 @@ class RearGestureConfigActivity : AppCompatActivity() {
             add(RearGestureAction.LAUNCH_APP to getString(R.string.rear_gesture_action_app))
             add(RearGestureAction.FOREGROUND_APP_TO_REAR to getString(R.string.rear_gesture_action_foreground_to_rear))
             add(RearGestureAction.CHARGING_PREVIEW to getString(R.string.rear_gesture_action_charging))
+            add(RearGestureAction.BALANCE_GAME to getString(R.string.rear_gesture_action_balance_game))
+            add(RearGestureAction.TRUTH_DARE_WHEEL to getString(R.string.rear_gesture_action_truth_dare_wheel))
+            add(RearGestureAction.HEART_RATE to getString(R.string.rear_gesture_action_heart_rate))
         }
     }
 

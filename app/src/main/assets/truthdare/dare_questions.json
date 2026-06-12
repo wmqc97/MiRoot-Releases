@@ -1,0 +1,660 @@
+[
+  {
+    "id": "d001",
+    "content": "用一种动物的叫声喊出自己的名字",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d002",
+    "content": "做出你最自信的pose，保持10秒",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d003",
+    "content": "用方言说\"我爱你\"",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 15
+  },
+  {
+    "id": "d004",
+    "content": "即兴唱一首歌的副歌部分",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d005",
+    "content": "做5个深蹲",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d006",
+    "content": "用肢体语言表演一部电影，让其他人猜",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 60
+  },
+  {
+    "id": "d007",
+    "content": "模仿在场一个人的说话方式和习惯动作",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d008",
+    "content": "跳一段15秒的即兴舞蹈",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d009",
+    "content": "用京剧腔调朗读一段广告词",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d010",
+    "content": "表演一个你常用的表情包",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d011",
+    "content": "对着镜头/大家大声说\"我是世界上最可爱的人\"",
+    "category": "perform",
+    "difficulty": 2,
+    "duration": 10
+  },
+  {
+    "id": "d012",
+    "content": "模仿一个网红的标志性动作和口头禅",
+    "category": "perform",
+    "difficulty": 2,
+    "duration": 30
+  },
+  {
+    "id": "d013",
+    "content": "即兴rap介绍你自己（至少30秒）",
+    "category": "perform",
+    "difficulty": 3,
+    "duration": 45
+  },
+  {
+    "id": "d014",
+    "content": "表演一段感人的哭戏",
+    "category": "perform",
+    "difficulty": 3,
+    "duration": 30
+  },
+  {
+    "id": "d015",
+    "content": "用一分钟时间讲一个冷笑话，要让至少一个人笑",
+    "category": "perform",
+    "difficulty": 2,
+    "duration": 60
+  },
+  {
+    "id": "d016",
+    "content": "不用手写一个蠢字",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d017",
+    "content": "单脚站立做15个蹲起",
+    "category": "perform",
+    "difficulty": 2,
+    "duration": 60
+  },
+  {
+    "id": "d018",
+    "content": "大象转十圈",
+    "category": "perform",
+    "difficulty": 2,
+    "duration": 40
+  },
+  {
+    "id": "d019",
+    "content": "表演一段进球的心情",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d020",
+    "content": "对着镜子自言自语30秒",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 35
+  },
+  {
+    "id": "d021",
+    "content": "模仿猫咪玩球球",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d022",
+    "content": "对墙假装练习告白",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d023",
+    "content": "表演一段少数民族舞至少30秒",
+    "category": "perform",
+    "difficulty": 2,
+    "duration": 35
+  },
+  {
+    "id": "d024",
+    "content": "跳海草舞",
+    "category": "perform",
+    "difficulty": 2,
+    "duration": 40
+  },
+  {
+    "id": "d025",
+    "content": "对着墙壁假装壁咚",
+    "category": "perform",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d026",
+    "content": "用嘴巴模拟放屁",
+    "category": "perform",
+    "difficulty": 3,
+    "duration": 10
+  },
+  {
+    "id": "d027",
+    "content": "给你左边的人一个拥抱（或隔空拥抱）",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 10
+  },
+  {
+    "id": "d028",
+    "content": "夸奖在场每个人一句话",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 60
+  },
+  {
+    "id": "d029",
+    "content": "和一个人玩一局石头剪刀布，输了要做鬼脸",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d030",
+    "content": "让在场的人给你取一个新外号，接受它",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d031",
+    "content": "选一个人，盯着对方的眼睛10秒不许笑",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 15
+  },
+  {
+    "id": "d032",
+    "content": "给你右边的人按摩肩膀30秒（或模拟动作）",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 35
+  },
+  {
+    "id": "d033",
+    "content": "说出在场每个人的一个优点",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 60
+  },
+  {
+    "id": "d034",
+    "content": "选一个人，用土味情话向TA表白",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d035",
+    "content": "打电话/发语音给一个好友说\"我想你了\"",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d036",
+    "content": "让在场的人投票选出你最明显的特点",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 45
+  },
+  {
+    "id": "d037",
+    "content": "给你暗恋过/喜欢过的人发一条问候消息",
+    "category": "interact",
+    "difficulty": 2,
+    "duration": 30
+  },
+  {
+    "id": "d038",
+    "content": "打电话给父母说\"爸妈我爱你\"",
+    "category": "interact",
+    "difficulty": 2,
+    "duration": 45
+  },
+  {
+    "id": "d039",
+    "content": "让在场的人轮流用一个词形容你",
+    "category": "interact",
+    "difficulty": 2,
+    "duration": 60
+  },
+  {
+    "id": "d040",
+    "content": "选一个人，认真地看着TA的眼睛说\"你很特别\"",
+    "category": "interact",
+    "difficulty": 3,
+    "duration": 15
+  },
+  {
+    "id": "d041",
+    "content": "在朋友圈发一条夸自己的状态（可设分组）",
+    "category": "interact",
+    "difficulty": 3,
+    "duration": 60
+  },
+  {
+    "id": "d042",
+    "content": "找个人陪你演一场生产大戏",
+    "category": "interact",
+    "difficulty": 3,
+    "duration": 90
+  },
+  {
+    "id": "d043",
+    "content": "和你右边的人拥抱一分钟",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 65
+  },
+  {
+    "id": "d044",
+    "content": "跟你喜欢的人告白",
+    "category": "interact",
+    "difficulty": 3,
+    "duration": 30
+  },
+  {
+    "id": "d045",
+    "content": "和你左手边的人对视30秒",
+    "category": "interact",
+    "difficulty": 1,
+    "duration": 35
+  },
+  {
+    "id": "d046",
+    "content": "朝一个陌生人给他唱告白气球",
+    "category": "interact",
+    "difficulty": 3,
+    "duration": 40
+  },
+  {
+    "id": "d047",
+    "content": "给异性朋友打电话说我喜欢你",
+    "category": "interact",
+    "difficulty": 3,
+    "duration": 60
+  },
+  {
+    "id": "d048",
+    "content": "用慢动作表演喝水",
+    "category": "funny",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d049",
+    "content": "做出最难看的表情自拍一张",
+    "category": "funny",
+    "difficulty": 1,
+    "duration": 15
+  },
+  {
+    "id": "d050",
+    "content": "学企鹅走路走10步",
+    "category": "funny",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d051",
+    "content": "用婴儿语说一句\"我好饿\"",
+    "category": "funny",
+    "difficulty": 1,
+    "duration": 10
+  },
+  {
+    "id": "d052",
+    "content": "做出你认为最性感的表情",
+    "category": "funny",
+    "difficulty": 1,
+    "duration": 10
+  },
+  {
+    "id": "d053",
+    "content": "用屁股写出你的名字",
+    "category": "funny",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d054",
+    "content": "模仿一种动物吃东西的样子",
+    "category": "funny",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d055",
+    "content": "把脸贴在桌子/墙上，保持10秒",
+    "category": "funny",
+    "difficulty": 1,
+    "duration": 15
+  },
+  {
+    "id": "d056",
+    "content": "学机器人走路绕场一圈",
+    "category": "funny",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d057",
+    "content": "用只有元音的方式说一句话",
+    "category": "funny",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d058",
+    "content": "做出最夸张的打喷嚏表演",
+    "category": "funny",
+    "difficulty": 2,
+    "duration": 15
+  },
+  {
+    "id": "d059",
+    "content": "用最骚气的方式走一段猫步",
+    "category": "funny",
+    "difficulty": 2,
+    "duration": 20
+  },
+  {
+    "id": "d060",
+    "content": "挑战一分钟不眨眼",
+    "category": "funny",
+    "difficulty": 2,
+    "duration": 65
+  },
+  {
+    "id": "d061",
+    "content": "模仿你妈妈/爸爸生气的样子",
+    "category": "funny",
+    "difficulty": 3,
+    "duration": 30
+  },
+  {
+    "id": "d062",
+    "content": "用最浮夸的演技说\"这是我这辈子吃过最好吃的东西\"",
+    "category": "funny",
+    "difficulty": 2,
+    "duration": 20
+  },
+  {
+    "id": "d063",
+    "content": "展示一个你会的小技能",
+    "category": "talent",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d064",
+    "content": "画一幅自画像给大家看",
+    "category": "talent",
+    "difficulty": 1,
+    "duration": 60
+  },
+  {
+    "id": "d065",
+    "content": "说一句你会的外语",
+    "category": "talent",
+    "difficulty": 1,
+    "duration": 10
+  },
+  {
+    "id": "d066",
+    "content": "展示你手机里拍的最好看的照片",
+    "category": "talent",
+    "difficulty": 1,
+    "duration": 15
+  },
+  {
+    "id": "d067",
+    "content": "用手指打响指10下",
+    "category": "talent",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d068",
+    "content": "倒着说一句完整的话",
+    "category": "talent",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d069",
+    "content": "唱一首歌但只能用\"啦\"",
+    "category": "talent",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d070",
+    "content": "背诵一首古诗",
+    "category": "talent",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d071",
+    "content": "说出10个以同一个字开头的词语",
+    "category": "talent",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d072",
+    "content": "用手比划一个数学公式让别人猜",
+    "category": "talent",
+    "difficulty": 1,
+    "duration": 45
+  },
+  {
+    "id": "d073",
+    "content": "一口气说完一段绕口令",
+    "category": "talent",
+    "difficulty": 2,
+    "duration": 30
+  },
+  {
+    "id": "d074",
+    "content": "30秒内说出20种水果",
+    "category": "talent",
+    "difficulty": 2,
+    "duration": 35
+  },
+  {
+    "id": "d075",
+    "content": "用B-box节奏打一段beat",
+    "category": "talent",
+    "difficulty": 3,
+    "duration": 30
+  },
+  {
+    "id": "d076",
+    "content": "背诵圆周率小数点后尽可能多的位数",
+    "category": "talent",
+    "difficulty": 3,
+    "duration": 30
+  },
+  {
+    "id": "d077",
+    "content": "即兴创作一首四句诗，主题是\"今天的游戏\"",
+    "category": "talent",
+    "difficulty": 3,
+    "duration": 60
+  },
+  {
+    "id": "d078",
+    "content": "下一轮不能说\"我\"字",
+    "category": "punishment",
+    "difficulty": 1,
+    "duration": 0
+  },
+  {
+    "id": "d079",
+    "content": "接下来三轮只能用点头或摇头回应",
+    "category": "punishment",
+    "difficulty": 1,
+    "duration": 0
+  },
+  {
+    "id": "d080",
+    "content": "给下一个被选中的人出一道题",
+    "category": "punishment",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d081",
+    "content": "分享你手机壁纸的故事",
+    "category": "punishment",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d082",
+    "content": "展示你手机里最近删除的照片",
+    "category": "punishment",
+    "difficulty": 2,
+    "duration": 20
+  },
+  {
+    "id": "d083",
+    "content": "背对地板躺下，不用手站起来",
+    "category": "punishment",
+    "difficulty": 2,
+    "duration": 45
+  },
+  {
+    "id": "d084",
+    "content": "群发给别人\"我是明星\"",
+    "category": "punishment",
+    "difficulty": 3,
+    "duration": 30
+  },
+  {
+    "id": "d085",
+    "content": "唱死了都要爱发朋友圈",
+    "category": "punishment",
+    "difficulty": 3,
+    "duration": 40
+  },
+  {
+    "id": "d086",
+    "content": "用最炫民族风的唱凉凉",
+    "category": "punishment",
+    "difficulty": 3,
+    "duration": 40
+  },
+  {
+    "id": "d087",
+    "content": "对着厕所唱征服",
+    "category": "punishment",
+    "difficulty": 3,
+    "duration": 35
+  },
+  {
+    "id": "d088",
+    "content": "鞋子左右脚反穿出去走一圈",
+    "category": "punishment",
+    "difficulty": 2,
+    "duration": 60
+  },
+  {
+    "id": "d089",
+    "content": "用最炫民族风的唱凉凉",
+    "category": "punishment",
+    "difficulty": 3,
+    "duration": 40
+  },
+  {
+    "id": "d090",
+    "content": "选择一个人和你一起完成一个双人pose",
+    "category": "special",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d091",
+    "content": "说出你对在场一个人的第一印象",
+    "category": "special",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d092",
+    "content": "用三个词描述你的人生",
+    "category": "special",
+    "difficulty": 1,
+    "duration": 20
+  },
+  {
+    "id": "d093",
+    "content": "分享一件今天发生的开心的事",
+    "category": "special",
+    "difficulty": 1,
+    "duration": 30
+  },
+  {
+    "id": "d094",
+    "content": "给在场的人排一个你觉得的颜值排名",
+    "category": "special",
+    "difficulty": 3,
+    "duration": 45
+  }
+]

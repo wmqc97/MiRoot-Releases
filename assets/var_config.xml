@@ -81,28 +81,4 @@
   </SeekBar>
   <OnOff name="isDisplayDefaultBg" displayTitle="显示默认背景" default="1"/>
   <OnOff name="isDeep" displayTitle="是否深色背景" default="1"/>
-  <OnOff name="miroot_bottom_swipe_up_on" displayTitle="底部上滑" default="1">
-    <Language displayTitle="Bottom swipe up" locale="bo_CN"/>
-    <Language displayTitle="Bottom swipe up" locale="en_US"/>
-    <Language displayTitle="Bottom swipe up" locale="ug_CN"/>
-    <Language displayTitle="底部上滑" locale="zh_CN"/>
-    <Language displayTitle="底部上滑" locale="zh_HK"/>
-    <Language displayTitle="底部上滑" locale="zh_TW"/>
-  </OnOff>
-  <OnOff name="miroot_bottom_swipe_left_on" displayTitle="底部左滑" default="1">
-    <Language displayTitle="Bottom swipe left" locale="bo_CN"/>
-    <Language displayTitle="Bottom swipe left" locale="en_US"/>
-    <Language displayTitle="Bottom swipe left" locale="ug_CN"/>
-    <Language displayTitle="底部左滑" locale="zh_CN"/>
-    <Language displayTitle="底部左滑" locale="zh_HK"/>
-    <Language displayTitle="底部左滑" locale="zh_TW"/>
-  </OnOff>
-  <OnOff name="miroot_bottom_swipe_right_on" displayTitle="底部右滑" default="1">
-    <Language displayTitle="Bottom swipe right" locale="bo_CN"/>
-    <Language displayTitle="Bottom swipe right" locale="en_US"/>
-    <Language displayTitle="Bottom swipe right" locale="ug_CN"/>
-    <Language displayTitle="底部右滑" locale="zh_CN"/>
-    <Language displayTitle="底部右滑" locale="zh_HK"/>
-    <Language displayTitle="底部右滑" locale="zh_TW"/>
-  </OnOff>
 </WidgetConfig>

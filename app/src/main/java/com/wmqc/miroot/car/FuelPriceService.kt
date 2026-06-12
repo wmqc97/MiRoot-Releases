@@ -49,14 +49,10 @@ object FuelPriceService {
             province?.trim()?.takeIf { it.isNotEmpty() }
                 ?: FuelPriceRegionPrefs.province(appCtx),
         )
-        if (latestPrice(appCtx, prov) == null) {
-            fetchAllProvinces(appCtx)
-        }
         val dayFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val today = dayFormat.format(Date())
-        val latest = latestPrice(appCtx, prov)?.yuanPerLiter
-            ?: FALLBACK_95[prov]
-            ?: 8.0
+        val isToday = refuelDayKey == today
+        val latest = resolveLatestYuanPerLiter(appCtx, prov, forceRefresh = isToday)
         persistRefuelDayPrice(appCtx, refuelDayKey, prov, today, latest)
     }
 
@@ -67,14 +63,10 @@ object FuelPriceService {
     ) {
         if (dayKeys.isEmpty()) return
         val prov = FuelPriceRegionPrefs.normalizeProvince(province)
-        if (latestPrice(context, prov) == null) {
-            fetchAllProvinces(context)
-        }
         val dayFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val today = dayFormat.format(Date())
-        val latest = latestPrice(context, prov)?.yuanPerLiter
-            ?: FALLBACK_95[prov]
-            ?: 8.0
+        val includesToday = dayKeys.contains(today)
+        val latest = resolveLatestYuanPerLiter(context, prov, forceRefresh = includesToday)
         for (dayKey in dayKeys) {
             persistRefuelDayPrice(context, dayKey, prov, today, latest)
         }
@@ -94,11 +86,6 @@ object FuelPriceService {
         val isToday = dayKey == today
         val existing = VehicleHistoryFuelCache.loadFuelPriceDay(context, dayKey, province)
         if (existing != null && !isToday) return
-        if (existing != null && isToday && !existing.isReferenceOnly &&
-            kotlin.math.abs(existing.yuanPerLiter - latestYuan) < 0.005
-        ) {
-            return
-        }
         VehicleHistoryFuelCache.saveFuelPriceDay(
             context,
             dayKey,
@@ -139,21 +126,34 @@ object FuelPriceService {
             )
             return PriceQuote(cached, fromCacheDay = true, isReferenceOnly = dayKey != today)
         }
-        if (latestPrice(context, prov) == null) {
-            fetchAllProvinces(context)
-        }
-        val latest = latestPrice(context, prov)?.yuanPerLiter
-            ?: FALLBACK_95[prov]
-            ?: 8.0
         val dayFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val today = dayFormat.format(Date())
-        val isRef = dayKey != today
+        val isToday = dayKey == today
+        val latest = resolveLatestYuanPerLiter(context, prov, forceRefresh = isToday)
+        val isRef = !isToday
         persistRefuelDayPrice(context, dayKey, prov, today, latest)
         return PriceQuote(
             yuanPerLiter = latest,
             fromCacheDay = false,
             isReferenceOnly = isRef,
         )
+    }
+
+    private fun resolveLatestYuanPerLiter(
+        context: Context,
+        province: String,
+        forceRefresh: Boolean,
+    ): Double {
+        val appCtx = context.applicationContext
+        if (forceRefresh) {
+            memoryLatest.clear()
+            fetchAllProvinces(appCtx)
+        } else if (latestPrice(appCtx, province) == null) {
+            fetchAllProvinces(appCtx)
+        }
+        return latestPrice(appCtx, province)?.yuanPerLiter
+            ?: FALLBACK_95[province]
+            ?: 8.0
     }
 
     private fun latestPrice(context: Context, province: String): PriceQuote? {

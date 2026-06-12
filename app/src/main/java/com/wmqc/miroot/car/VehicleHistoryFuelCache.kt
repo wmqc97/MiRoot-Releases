@@ -27,13 +27,16 @@ object VehicleHistoryFuelCache {
         val computedAt: Long,
     )
 
+    /** 解析/油价逻辑变更时递增，使旧缓存失效并触发重算。 */
+    private const val ANALYTICS_LOGIC_VERSION = "fuel_v4"
+
     fun computeFingerprint(context: Context): String {
         val appCtx = context.applicationContext
         val count = VehicleHistoryDatabase.loadHistoryCounts(appCtx).first
         val maxId = VehicleHistoryDatabase.maxVehicleDataRecordId(appCtx)
         val tank = FuelPriceRegionPrefs.tankCapacityLiters(appCtx)
         val prov = FuelPriceRegionPrefs.province(appCtx)
-        return "${count}_${maxId}_${tank}_${prov}"
+        return "${count}_${maxId}_${tank}_${prov}_$ANALYTICS_LOGIC_VERSION"
     }
 
     fun needsRefresh(context: Context): Boolean {

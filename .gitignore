@@ -73,3 +73,10 @@ fix_*.py
 
 # Vehicle API scripts (local only, not for public repo)
 星瑞车控/
+
+# Temporary / local-only working files
+.tmp/
+.tmp_truth_dare/
+tmp_logcat.txt
+tmp_rearscreen.zip
+tools/

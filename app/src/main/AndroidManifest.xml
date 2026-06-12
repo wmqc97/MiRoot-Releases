@@ -28,6 +28,16 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 
     <queries>
         <package android:name="moe.shizuku.privileged.api" />
@@ -531,6 +541,77 @@
         <service
             android:name=".rear.desktop.RearDesktopLaunchService"
             android:exported="false" />
+
+        <activity
+            android:name=".rear.balance.RearBalanceGameActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.MiRoot"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode|smallestScreenSize|density"
+            android:enableOnBackInvokedCallback="false">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+
+        <service
+            android:name=".rear.balance.RearBalanceGameLaunchService"
+            android:exported="false" />
+
+        <activity
+            android:name=".rear.truthdare.TruthDareSettingsActivity"
+            android:exported="false"
+            android:label="@string/truth_dare_settings_title"
+            android:theme="@style/Theme.MiRoot"
+            android:enableOnBackInvokedCallback="true" />
+
+        <activity
+            android:name=".rear.truthdare.RearTruthDareWheelActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.MiRoot"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode|smallestScreenSize|density"
+            android:enableOnBackInvokedCallback="false">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+
+        <service
+            android:name=".rear.truthdare.RearTruthDareWheelLaunchService"
+            android:exported="false" />
+
+        <activity
+            android:name=".rear.heartrate.RearHeartRateActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:theme="@style/Theme.MiRoot"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode|smallestScreenSize|density"
+            android:enableOnBackInvokedCallback="false">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
+
+        <service
+            android:name=".rear.heartrate.RearHeartRateLaunchService"
+            android:exported="false" />
+
+        <activity
+            android:name=".rear.heartrate.HeartRateBlePermissionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="com.wmqc.miroot.rear.heartrate.permission"
+            android:theme="@style/Theme.MiRoot.Transparent"
+            android:enableOnBackInvokedCallback="false">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
 
         <receiver
             android:name=".rear.desktop.RearDesktopBroadcastReceiver"

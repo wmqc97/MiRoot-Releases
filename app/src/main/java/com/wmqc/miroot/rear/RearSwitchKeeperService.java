@@ -57,7 +57,7 @@ public class RearSwitchKeeperService extends Service {
     /** [RearScreenDesktopActivity] 结束时：仅当当前监控任务仍为该 key 时才收口（避免误停应用投屏 Keeper）。 */
     public static final String ACTION_RELEASE_MONITOR_IF_MATCH = "com.wmqc.miroot.rear.ACTION_RELEASE_MONITOR_IF_MATCH";
     public static final String EXTRA_MONITOR_KEY = "monitorKey";
-    /** 为 true 时跳过 {@link #performInitialKills()}（不 force-stop 官方背屏中心，保留官方手势）。 */
+    /** 为 true 时跳过 {@link #performInitialKills()}（背屏桌面等已由 Session 处理时避免重复杀进程）。 */
     public static final String EXTRA_SKIP_INITIAL_LAUNCHER_KILLS = "skipInitialLauncherKills";
     /**
      * 仅「应用列表直开背屏」迁第三方应用时应为 true：初始杀进程走 {@link AppProjectionOfficialGesturePolicy}。
@@ -82,6 +82,7 @@ public class RearSwitchKeeperService extends Service {
     // V14.5: 监听应用是否手动移回主屏
     private static final long CHECK_TASK_INTERVAL_MS = 3000; // 每3秒检查一次
     private String monitoredTaskInfo = null; // 格式: "packageName:taskId"
+    private boolean skipInitialLauncherKills = false;
     private static final String SUBSCREENCENTER_PKG = "com.xiaomi.subscreencenter";
     private static final int MAX_TRANSIENT_FOREGROUND_MISMATCH = 3;
     private static final long BACKOFF_BASE_MS = 1000L;
@@ -246,7 +247,6 @@ public class RearSwitchKeeperService extends Service {
 
         try {
             // V14.7: 先从Intent获取要监控的任务信息
-            boolean skipInitialLauncherKills = false;
             if (intent != null) {
                 String newMonitoredTask = intent.getStringExtra("lastMovedTask");
                 if (newMonitoredTask != null) {
@@ -317,8 +317,8 @@ public class RearSwitchKeeperService extends Service {
                 }
             }
 
-            // 3. V12.2: 初始杀进程（背屏桌面 / MiRoot 自带投屏会话跳过，保留官方背屏手势/中心）
-            if (!skipInitialLauncherKills && !shouldSkipInitialLauncherKillsForMonitoredMiRootTask()) {
+            // 3. 初始杀官方背屏中心（平衡球/真心话/心率等与磁贴迁屏一致；背屏桌面显式 skip）
+            if (!skipInitialLauncherKills) {
                 performInitialKills();
             }
 
@@ -543,23 +543,6 @@ public class RearSwitchKeeperService extends Service {
     }
 
     /**
-     * MiRoot 自带背屏 Activity（歌词、车控等）的 Keeper 监控任务与
-     * {@link com.wmqc.miroot.rear.desktop.RearScreenDesktopActivity} 一致：不在启动时 force-stop 官方背屏中心，
-     * 避免副屏边缘返回长时间不可用。
-     */
-    private boolean shouldSkipInitialLauncherKillsForMonitoredMiRootTask() {
-        if (monitoredTaskInfo == null) {
-            return false;
-        }
-        int colon = monitoredTaskInfo.indexOf(':');
-        if (colon <= 0) {
-            return false;
-        }
-        String pkg = monitoredTaskInfo.substring(0, colon).trim();
-        return BuildConfig.APPLICATION_ID.equals(pkg);
-    }
-
-    /**
      * TaskService 连接回调（RootTaskService）
      */
     private final ServiceConnection taskServiceConnection = new ServiceConnection() {
@@ -572,6 +555,10 @@ public class RearSwitchKeeperService extends Service {
             // 取消重连任务（如果存在）
             if (handler != null) {
                 handler.removeCallbacks(reconnectTaskServiceRunnable);
+            }
+
+            if (!skipInitialLauncherKills) {
+                performInitialKills();
             }
         }
 

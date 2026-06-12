@@ -5,9 +5,11 @@ import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -64,8 +66,8 @@ fun miRootPageTitleTextUnit(): TextUnit {
 @Composable
 fun MiRootSecondaryToolbar(
     title: String,
-    onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onNavigateBack: (() -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val barBg = Color(ContextCompat.getColor(ctx, R.color.mi_page_bg))
@@ -77,12 +79,16 @@ fun MiRootSecondaryToolbar(
             .background(barBg),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onNavigateBack) {
-            Icon(
-                painter = painterResource(R.drawable.ic_arrow_back),
-                contentDescription = stringResource(R.string.cd_navigate_up),
-                tint = onPrimary,
-            )
+        if (onNavigateBack != null) {
+            IconButton(onClick = onNavigateBack) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_arrow_back),
+                    contentDescription = stringResource(R.string.cd_navigate_up),
+                    tint = onPrimary,
+                )
+            }
+        } else {
+            Spacer(Modifier.width(16.dp))
         }
         Text(
             text = title,

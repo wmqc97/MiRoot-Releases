@@ -15,7 +15,6 @@ object FuelTankAnalytics {
 
     /** 相较上一条，油量至少上升这么多才视为加油（过滤传感器抖动）。 */
     private const val MIN_REFUEL_LITERS = 2.5
-    private const val MIN_REFUEL_PERCENT = 4
     private const val MAX_REFUEL_ODO_DELTA_KM = 120.0
     private const val MAX_REFUEL_GAP_HOURS = 96.0
 
@@ -51,7 +50,6 @@ object FuelTankAnalytics {
 
     private data class FuelReading(
         val liters: Double?,
-        val percent: Int?,
     )
 
     private data class RefuelPoint(
@@ -97,23 +95,15 @@ object FuelTankAnalytics {
     fun refuelAddedLiters(
         previous: VehicleHistoryDatabase.VehicleDataRecord,
         current: VehicleHistoryDatabase.VehicleDataRecord,
-        tankCap: Float,
     ): Double? {
-        val before = fuelLevelLiters(previous, tankCap) ?: return null
-        val after = fuelLevelLiters(current, tankCap) ?: return null
+        val before = fuelLevelLiters(previous) ?: return null
+        val after = fuelLevelLiters(current) ?: return null
         return (after - before).takeIf { it > 0.5 }
     }
 
-    private fun fuelLevelLiters(
-        record: VehicleHistoryDatabase.VehicleDataRecord,
-        tankCap: Float,
-    ): Double? {
+    private fun fuelLevelLiters(record: VehicleHistoryDatabase.VehicleDataRecord): Double? {
         if (record.fuelLiters >= 0) return record.fuelLiters
-        if (record.fuelPercent in 0..100) return tankCap * record.fuelPercent / 100.0
-        val r = VehicleHistoryFuelDisplay.fuelReading(record)
-        r.liters?.let { return it }
-        r.percent?.let { return tankCap * it / 100.0 }
-        return null
+        return VehicleHistoryFuelDisplay.fuelReading(record).liters
     }
 
     fun detectRefuelBetween(
@@ -127,11 +117,10 @@ object FuelTankAnalytics {
         if (dOdo > MAX_REFUEL_ODO_DELTA_KM) return null
         val hours = (current.insertDate - previous.insertDate) / 3_600_000.0
         if (hours > MAX_REFUEL_GAP_HOURS) return null
-        val jumpL = refuelAddedLiters(previous, current, tankCap)
-            ?: (fuelLitersEstimate(r1, tankCap) - fuelLitersEstimate(r0, tankCap)).takeIf { it > 0.5 }
-        val jumpP = (r1.percent ?: -1) - (r0.percent ?: -1)
-        if ((jumpL ?: 0.0) < MIN_REFUEL_LITERS && jumpP < MIN_REFUEL_PERCENT) return null
-        if ((jumpL ?: 0.0) <= 0.3 && jumpP <= 0) return null
+        val jumpL = refuelAddedLiters(previous, current)
+            ?: (fuelLitersEstimate(r1) - fuelLitersEstimate(r0)).takeIf { it > 0.5 }
+        if ((jumpL ?: 0.0) < MIN_REFUEL_LITERS) return null
+        if ((jumpL ?: 0.0) <= 0.3) return null
         val dayFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val monthFormat = SimpleDateFormat("yyyy-MM", Locale.getDefault())
         val date = Date(current.insertDate)
@@ -139,7 +128,7 @@ object FuelTankAnalytics {
             dayKey = dayFormat.format(date),
             monthKey = monthFormat.format(date),
             addedLiters = jumpL,
-            addedPercent = jumpP.takeIf { it > 0 },
+            addedPercent = null,
         )
     }
 
@@ -188,9 +177,8 @@ object FuelTankAnalytics {
             val quote = FuelPriceService.price95ForDay(context, prov, refuel.dayKey)
             val refSuffix = if (quote.isReferenceOnly) "参考" else ""
             val priceText = "95# ¥${FuelPriceService.formatPriceYuan(quote.yuanPerLiter)}$refSuffix"
-            val addedLiters = refuelAddedLiters(prev, record, tankCap) ?: refuel.addedLiters
+            val addedLiters = refuelAddedLiters(prev, record) ?: refuel.addedLiters
             val added = addedLiters?.let { formatLitersDelta(it) }
-                ?: refuel.addedPercent?.let { "+$it%" }
             val refuelCost = addedLiters?.let { it * quote.yuanPerLiter }
             val cycle = cycles.getOrNull(ri - 1)
             val tankAvg = cycle?.litersPer100Km?.let {
@@ -246,9 +234,8 @@ object FuelTankAnalytics {
         refuels.forEach { refuel ->
             val record = recordsAsc[refuel.index]
             val prev = recordsAsc[refuel.index - 1]
-            val added = refuelAddedLiters(prev, record, tankCap)
+            val added = refuelAddedLiters(prev, record)
                 ?: refuel.addedLiters?.takeIf { it > 0.5 }
-                ?: refuel.addedPercent?.let { pct -> tankCap * (pct / 100.0) }
                 ?: return@forEach
             val prov = FuelPriceRegionPrefs.provinceForRecord(context, record)
             val quote = FuelPriceService.price95ForDay(context, prov, refuel.dayKey)
@@ -285,7 +272,7 @@ object FuelTankAnalytics {
 
     private fun fuelReading(record: VehicleHistoryDatabase.VehicleDataRecord): FuelReading {
         val r = VehicleHistoryFuelDisplay.fuelReading(record)
-        return FuelReading(r.liters, r.percent)
+        return FuelReading(r.liters)
     }
 
     private fun detectRefuels(
@@ -330,13 +317,13 @@ object FuelTankAnalytics {
             if (end.index <= start.index) continue
             val distance = end.odometer - start.odometer
             if (distance < 30.0) continue
-            val startFuel = fuelLevelLiters(records[start.index], tankCap)
-                ?: fuelLitersEstimate(readings[start.index], tankCap)
-            val endBefore = fuelLevelLiters(records[end.index - 1], tankCap)
-                ?: fuelLitersEstimate(readings[end.index - 1], tankCap)
+            val startFuel = fuelLevelLiters(records[start.index])
+                ?: fuelLitersEstimate(readings[start.index])
+            val endBefore = fuelLevelLiters(records[end.index - 1])
+                ?: fuelLitersEstimate(readings[end.index - 1])
             var fuelUsed = startFuel - endBefore
             if (fuelUsed <= 1.0) {
-                fuelUsed = minFuelDrop(readings, start.index, end.index, tankCap)
+                fuelUsed = minFuelDrop(readings, start.index, end.index)
             }
             if (fuelUsed < 3.0) continue
             val l100 = fuelUsed / distance * 100.0
@@ -364,23 +351,18 @@ object FuelTankAnalytics {
         readings: List<FuelReading>,
         from: Int,
         to: Int,
-        tankCap: Float,
     ): Double {
         if (to <= from) return 0.0
-        val start = fuelLitersEstimate(readings[from], tankCap)
+        val start = fuelLitersEstimate(readings[from])
         var min = start
         for (i in from..to) {
-            val v = fuelLitersEstimate(readings[i], tankCap)
+            val v = fuelLitersEstimate(readings[i])
             if (v < min) min = v
         }
         return (start - min).coerceAtLeast(0.0)
     }
 
-    private fun fuelLitersEstimate(reading: FuelReading, tankCap: Float): Double {
-        reading.liters?.let { return it }
-        val pct = reading.percent ?: return 0.0
-        return tankCap * (pct / 100.0)
-    }
+    private fun fuelLitersEstimate(reading: FuelReading): Double = reading.liters ?: 0.0
 
     private fun formatLitersDelta(liters: Double): String =
         String.format(Locale.getDefault(), "+%.0fL", liters)

@@ -10,7 +10,7 @@ import org.json.JSONArray
  * 是否对官方背屏中心 [com.xiaomi.subscreencenter] 执行 force-stop（与 [com.wmqc.miroot.lyrics.TaskService] 内
  * `disableSubScreenLauncherForAppProjection` / `killLauncherProcessForAppProjection` 配套）。
  *
- * 磁贴迁屏、充电动画、背屏桌面、音乐/车控投屏等 **不** 走本策略，一律由 Session 或 `disableSubScreenLauncher()` 强制禁用。
+ * 磁贴迁屏、充电动画、背屏桌面、音乐/车控/平衡球/真心话/心率投屏等 **不** 走本策略，一律由 Session 或 `disableSubScreenLauncher()` 强制禁用。
  *
  * - **总开关**：[OfficialSubscreenServiceGate]。
  * - **范围**（「应用」标签）：`ALL` = 凡应用列表迁屏均禁用官方中心；`SELECTED` = 仅在该应用「投屏参数」中开启「禁用官方…」时禁用。

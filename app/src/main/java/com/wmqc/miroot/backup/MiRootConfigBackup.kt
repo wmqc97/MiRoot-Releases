@@ -9,6 +9,7 @@ import com.wmqc.miroot.car.LoginService
 import com.wmqc.miroot.car.VehicleHistoryDatabase
 import com.wmqc.miroot.charging.ChargingAnimationPrefs
 import com.wmqc.miroot.lyrics.LogHelper
+import com.wmqc.miroot.rear.truthdare.TruthDarePrefs
 import com.wmqc.miroot.ui.music.MusicAutoProjectionPrefs
 import org.json.JSONArray
 import org.json.JSONObject
@@ -63,6 +64,7 @@ object MiRootConfigBackup {
         "fuel_price_95_day_cache_v2",
         "fuel_price_95_latest_v1",
         "music_auto_projection_v1",
+        TruthDarePrefs.PREFS_NAME,
     )
 
     private val EXCLUDED_PREFS = setOf(

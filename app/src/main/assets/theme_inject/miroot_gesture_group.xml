@@ -1,0 +1,43 @@
+  <!-- MiRoot: 三槽位手势广播；几何仅用 #view_width/#view_height/#touch_*，不依赖 vsy 或 var_config 开关 -->
+  <Group name="miroot_gesture_inject">
+    <Function name="miroot_emit_s1">
+      <IntentCommand action="com.wmqc.miroot.rear.ACTION_REAR_BOTTOM_GESTURE" broadcast="true" package="com.wmqc.miroot">
+        <Extra name="com.wmqc.miroot.rear.EXTRA_GESTURE_SLOT" type="number" expression="1"/>
+      </IntentCommand>
+    </Function>
+    <Function name="miroot_emit_s2">
+      <IntentCommand action="com.wmqc.miroot.rear.ACTION_REAR_BOTTOM_GESTURE" broadcast="true" package="com.wmqc.miroot">
+        <Extra name="com.wmqc.miroot.rear.EXTRA_GESTURE_SLOT" type="number" expression="2"/>
+      </IntentCommand>
+    </Function>
+    <Function name="miroot_emit_s3">
+      <IntentCommand action="com.wmqc.miroot.rear.ACTION_REAR_BOTTOM_GESTURE" broadcast="true" package="com.wmqc.miroot">
+        <Extra name="com.wmqc.miroot.rear.EXTRA_GESTURE_SLOT" type="number" expression="3"/>
+      </IntentCommand>
+    </Function>
+    <Button name="miroot_bottom_gesture" x="0" y="(#view_height - (80 * (#view_height / 572)))" w="#view_width" h="(80 * (#view_height / 572))" interceptTouch="true">
+      <Normal>
+      </Normal>
+      <Pressed>
+      </Pressed>
+      <Triggers>
+        <Trigger action="up,cancel">
+          <IfCommand ifCondition="((#touch_begin_y }= (#view_height - (80 * (#view_height / 572)))) ** ((#touch_begin_y - #touch_y) }= (50 * (#view_height / 572))) ** ((#touch_begin_y - #touch_y) }= (abs(#touch_x - #touch_begin_x) + (24 * (#view_height / 572)))))">
+            <Consequent>
+              <FunctionCommand target="miroot_emit_s1"/>
+            </Consequent>
+          </IfCommand>
+          <IfCommand ifCondition="((#touch_begin_y }= (#view_height - (80 * (#view_height / 572)))) ** ((#touch_begin_x - #touch_x) }= (0.07 * #view_width)) ** ((#touch_begin_x - #touch_x) }= (abs(#touch_begin_y - #touch_y) + (24 * (#view_height / 572)))))">
+            <Consequent>
+              <FunctionCommand target="miroot_emit_s2"/>
+            </Consequent>
+          </IfCommand>
+          <IfCommand ifCondition="((#touch_begin_y }= (#view_height - (80 * (#view_height / 572)))) ** ((#touch_x - #touch_begin_x) }= (0.07 * #view_width)) ** ((#touch_x - #touch_begin_x) }= (abs(#touch_begin_y - #touch_y) + (24 * (#view_height / 572)))))">
+            <Consequent>
+              <FunctionCommand target="miroot_emit_s3"/>
+            </Consequent>
+          </IfCommand>
+        </Trigger>
+      </Triggers>
+    </Button>
+  </Group>

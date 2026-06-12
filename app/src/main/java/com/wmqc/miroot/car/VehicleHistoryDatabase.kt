@@ -44,7 +44,7 @@ object VehicleHistoryDatabase {
     const val COL_FUEL_LEVEL = "FUEL_LEVEL"
     /** 剩余油量升数；-1 表示未记录。 */
     const val COL_FUEL_LITERS = "FUEL_LITERS"
-    /** 油量百分比 0–100；-1 表示未记录。 */
+    /** 历史不写入百分比，恒为 -1（保留列兼容旧库）。 */
     const val COL_FUEL_PERCENT = "FUEL_PERCENT"
     const val COL_DISTANCE_TO_EMPTY = "DISTANCE_TO_EMPTY"
     const val COL_ADD_OLI_FLAG = "ADD_OLI_FLAG"
@@ -188,15 +188,15 @@ object VehicleHistoryDatabase {
             }
             ensureVehicleProfileOnce(appCtx)
             val snapshot = buildSnapshotJson(appCtx, status, vehicleUpdateMillis)
-            val fuel = VehicleFuelParser.parse(status)
+            val fuelLiters = VehicleFuelParser.parseLiters(status)
             val location = resolveRecordLocation(appCtx, status)
             val cv = ContentValues().apply {
                 put(COL_INSERT_DATE, vehicleUpdateMillis)
                 put(COL_BATTERY_VOLTAGE, parseVoltage(status.voltage))
                 put(COL_ODOMETER, parseOdometer(status.odometer))
-                put(COL_FUEL_LITERS, fuel.liters ?: -1.0)
-                put(COL_FUEL_PERCENT, fuel.percent ?: -1)
-                put(COL_FUEL_LEVEL, fuel.liters ?: fuel.percent?.toDouble() ?: 0.0)
+                put(COL_FUEL_LITERS, fuelLiters ?: -1.0)
+                put(COL_FUEL_PERCENT, -1)
+                put(COL_FUEL_LEVEL, fuelLiters ?: 0.0)
                 put(COL_DISTANCE_TO_EMPTY, parseDistanceKm(status.distanceToEmpty).toDouble())
                 put(COL_ADD_OLI_FLAG, parseAddOilFlag(status.serviceWarningStatus))
                 put(COL_ENGINE_START, if (isEngineRunning(status)) 1 else 0)
@@ -1428,10 +1428,9 @@ object VehicleHistoryDatabase {
         root.put("vehicleUpdateMillis", vehicleUpdateMillis)
         root.put("savedAtMillis", System.currentTimeMillis())
         root.put("rangeKm", VehicleStatusService.parseDistanceToEmptyKm(status.distanceToEmpty))
-        val fuel = VehicleFuelParser.parse(status)
-        fuel.percent?.let { root.put("fuelPercent", it) }
-        fuel.liters?.let { root.put("fuelLiters", it) }
-        root.put("fuelValueIsLiters", fuel.liters != null)
+        val fuelLiters = VehicleFuelParser.parseLiters(status)
+        fuelLiters?.let { root.put("fuelLiters", it) }
+        root.put("fuelValueIsLiters", fuelLiters != null)
         root.put(
             "interiorTemp",
             VehicleStatusService.formatTempCelsiusDigitsOrUnknown(status.interiorTemp),

@@ -416,7 +416,7 @@ object AppliedRearThemeHelper {
             if (!ok) return false
             val inputZip = File(tmpIn)
             val outputZip = File(tmpOut)
-            if (!AiRearscreenLyricsGestureInjector.injectGestureIntoLocalZipFile(inputZip, outputZip)) return false
+            if (!AiRearscreenLyricsGestureInjector.injectGestureIntoLocalZipFile(context, inputZip, outputZip)) return false
             if (!outputZip.isFile || outputZip.length() == 0L) return false
             AiWallpaperThemeHelper.replaceRootOwnedFile(ts, mrc, outputZip.absolutePath, true)
         } catch (_: Exception) {
@@ -427,7 +427,7 @@ object AppliedRearThemeHelper {
     }
 
     /** 删除已应用主题 .mrc 中 MiRoot 注入的启动手势层。 */
-    fun removeInjectedLaunchGesture(ts: ITaskService, theme: AppliedRearTheme): Boolean {
+    fun removeInjectedLaunchGesture(ts: ITaskService, theme: AppliedRearTheme, context: Context): Boolean {
         val mrc = theme.mrcPath.trim()
         if (mrc.isEmpty()) return false
         val workDir = AiWallpaperThemeHelper.THEME_TEMP_DIR
@@ -443,7 +443,7 @@ object AppliedRearThemeHelper {
             if (!ok) return false
             val inputZip = File(tmpIn)
             val outputZip = File(tmpOut)
-            if (!AiRearscreenLyricsGestureInjector.removeGestureFromLocalZipFile(inputZip, outputZip)) return false
+            if (!AiRearscreenLyricsGestureInjector.removeGestureFromLocalZipFile(context, inputZip, outputZip)) return false
             if (!outputZip.isFile || outputZip.length() == 0L) return false
             AiWallpaperThemeHelper.replaceRootOwnedFile(ts, mrc, outputZip.absolutePath, true)
         } catch (_: Exception) {

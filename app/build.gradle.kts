@@ -130,8 +130,8 @@ android {
         // Android 16 = API 36；minSdk 勿与 target 相同，否则仅 16+ 设备可安装
         minSdk = 28
         targetSdk = 36
-        versionCode = 35
-        versionName = "2.1"
+        versionCode = 36
+        versionName = "2.2"
 
         manifestPlaceholders["superlyricApiVersionName"] = "3.4"
         manifestPlaceholders["superlyricApiVersionCode"] = "34"

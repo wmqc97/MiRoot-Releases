@@ -517,6 +517,90 @@
                     android:layout_marginTop="@dimen/mi_features_section_gap"
                     android:text="@string/features_rear_gesture_config_button" />
 
+                <LinearLayout
+                    android:id="@+id/layout_heart_rate_section"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/mi_features_section_gap"
+                        android:text="@string/features_section_heart_rate"
+                        android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/features_heart_rate_hint"
+                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textColor="@color/mi_text_secondary" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_heart_rate_open_rear"
+                        style="@style/Widget.MiRoot.Button.Text"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="@dimen/mi_features_section_gap"
+                        android:text="@string/heart_rate_open_on_rear" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:text="@string/features_section_balance_game"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/features_balance_game_hint"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="@color/mi_text_secondary" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_balance_game_open_rear"
+                    style="@style/Widget.MiRoot.Button.Text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:text="@string/balance_game_open_on_rear" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:text="@string/features_section_truth_dare"
+                    android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/features_truth_dare_hint"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="@color/mi_text_secondary" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_truth_dare_settings"
+                    style="@style/Widget.MiRoot.Button.Tonal"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/mi_features_section_gap"
+                    android:text="@string/features_truth_dare_settings_button" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_truth_dare_open_rear"
+                    style="@style/Widget.MiRoot.Button.Text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/truth_dare_open_on_rear" />
+
                 <View
                     android:layout_width="match_parent"
                     android:layout_height="1dp"

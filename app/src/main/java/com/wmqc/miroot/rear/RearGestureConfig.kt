@@ -2,7 +2,7 @@ package com.wmqc.miroot.rear
 
 /**
  * 单个背屏底部手势可配置动作。
- * [REAR_DESKTOP]、[MUSIC_LYRICS]、[CAR_CONTROL]、[FOREGROUND_APP_TO_REAR]、[CHARGING_PREVIEW] 为**互斥动作**：每种动作最多被一个槽位使用；
+ * [REAR_DESKTOP]、[MUSIC_LYRICS]、[CAR_CONTROL]、[FOREGROUND_APP_TO_REAR]、[CHARGING_PREVIEW]、[BALANCE_GAME]、[TRUTH_DARE_WHEEL]、[HEART_RATE] 为**互斥动作**：每种动作最多被一个槽位使用；
  * 其它槽的下拉中不再出现已被占用的该动作，避免两路手势唤起同一系统能力。由 [RearGesturePrefs] 与配置页共同约束。
  */
 enum class RearGestureAction {
@@ -15,6 +15,12 @@ enum class RearGestureAction {
     FOREGROUND_APP_TO_REAR,
     /** 功能页预览同款：背屏充电动画（涨水/常亮等读当前设置）。 */
     CHARGING_PREVIEW,
+    /** 背屏平衡球小游戏：倾斜手机控制小球留在竞技区内。 */
+    BALANCE_GAME,
+    /** 背屏真心话大冒险转盘。 */
+    TRUTH_DARE_WHEEL,
+    /** 背屏蓝牙心率广播：接收手环/手表标准心率广播并显示。 */
+    HEART_RATE,
     ;
 
     val isExclusive: Boolean
@@ -23,7 +29,10 @@ enum class RearGestureAction {
                 this == MUSIC_LYRICS ||
                 this == CAR_CONTROL ||
                 this == FOREGROUND_APP_TO_REAR ||
-                this == CHARGING_PREVIEW
+                this == CHARGING_PREVIEW ||
+                this == BALANCE_GAME ||
+                this == TRUTH_DARE_WHEEL ||
+                this == HEART_RATE
 }
 
 /**

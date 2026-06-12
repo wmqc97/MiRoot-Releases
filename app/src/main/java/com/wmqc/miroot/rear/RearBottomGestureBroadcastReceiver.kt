@@ -14,6 +14,11 @@ import com.wmqc.miroot.lyrics.LyricsIntents
 import com.wmqc.miroot.lyrics.MusicProjectionService
 import com.wmqc.miroot.lyrics.RootTaskServiceConnector
 import com.wmqc.miroot.ui.music.MusicProjectionController
+import com.wmqc.miroot.rear.balance.RearBalanceGameIntents
+import com.wmqc.miroot.rear.balance.RearBalanceGameLaunchService
+import com.wmqc.miroot.rear.heartrate.RearHeartRateLaunchHelper
+import com.wmqc.miroot.rear.truthdare.RearTruthDareWheelIntents
+import com.wmqc.miroot.rear.truthdare.RearTruthDareWheelLaunchService
 import com.wmqc.miroot.rear.desktop.RearDesktopIntents
 import com.wmqc.miroot.rear.desktop.RearDesktopLaunchService
 import kotlin.math.roundToInt
@@ -61,6 +66,9 @@ class RearBottomGestureBroadcastReceiver : BroadcastReceiver() {
             }
             RearGestureAction.FOREGROUND_APP_TO_REAR -> startForegroundAppProjectionLikeTile(app)
             RearGestureAction.CHARGING_PREVIEW -> startChargingPreview(app)
+            RearGestureAction.BALANCE_GAME -> openBalanceGame(app)
+            RearGestureAction.TRUTH_DARE_WHEEL -> openTruthDareWheel(app)
+            RearGestureAction.HEART_RATE -> openHeartRate(app)
         }
     }
 
@@ -120,6 +128,38 @@ class RearBottomGestureBroadcastReceiver : BroadcastReceiver() {
             ChargingPreviewLauncher.requestPreview(app)
         } catch (e: Exception) {
             LogHelper.e(TAG, "charging preview failed", e)
+        }
+    }
+
+    private fun openBalanceGame(app: Context) {
+        try {
+            app.startService(
+                Intent(app, RearBalanceGameLaunchService::class.java).apply {
+                    setAction(RearBalanceGameIntents.ACTION_OPEN_BALANCE_GAME)
+                },
+            )
+        } catch (e: Exception) {
+            LogHelper.e(TAG, "balance game launch failed", e)
+        }
+    }
+
+    private fun openTruthDareWheel(app: Context) {
+        try {
+            app.startService(
+                Intent(app, RearTruthDareWheelLaunchService::class.java).apply {
+                    setAction(RearTruthDareWheelIntents.ACTION_OPEN_TRUTH_DARE_WHEEL)
+                },
+            )
+        } catch (e: Exception) {
+            LogHelper.e(TAG, "truth dare wheel launch failed", e)
+        }
+    }
+
+    private fun openHeartRate(app: Context) {
+        try {
+            RearHeartRateLaunchHelper.requestOpenHeartRate(app)
+        } catch (e: Exception) {
+            LogHelper.e(TAG, "heart rate launch failed", e)
         }
     }
 

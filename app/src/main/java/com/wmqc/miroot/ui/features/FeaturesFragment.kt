@@ -63,6 +63,9 @@ import com.wmqc.miroot.databinding.FragmentFeaturesBinding
 import com.wmqc.miroot.rear.RearAssistPrefs
 import com.wmqc.miroot.rear.RearAssistService
 import com.wmqc.miroot.rear.RearSwitchKeeperService
+import com.wmqc.miroot.rear.balance.RearBalanceGameLaunchHelper
+import com.wmqc.miroot.rear.truthdare.RearTruthDareWheelLaunchHelper
+import com.wmqc.miroot.rear.truthdare.TruthDareSettingsActivity
 import com.wmqc.miroot.lyrics.RearScreenWakeService
 import com.wmqc.miroot.record.RearScreenRecordService
 import com.wmqc.miroot.shell.DeviceGeometry
@@ -372,6 +375,17 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
 
         binding.buttonRearGestureConfig.setOnClickListener {
             startActivity(Intent(requireContext(), RearGestureConfigActivity::class.java))
+        }
+
+        binding.buttonBalanceGameOpenRear.setOnClickListener {
+            RearBalanceGameLaunchHelper.requestOpenBalanceGame(requireContext().applicationContext)
+        }
+
+        binding.buttonTruthDareSettings.setOnClickListener {
+            startActivity(Intent(requireContext(), TruthDareSettingsActivity::class.java))
+        }
+        binding.buttonTruthDareOpenRear.setOnClickListener {
+            RearTruthDareWheelLaunchHelper.requestOpenTruthDareWheel(requireContext().applicationContext)
         }
 
         binding.buttonScreenshot.setOnClickListener {

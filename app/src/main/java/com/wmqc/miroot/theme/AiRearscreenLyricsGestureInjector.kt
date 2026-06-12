@@ -1,8 +1,8 @@
 package com.wmqc.miroot.theme
 
+import android.content.Context
 import com.wmqc.miroot.lyrics.ITaskService
 import com.wmqc.miroot.lyrics.LogHelper
-import com.wmqc.miroot.rear.RearBottomGestureIntents
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -11,118 +11,164 @@ import java.nio.charset.StandardCharsets
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
+enum class GestureInjectOutcome {
+    OK,
+    REARSCREEN_NOT_FOUND,
+    ZIP_READ_FAILED,
+    MANIFEST_MISSING,
+    MANIFEST_INCOMPATIBLE,
+    WRITE_FAILED,
+}
+
 object AiRearscreenLyricsGestureInjector {
     private const val TAG = "AiRearscreenInject"
+
+    private enum class GesturePatchResult {
+        OK,
+        MANIFEST_MISSING,
+        MANIFEST_INCOMPATIBLE,
+        IO_ERROR,
+    }
 
     private const val ZIP_ENTRY_MANIFEST = "manifest.xml"
     private const val ZIP_ENTRY_VAR_CONFIG = "var_config.xml"
 
+    private const val ASSET_GESTURE_GROUP = "theme_inject/miroot_gesture_group.xml"
+
     /**
      * 在 rearscreen zip 内增量修改 [ZIP_ENTRY_MANIFEST] 与 [ZIP_ENTRY_VAR_CONFIG]。
      *
-     * **Manifest（含 AI 目录「手势启动」路径）**
-     * 1. 先移除本工具曾注入的旧版底栏 / 旧直发广播 / 旧 [miroot_gesture_inject]。
-     * 2. 再写入**三槽位手势层**（`ACTION_REAR_BOTTOM_GESTURE` + 槽位 1/2/3）；若无法挂载则整次失败，不覆盖 zip（不会「只删不写」）。
-     * 3. 挂载策略：优先在根 [Widget] 最后一个 [</Widget>] 前插入；若无合法锚点则在 [ExternalCommands] 之前插入。
+     * **Manifest**
+     * 1. 移除旧版底栏 / 旧直发广播 / 旧 [miroot_gesture_inject] / MusicControl+Slider 等。
+     * 2. 写入三槽位手势层（仅用 #view_width/#view_height/#touch_* 写死几何，不注入自定义 Var、不读 var_config 开关）。
      *
      * **var_config**
-     * - 移除旧版 [musicBroadcastOn] 等三开关；写入三个 [OnOff]：`miroot_bottom_swipe_up_on` / `miroot_bottom_swipe_left_on` /
-     *   `miroot_bottom_swipe_right_on`（展示标题：底部上滑、底部左滑、底部右滑），与旧版一样可在主题/背屏壁纸参数里开关。
-     *   三个开关写入时 **default 均为开启**（用户可在主题里自行关闭）。手势触发后仅发三槽位通用广播；**与「功能 → 背屏手势配置」无关**，槽位收到广播后执行何种动作由 `RearGesturePrefs` 在运行时决定。
-     * - 若无 [var_config.xml]：新建仅含手势变量的最小 [WidgetConfig]。
+     * - 仅追加 [miroot_gesture_injected] OnOff 标识注入成功。
      */
-    fun injectGestureIntoLocalZipFile(inputZip: File, outputZip: File): Boolean {
+    fun injectGestureIntoLocalZipFile(context: Context, inputZip: File, outputZip: File): Boolean {
         if (!inputZip.isFile || inputZip.length() == 0L) return false
         outputZip.parentFile?.takeIf { !it.exists() }?.mkdirs()
-        return rebuildZipWithGesturePatches(inputZip, outputZip)
+        return rebuildZipWithGesturePatches(context, inputZip, outputZip) == GesturePatchResult.OK
     }
 
-    fun removeGestureFromLocalZipFile(inputZip: File, outputZip: File): Boolean {
+    fun removeGestureFromLocalZipFile(context: Context, inputZip: File, outputZip: File): Boolean {
         if (!inputZip.isFile || inputZip.length() == 0L) return false
         outputZip.parentFile?.takeIf { !it.exists() }?.mkdirs()
-        return rebuildZipWithGestureRemovePatches(inputZip, outputZip)
+        return rebuildZipWithGestureRemovePatches(context, inputZip, outputZip)
     }
 
-    /**
-     * AI 壁纸目录下 `rearscreen` zip 的**注入手势**（增量写入 manifest / var_config）。
-     *
-     * **非仅删除**：先去掉本工具曾写入的旧底栏 / 旧直发音乐·桌面·车控广播等，再写入**三槽位手势层**
-     *（`com.wmqc.miroot.rear.ACTION_REAR_BOTTOM_GESTURE` 及槽位 1/2/3）。注入内容与「背屏手势配置」页无关；主题内自带三方向开关。
-     * 收到广播后打开桌面、歌词、车控或应用等，由 `RearGesturePrefs`（「功能 → 背屏手势配置」）在运行时决定。
-     *
-     * 若 manifest 无法挂载新手势层（无合法 `</Widget>` 且无 `ExternalCommands` 锚点），整次注入失败并返回 `false`，**不会**用「只删不增」的结果覆盖原文件。
-     */
-    fun inject(taskService: ITaskService, aiDirectoryName: String): Boolean {
-        if (aiDirectoryName.isBlank()) return false
-        val srcRearscreen = AiWallpaperThemeHelper.AI_MAML_BASE + aiDirectoryName + "/rearscreen"
-        val workDir = AiWallpaperThemeHelper.THEME_TEMP_DIR
+    fun inject(
+        context: Context,
+        taskService: ITaskService,
+        aiDirectoryName: String,
+        workDir: File,
+    ): GestureInjectOutcome {
+        if (aiDirectoryName.isBlank()) return GestureInjectOutcome.REARSCREEN_NOT_FOUND
+        val srcRearscreen =
+            AiWallpaperThemeHelper.resolveExistingMamlRearscreenPath(taskService, aiDirectoryName)
+                ?: run {
+                    LogHelper.w(TAG, "rearscreen not found for dir=$aiDirectoryName")
+                    return GestureInjectOutcome.REARSCREEN_NOT_FOUND
+                }
+        workDir.mkdirs()
         val ts = System.currentTimeMillis()
-        val tmpIn = "${workDir}rearscreen_in_$ts.zip"
-        val tmpOut = "${workDir}rearscreen_out_$ts.zip"
+        val inputZip = File(workDir, "rearscreen_in_$ts.zip")
+        val outputZip = File(workDir, "rearscreen_out_$ts.zip")
+        val tmpIn = inputZip.absolutePath
+        val tmpOut = outputZip.absolutePath
 
         try {
-            taskService.executeShellCommand("mkdir -p \"$workDir\"")
-            val ok =
-                taskService.executeShellCommandWithResult(
-                    "test -f \"$srcRearscreen\" && cp \"$srcRearscreen\" \"$tmpIn\" && echo ok || echo no",
-                )?.trim() == "ok"
-            if (!ok) return false
+            val copied =
+                AiWallpaperThemeHelper.themeShellResultOk(
+                    taskService,
+                    "test -f \"$srcRearscreen\" && cp \"$srcRearscreen\" \"$tmpIn\" " +
+                        "&& chmod a+rw \"$tmpIn\" && echo ok || echo no",
+                )
+            if (!copied) {
+                LogHelper.w(TAG, "copy rearscreen to work dir failed src=$srcRearscreen")
+                return GestureInjectOutcome.ZIP_READ_FAILED
+            }
+            if (!inputZip.isFile || inputZip.length() == 0L) {
+                LogHelper.w(TAG, "work input zip missing/empty path=$tmpIn")
+                return GestureInjectOutcome.ZIP_READ_FAILED
+            }
 
-            val inputZip = File(tmpIn)
-            val outputZip = File(tmpOut)
-            if (!inputZip.isFile || inputZip.length() == 0L) return false
-
-            if (!rebuildZipWithGesturePatches(inputZip, outputZip)) return false
-            if (!outputZip.isFile || outputZip.length() == 0L) return false
+            when (rebuildZipWithGesturePatches(context, inputZip, outputZip)) {
+                GesturePatchResult.OK -> Unit
+                GesturePatchResult.MANIFEST_MISSING -> return GestureInjectOutcome.MANIFEST_MISSING
+                GesturePatchResult.MANIFEST_INCOMPATIBLE -> return GestureInjectOutcome.MANIFEST_INCOMPATIBLE
+                GesturePatchResult.IO_ERROR -> return GestureInjectOutcome.ZIP_READ_FAILED
+            }
+            if (!outputZip.isFile || outputZip.length() == 0L) {
+                LogHelper.w(TAG, "patched output zip missing/empty path=$tmpOut")
+                return GestureInjectOutcome.ZIP_READ_FAILED
+            }
+            outputZip.setReadable(true, false)
+            AiWallpaperThemeHelper.themeShellCommand(taskService, "chmod a+r \"$tmpOut\"")
 
             val replaced =
                 AiWallpaperThemeHelper.replaceRootOwnedFile(
                     taskService,
                     srcRearscreen,
-                    outputZip.absolutePath,
+                    tmpOut,
                     false,
                 )
             if (replaced) {
                 LogHelper.d(TAG, "AI rearscreen: gesture inject written (dir=$aiDirectoryName)")
+                return GestureInjectOutcome.OK
             }
-            return replaced
+            LogHelper.w(TAG, "replaceRootOwnedFile failed dest=$srcRearscreen")
+            return GestureInjectOutcome.WRITE_FAILED
         } catch (e: Exception) {
             LogHelper.w(TAG, "inject failed", e)
-            return false
+            return GestureInjectOutcome.WRITE_FAILED
         } finally {
             runCatching {
-                taskService.executeShellCommand("rm -f \"$tmpIn\" \"$tmpOut\"")
+                AiWallpaperThemeHelper.themeShellCommand(taskService, "rm -f \"$tmpIn\" \"$tmpOut\"")
             }
+            inputZip.delete()
+            outputZip.delete()
         }
     }
 
-    fun remove(taskService: ITaskService, aiDirectoryName: String): Boolean {
+    fun remove(
+        context: Context,
+        taskService: ITaskService,
+        aiDirectoryName: String,
+        workDir: File,
+    ): Boolean {
         if (aiDirectoryName.isBlank()) return false
-        val srcRearscreen = AiWallpaperThemeHelper.AI_MAML_BASE + aiDirectoryName + "/rearscreen"
-        val workDir = AiWallpaperThemeHelper.THEME_TEMP_DIR
+        val srcRearscreen =
+            AiWallpaperThemeHelper.resolveExistingMamlRearscreenPath(taskService, aiDirectoryName)
+                ?: return false
+        workDir.mkdirs()
         val ts = System.currentTimeMillis()
-        val tmpIn = "${workDir}rearscreen_in_$ts.zip"
-        val tmpOut = "${workDir}rearscreen_out_$ts.zip"
+        val inputZip = File(workDir, "rearscreen_in_$ts.zip")
+        val outputZip = File(workDir, "rearscreen_out_$ts.zip")
+        val tmpIn = inputZip.absolutePath
+        val tmpOut = outputZip.absolutePath
 
         try {
-            taskService.executeShellCommand("mkdir -p \"$workDir\"")
-            val ok =
-                taskService.executeShellCommandWithResult(
-                    "test -f \"$srcRearscreen\" && cp \"$srcRearscreen\" \"$tmpIn\" && echo ok || echo no",
-                )?.trim() == "ok"
-            if (!ok) return false
+            val copied =
+                AiWallpaperThemeHelper.themeShellResultOk(
+                    taskService,
+                    "test -f \"$srcRearscreen\" && cp \"$srcRearscreen\" \"$tmpIn\" " +
+                        "&& chmod a+rw \"$tmpIn\" && echo ok || echo no",
+                )
+            if (!copied) return false
 
-            val inputZip = File(tmpIn)
-            val outputZip = File(tmpOut)
             if (!inputZip.isFile || inputZip.length() == 0L) return false
 
-            if (!rebuildZipWithGestureRemovePatches(inputZip, outputZip)) return false
+            if (!rebuildZipWithGestureRemovePatches(context, inputZip, outputZip)) return false
             if (!outputZip.isFile || outputZip.length() == 0L) return false
+
+            outputZip.setReadable(true, false)
+            AiWallpaperThemeHelper.themeShellCommand(taskService, "chmod a+r \"$tmpOut\"")
 
             return AiWallpaperThemeHelper.replaceRootOwnedFile(
                 taskService,
                 srcRearscreen,
-                outputZip.absolutePath,
+                tmpOut,
                 false,
             )
         } catch (e: Exception) {
@@ -130,8 +176,10 @@ object AiRearscreenLyricsGestureInjector {
             return false
         } finally {
             runCatching {
-                taskService.executeShellCommand("rm -f \"$tmpIn\" \"$tmpOut\"")
+                AiWallpaperThemeHelper.themeShellCommand(taskService, "rm -f \"$tmpIn\" \"$tmpOut\"")
             }
+            inputZip.delete()
+            outputZip.delete()
         }
     }
 
@@ -160,7 +208,7 @@ object AiRearscreenLyricsGestureInjector {
         val rawBytes: ByteArray?,
     )
 
-    private fun rebuildZipWithGesturePatches(inputZip: File, outputZip: File): Boolean {
+    private fun rebuildZipWithGesturePatches(context: Context, inputZip: File, outputZip: File): GesturePatchResult {
         val zipFile = AiWallpaperThemeHelper.openZipFileForTheme(inputZip)
         try {
             var manifestBytes: ByteArray? = null
@@ -195,10 +243,10 @@ object AiRearscreenLyricsGestureInjector {
             var vIn = varConfigBytes
             if (mIn == null) {
                 LogHelper.w(TAG, "zip missing manifest.xml")
-                return false
+                return GesturePatchResult.MANIFEST_MISSING
             }
             if (vIn == null) {
-                LogHelper.d(TAG, "zip has no root var_config.xml; injecting new minimal WidgetConfig (gesture vars)")
+                LogHelper.d(TAG, "zip has no root var_config.xml; injecting new minimal WidgetConfig")
                 vIn = newMinimalVarConfigXml().toByteArray(StandardCharsets.UTF_8)
                 slots.add(
                     ZipWriteSlot(
@@ -212,10 +260,10 @@ object AiRearscreenLyricsGestureInjector {
             }
 
             val manifestText = String(mIn, StandardCharsets.UTF_8).trimStart('\uFEFF')
-            val patchedManifest = patchManifestForGesture(manifestText)
+            val patchedManifest = patchManifestForGesture(context, manifestText)
             if (patchedManifest == null) {
                 LogHelper.w(TAG, "manifest gesture patch failed (no universal </Widget> anchor and no ExternalCommands)")
-                return false
+                return GesturePatchResult.MANIFEST_INCOMPATIBLE
             }
             val patchedManifestBytes = patchedManifest.toByteArray(StandardCharsets.UTF_8)
 
@@ -240,13 +288,16 @@ object AiRearscreenLyricsGestureInjector {
                 }
                 zos.flush()
             }
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "rebuildZipWithGesturePatches failed", e)
+            return GesturePatchResult.IO_ERROR
         } finally {
             runCatching { zipFile.close() }
         }
-        return true
+        return GesturePatchResult.OK
     }
 
-    private fun rebuildZipWithGestureRemovePatches(inputZip: File, outputZip: File): Boolean {
+    private fun rebuildZipWithGestureRemovePatches(context: Context, inputZip: File, outputZip: File): Boolean {
         val zipFile = AiWallpaperThemeHelper.openZipFileForTheme(inputZip)
         try {
             var manifestBytes: ByteArray? = null
@@ -316,19 +367,22 @@ object AiRearscreenLyricsGestureInjector {
                 }
                 zos.flush()
             }
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "rebuildZipWithGestureRemovePatches failed", e)
+            return false
         } finally {
             runCatching { zipFile.close() }
         }
         return true
     }
 
-    private fun patchManifestForGesture(xml: String): String? {
+    private fun patchManifestForGesture(context: Context, xml: String): String? {
         val cleaned = removeGestureFromManifest(xml)
-        tryInjectUniversalGesture(cleaned)?.let {
+        tryInjectUniversalGesture(context, cleaned)?.let {
             LogHelper.d(TAG, "manifest: gesture inject applied (before </Widget>)")
             return it
         }
-        return patchManifestLegacyAiVideo(cleaned)
+        return patchManifestLegacyAiVideo(context, cleaned)
     }
 
     private fun removeGestureFromManifest(xml: String): String {
@@ -350,6 +404,43 @@ object AiRearscreenLyricsGestureInjector {
                     )
                 s.replace(re, "")
             }.getOrDefault(s)
+
+        s =
+            runCatching {
+                val re =
+                    Regex(
+                        """(?is)<Slider\b[^>]*\bname\s*=\s*["']swipe_up_broadcast["'][^>]*>.*?</Slider>""",
+                    )
+                s.replace(re, "")
+            }.getOrDefault(s)
+
+        s =
+            runCatching {
+                val re =
+                    Regex(
+                        """(?is)<MusicControl\b[^>]*\bname\s*=\s*["']music_control["'][^>]*/>""",
+                    )
+                s.replace(re, "")
+            }.getOrDefault(s)
+
+        val varNames =
+            listOf(
+                "music_state",
+                "musicBroadcastOn",
+                "miroot_bottom_swipe_up_on",
+                "miroot_bottom_swipe_left_on",
+                "miroot_bottom_swipe_right_on",
+            )
+        for (name in varNames) {
+            s =
+                runCatching {
+                    val re =
+                        Regex(
+                            """(?is)<Var\b[^>]*\bname\s*=\s*["']$name["'][^>]*/>\s*""",
+                        )
+                    s.replace(re, "")
+                }.getOrDefault(s)
+        }
 
         val fnNames =
             listOf(
@@ -387,6 +478,7 @@ object AiRearscreenLyricsGestureInjector {
                 "miroot_bottom_swipe_up_on",
                 "miroot_bottom_swipe_left_on",
                 "miroot_bottom_swipe_right_on",
+                "miroot_gesture_injected",
             )
         for (name in onOffNames) {
             s =
@@ -409,9 +501,6 @@ object AiRearscreenLyricsGestureInjector {
         return s
     }
 
-    /**
-     * 根 [Widget] 闭合后仅允许空白或尾部注释块；避免把内层 `</Widget>` 误当根闭合，同时兼容部分包尾带注释的写法。
-     */
     private fun isAcceptableTailAfterRootWidgetClose(tail: String): Boolean {
         var s = tail.trim()
         if (s.isEmpty()) return true
@@ -427,7 +516,7 @@ object AiRearscreenLyricsGestureInjector {
         return true
     }
 
-    private fun tryInjectUniversalGesture(xml: String): String? {
+    private fun tryInjectUniversalGesture(context: Context, xml: String): String? {
         if (!xml.contains("<Widget", ignoreCase = true)) {
             return null
         }
@@ -441,11 +530,10 @@ object AiRearscreenLyricsGestureInjector {
             LogHelper.d(TAG, "manifest: skip universal anchor (non-empty tail after last </Widget>)")
             return null
         }
-        return xml.substring(0, idx) + buildGestureGroupXml() + "\n" + xml.substring(idx)
+        return xml.substring(0, idx) + loadAssetText(context, ASSET_GESTURE_GROUP) + "\n" + xml.substring(idx)
     }
 
-    /** 无合法 [</Widget>] 时：在 [ExternalCommands] 前插入新版手势层（不再依赖旧 vsy / openMusicProjection 片段）。 */
-    private fun patchManifestLegacyAiVideo(xml: String): String? {
+    private fun patchManifestLegacyAiVideo(context: Context, xml: String): String? {
         if (!xml.contains("<ExternalCommands>", ignoreCase = true)) {
             return null
         }
@@ -453,7 +541,7 @@ object AiRearscreenLyricsGestureInjector {
         if (idx < 0) {
             return null
         }
-        return xml.substring(0, idx) + buildGestureGroupXml() + "\n" + xml.substring(idx)
+        return xml.substring(0, idx) + loadAssetText(context, ASSET_GESTURE_GROUP) + "\n" + xml.substring(idx)
     }
 
     private fun patchVarConfigForGesture(xml: String): String {
@@ -465,12 +553,12 @@ object AiRearscreenLyricsGestureInjector {
             return base
         }
         val head = base.substring(0, idx).trimEnd()
-        return head + "\n" + gestureVarConfigAppend() + "\n" + closing
+        return head + "\n" + gestureInjectedMarkerBlock() + "\n" + closing
     }
 
     private fun newMinimalVarConfigXml(): String =
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<WidgetConfig version=\"1\" des=\"MiRoot\">\n" +
-            gestureVarConfigAppend() +
+            gestureInjectedMarkerBlock() +
             "\n</WidgetConfig>\n"
 
     private fun unwrapVarConfigOuterCommentIfNeeded(xml: String): String {
@@ -488,103 +576,17 @@ object AiRearscreenLyricsGestureInjector {
         return inner
     }
 
-    private fun gestureVarConfigAppend(): String =
-        listOf(
-            swipeOnOffBlock("miroot_bottom_swipe_up_on", "底部上滑", "Bottom swipe up", defaultOn = true),
-            swipeOnOffBlock("miroot_bottom_swipe_left_on", "底部左滑", "Bottom swipe left", defaultOn = true),
-            swipeOnOffBlock("miroot_bottom_swipe_right_on", "底部右滑", "Bottom swipe right", defaultOn = true),
-        ).joinToString("\n")
-
-    private fun swipeOnOffBlock(
-        xmlName: String,
-        zhTitle: String,
-        enTitle: String,
-        defaultOn: Boolean,
-    ): String {
-        val d = if (defaultOn) "1" else "0"
-        return (
-            """  <OnOff name="$xmlName" displayTitle="$zhTitle" default="$d">
-    <Language displayTitle="$enTitle" locale="bo_CN"/>
-    <Language displayTitle="$enTitle" locale="en_US"/>
-    <Language displayTitle="$enTitle" locale="ug_CN"/>
-    <Language displayTitle="$zhTitle" locale="zh_CN"/>
-    <Language displayTitle="$zhTitle" locale="zh_HK"/>
-    <Language displayTitle="$zhTitle" locale="zh_TW"/>
+    private fun gestureInjectedMarkerBlock(): String =
+        """  <OnOff name="miroot_gesture_injected" displayTitle="MiRoot手势已注入" default="1">
+    <Language displayTitle="MiRoot gesture injected" locale="bo_CN"/>
+    <Language displayTitle="MiRoot gesture injected" locale="en_US"/>
+    <Language displayTitle="MiRoot gesture injected" locale="ug_CN"/>
+    <Language displayTitle="MiRoot手势已注入" locale="zh_CN"/>
+    <Language displayTitle="MiRoot手勢已注入" locale="zh_HK"/>
+    <Language displayTitle="MiRoot手勢已注入" locale="zh_TW"/>
   </OnOff>"""
-        )
-    }
 
-    private fun mamlBottomY(): String = "(#view_height - (80 * (#view_height / 572)))"
-
-    private fun mamlH(): String = "(#view_height / 572)"
-
-    private fun condSlotActive(slot: Int): String {
-        val v =
-            when (slot) {
-                1 -> "miroot_bottom_swipe_up_on"
-                2 -> "miroot_bottom_swipe_left_on"
-                3 -> "miroot_bottom_swipe_right_on"
-                else -> "miroot_bottom_swipe_up_on"
-            }
-        return "(#$v == 1)"
-    }
-
-    private fun geomUp(): String =
-        "(#touch_begin_y }= (${mamlBottomY()})) ** ((#touch_begin_y - #touch_y) }= (50 * ${mamlH()})) ** ((#touch_begin_y - #touch_y) }= (abs(#touch_x - #touch_begin_x) + (24 * ${mamlH()})))"
-
-    private fun geomLeft(): String =
-        "(#touch_begin_y }= (${mamlBottomY()})) ** ((#touch_begin_x - #touch_x) }= (0.07 * #view_width)) ** ((#touch_begin_x - #touch_x) }= (abs(#touch_begin_y - #touch_y) + (24 * ${mamlH()})))"
-
-    private fun geomRight(): String =
-        "(#touch_begin_y }= (${mamlBottomY()})) ** ((#touch_x - #touch_begin_x) }= (0.07 * #view_width)) ** ((#touch_x - #touch_begin_x) }= (abs(#touch_begin_y - #touch_y) + (24 * ${mamlH()})))"
-
-    private fun emitIf(slot: Int, geom: String): String =
-        """                    <IfCommand ifCondition="(${condSlotActive(slot)} ** $geom)">
-                        <Consequent>
-                            <FunctionCommand target="miroot_emit_s${slot}"/>
-                        </Consequent>
-                    </IfCommand>"""
-
-    private fun buildEmitFunctionsXml(): String =
-        """
-        <Function name="miroot_emit_s1">
-            <IntentCommand action="${RearBottomGestureIntents.ACTION_REAR_BOTTOM_GESTURE}" broadcast="true" package="com.wmqc.miroot">
-                <Extra name="${RearBottomGestureIntents.EXTRA_GESTURE_SLOT}" type="number" expression="1"/>
-            </IntentCommand>
-        </Function>
-        <Function name="miroot_emit_s2">
-            <IntentCommand action="${RearBottomGestureIntents.ACTION_REAR_BOTTOM_GESTURE}" broadcast="true" package="com.wmqc.miroot">
-                <Extra name="${RearBottomGestureIntents.EXTRA_GESTURE_SLOT}" type="number" expression="2"/>
-            </IntentCommand>
-        </Function>
-        <Function name="miroot_emit_s3">
-            <IntentCommand action="${RearBottomGestureIntents.ACTION_REAR_BOTTOM_GESTURE}" broadcast="true" package="com.wmqc.miroot">
-                <Extra name="${RearBottomGestureIntents.EXTRA_GESTURE_SLOT}" type="number" expression="3"/>
-            </IntentCommand>
-        </Function>""".trimIndent()
-
-    private fun buildGestureGroupXml(): String {
-        val triggers =
-            listOf(
-                emitIf(1, geomUp()),
-                emitIf(2, geomLeft()),
-                emitIf(3, geomRight()),
-            ).joinToString("\n")
-        return """
-    <!-- MiRoot: 注入手势 — 槽位广播 1=上滑 2=左滑 3=右滑；收到广播后的动作由「背屏手势配置」决定，与注入内容无关 -->
-    <Group name="miroot_gesture_inject" visibility="(((#miroot_bottom_swipe_up_on == 1) || (#miroot_bottom_swipe_left_on == 1)) || (#miroot_bottom_swipe_right_on == 1))">
-${buildEmitFunctionsXml()}
-        <Button name="miroot_bottom_gesture" x="0" y="${mamlBottomY()}" w="#view_width" h="(80 * ${mamlH()})" interceptTouch="true">
-            <Normal>
-            </Normal>
-            <Pressed>
-            </Pressed>
-            <Triggers>
-                <Trigger action="up,cancel">
-$triggers
-                </Trigger>
-            </Triggers>
-        </Button>
-    </Group>""".trimIndent()
+    private fun loadAssetText(context: Context, path: String): String {
+        return context.assets.open(path).bufferedReader(StandardCharsets.UTF_8).use { it.readText() }.trimEnd() + "\n"
     }
 }

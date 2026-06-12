@@ -1,0 +1,560 @@
+[
+  {
+    "id": "t001",
+    "content": "你最近一次心动是什么时候？",
+    "category": "emotion",
+    "difficulty": 1
+  },
+  {
+    "id": "t002",
+    "content": "你理想中的约会是什么样的？",
+    "category": "emotion",
+    "difficulty": 1
+  },
+  {
+    "id": "t003",
+    "content": "你喜欢什么类型的异性/同性？",
+    "category": "emotion",
+    "difficulty": 1
+  },
+  {
+    "id": "t004",
+    "content": "你相信一见钟情吗？",
+    "category": "emotion",
+    "difficulty": 1
+  },
+  {
+    "id": "t005",
+    "content": "你觉得暧昧期最甜蜜还是恋爱期？",
+    "category": "emotion",
+    "difficulty": 1
+  },
+  {
+    "id": "t006",
+    "content": "你有没有偷偷喜欢过谁但没说出口？",
+    "category": "emotion",
+    "difficulty": 1
+  },
+  {
+    "id": "t007",
+    "content": "你被拒绝过吗？当时什么感受？",
+    "category": "emotion",
+    "difficulty": 1
+  },
+  {
+    "id": "t008",
+    "content": "你觉得在场谁最有魅力？",
+    "category": "emotion",
+    "difficulty": 1
+  },
+  {
+    "id": "t009",
+    "content": "你最浪漫的经历是什么？",
+    "category": "emotion",
+    "difficulty": 1
+  },
+  {
+    "id": "t010",
+    "content": "你有没有吃过前任的醋？",
+    "category": "emotion",
+    "difficulty": 1
+  },
+  {
+    "id": "t011",
+    "content": "说出你现在最想见的人是谁，为什么？",
+    "category": "emotion",
+    "difficulty": 2
+  },
+  {
+    "id": "t012",
+    "content": "你做过最疯狂的追求行为是什么？",
+    "category": "emotion",
+    "difficulty": 2
+  },
+  {
+    "id": "t013",
+    "content": "你有没有同时喜欢过两个人？",
+    "category": "emotion",
+    "difficulty": 2
+  },
+  {
+    "id": "t014",
+    "content": "你最后悔没有表白的人是谁？",
+    "category": "emotion",
+    "difficulty": 3
+  },
+  {
+    "id": "t015",
+    "content": "如果在场有人向你表白，你会接受谁？",
+    "category": "emotion",
+    "difficulty": 3
+  },
+  {
+    "id": "t016",
+    "content": "你做过最蠢的事是什么？",
+    "category": "funny",
+    "difficulty": 1
+  },
+  {
+    "id": "t017",
+    "content": "你有什么奇怪的小癖好？",
+    "category": "funny",
+    "difficulty": 1
+  },
+  {
+    "id": "t018",
+    "content": "你洗澡的时候会唱歌吗？唱什么？",
+    "category": "funny",
+    "difficulty": 1
+  },
+  {
+    "id": "t019",
+    "content": "你最怕什么动物或东西？",
+    "category": "funny",
+    "difficulty": 1
+  },
+  {
+    "id": "t020",
+    "content": "你有没有自己给自己起过外号？",
+    "category": "funny",
+    "difficulty": 1
+  },
+  {
+    "id": "t021",
+    "content": "你最尴尬的社死瞬间是什么？",
+    "category": "funny",
+    "difficulty": 1
+  },
+  {
+    "id": "t022",
+    "content": "你有没有在公共场合出过糗？",
+    "category": "funny",
+    "difficulty": 1
+  },
+  {
+    "id": "t023",
+    "content": "你手机里最不想让别人看到的是什么？",
+    "category": "funny",
+    "difficulty": 1
+  },
+  {
+    "id": "t024",
+    "content": "你有没有假装听懂其实完全没懂？",
+    "category": "funny",
+    "difficulty": 1
+  },
+  {
+    "id": "t025",
+    "content": "你做过最离谱的梦是什么？",
+    "category": "funny",
+    "difficulty": 1
+  },
+  {
+    "id": "t026",
+    "content": "你有没有偷偷关注过谁的社交媒体？",
+    "category": "funny",
+    "difficulty": 2
+  },
+  {
+    "id": "t027",
+    "content": "说出你最不想承认的黑历史",
+    "category": "funny",
+    "difficulty": 2
+  },
+  {
+    "id": "t028",
+    "content": "你有没有在背后吐槽过在场的人？",
+    "category": "funny",
+    "difficulty": 3
+  },
+  {
+    "id": "t029",
+    "content": "你最想删掉的聊天记录是什么？",
+    "category": "funny",
+    "difficulty": 3
+  },
+  {
+    "id": "t030",
+    "content": "说出你撒过最大的谎",
+    "category": "funny",
+    "difficulty": 3
+  },
+  {
+    "id": "t031",
+    "content": "你上学时最喜欢的科目是什么？",
+    "category": "school",
+    "difficulty": 1
+  },
+  {
+    "id": "t032",
+    "content": "你有没有逃过课？",
+    "category": "school",
+    "difficulty": 1
+  },
+  {
+    "id": "t033",
+    "content": "你最怀念学生时代的什么？",
+    "category": "school",
+    "difficulty": 1
+  },
+  {
+    "id": "t034",
+    "content": "你有没有在课上睡着被老师发现？",
+    "category": "school",
+    "difficulty": 1
+  },
+  {
+    "id": "t035",
+    "content": "你上学时最讨厌的科目是什么？",
+    "category": "school",
+    "difficulty": 1
+  },
+  {
+    "id": "t036",
+    "content": "你有没有暗恋过老师或学长学姐？",
+    "category": "school",
+    "difficulty": 1
+  },
+  {
+    "id": "t037",
+    "content": "你有没有抄过作业或考试作弊？",
+    "category": "school",
+    "difficulty": 1
+  },
+  {
+    "id": "t038",
+    "content": "你上学时做过什么叛逆的事？",
+    "category": "school",
+    "difficulty": 1
+  },
+  {
+    "id": "t039",
+    "content": "你有没有因为喜欢谁而特意选课？",
+    "category": "school",
+    "difficulty": 1
+  },
+  {
+    "id": "t040",
+    "content": "你收到过情书或表白吗？",
+    "category": "school",
+    "difficulty": 1
+  },
+  {
+    "id": "t041",
+    "content": "说出你学生时代最想忘记的事",
+    "category": "school",
+    "difficulty": 2
+  },
+  {
+    "id": "t042",
+    "content": "你有没有和同学发生过冲突？",
+    "category": "school",
+    "difficulty": 2
+  },
+  {
+    "id": "t043",
+    "content": "你最后悔没有做的校园事是什么？",
+    "category": "school",
+    "difficulty": 3
+  },
+  {
+    "id": "t044",
+    "content": "你理想的工作是什么？",
+    "category": "work",
+    "difficulty": 1
+  },
+  {
+    "id": "t045",
+    "content": "你有没有上班摸鱼过？",
+    "category": "work",
+    "difficulty": 1
+  },
+  {
+    "id": "t046",
+    "content": "你最讨厌什么样的同事？",
+    "category": "work",
+    "difficulty": 1
+  },
+  {
+    "id": "t047",
+    "content": "你有没有在工作中哭过？",
+    "category": "work",
+    "difficulty": 1
+  },
+  {
+    "id": "t048",
+    "content": "你遇到过最奇葩的领导是什么样的？",
+    "category": "work",
+    "difficulty": 1
+  },
+  {
+    "id": "t049",
+    "content": "你有没有在公司偷偷做私事？",
+    "category": "work",
+    "difficulty": 1
+  },
+  {
+    "id": "t050",
+    "content": "你有没有想过辞职？原因是什么？",
+    "category": "work",
+    "difficulty": 1
+  },
+  {
+    "id": "t051",
+    "content": "你有没有在背后吐槽过领导？",
+    "category": "work",
+    "difficulty": 1
+  },
+  {
+    "id": "t052",
+    "content": "你觉得你的工资配得上你的付出吗？",
+    "category": "work",
+    "difficulty": 1
+  },
+  {
+    "id": "t053",
+    "content": "你有没有职场暗恋过谁？",
+    "category": "work",
+    "difficulty": 1
+  },
+  {
+    "id": "t054",
+    "content": "你在工作中做过最出格的事是什么？",
+    "category": "work",
+    "difficulty": 2
+  },
+  {
+    "id": "t055",
+    "content": "你有没有抢过别人的功劳？",
+    "category": "work",
+    "difficulty": 3
+  },
+  {
+    "id": "t056",
+    "content": "说出你工作中最想删掉的邮件/消息",
+    "category": "work",
+    "difficulty": 3
+  },
+  {
+    "id": "t057",
+    "content": "你最想改变自己什么？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t058",
+    "content": "你最骄傲的事情是什么？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t059",
+    "content": "你最想去的地方是哪里？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t060",
+    "content": "你有什么不为人知的才艺？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t061",
+    "content": "你最珍贵的东西是什么？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t062",
+    "content": "你最害怕失去什么？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t063",
+    "content": "你有没有后悔过的决定？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t064",
+    "content": "你觉得自己最大的缺点是什么？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t065",
+    "content": "你有没有嫉妒过别人？为什么？",
+    "category": "mixed",
+    "difficulty": 2
+  },
+  {
+    "id": "t066",
+    "content": "你最想对过去的自己说什么？",
+    "category": "mixed",
+    "difficulty": 2
+  },
+  {
+    "id": "t067",
+    "content": "你现在最大的压力来自哪里？",
+    "category": "mixed",
+    "difficulty": 2
+  },
+  {
+    "id": "t068",
+    "content": "你有什么秘密从来没告诉过任何人？",
+    "category": "mixed",
+    "difficulty": 3
+  },
+  {
+    "id": "t069",
+    "content": "如果明天是世界末日，你最想做什么？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t070",
+    "content": "你觉得在场谁最适合当你的好朋友？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t071",
+    "content": "你最想对未来的自己说什么？",
+    "category": "mixed",
+    "difficulty": 2
+  },
+  {
+    "id": "t072",
+    "content": "你最想对过去的自己说什么？",
+    "category": "mixed",
+    "difficulty": 2
+  },
+  {
+    "id": "t073",
+    "content": "你最想对现在的自己说什么？",
+    "category": "mixed",
+    "difficulty": 2
+  },
+  {
+    "id": "t074",
+    "content": "你觉得什么行为浪费时间？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t075",
+    "content": "说出最难忘的旅游经历？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t076",
+    "content": "你听到别人对自己不好的评论有何感想？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t077",
+    "content": "遇到爱莫能助的事是什么？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t078",
+    "content": "最讨厌的蔬菜",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t079",
+    "content": "会和不喜欢的人一起去玩吗？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t080",
+    "content": "如果能拥有超能力，你希望是什么？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t081",
+    "content": "曾经全力以赴的事情是什么？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t082",
+    "content": "如果有时光机，最想回到什么时候？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t083",
+    "content": "是否记得父母生日并送上祝福？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t084",
+    "content": "迄今为止说过最难听的话",
+    "category": "mixed",
+    "difficulty": 2
+  },
+  {
+    "id": "t085",
+    "content": "会不会无缘无故讨厌一个人",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t086",
+    "content": "钱是用来上学还是环游世界？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t087",
+    "content": "自己的努力被否定是什么感受？",
+    "category": "mixed",
+    "difficulty": 2
+  },
+  {
+    "id": "t088",
+    "content": "什么事情让你笑得很假？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t089",
+    "content": "有什么事情对你产生极大的影响？",
+    "category": "mixed",
+    "difficulty": 2
+  },
+  {
+    "id": "t090",
+    "content": "朋友惹你生气的事是什么",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t091",
+    "content": "你最怀念的时光。",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t044",
+    "content": "你理想的工作是什么？",
+    "category": "mixed",
+    "difficulty": 1
+  },
+  {
+    "id": "t055",
+    "content": "你有没有抢过别人的功劳？",
+    "category": "mixed",
+    "difficulty": 3
+  }
+]

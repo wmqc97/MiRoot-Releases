@@ -10,7 +10,8 @@
 
 | 版本 | 说明 |
 |------|------|
-| **V2.1** | WebDAV 云备份；车控小组件与车辆历史；界面统一；歌词 API 重构 |
+| **V2.2** | 背屏平衡小游戏；真心话大冒险；蓝牙心率广播；车控油耗优化；歌词分词修复 |
+| V2.1 | WebDAV 云备份；车控小组件与车辆历史；界面统一；歌词 API 重构 |
 
 请到 [Releases](https://github.com/wmqc97/MiRoot-Releases/releases) 下载最新 `MiRoot_*_Release.apk`。
 

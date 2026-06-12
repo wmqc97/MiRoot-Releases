@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import com.wmqc.miroot.rear.RearDisplayOpenHelper
 import com.wmqc.miroot.lyrics.LogHelper
 import com.wmqc.miroot.lyrics.RootTaskServiceConnector
 import java.util.concurrent.CountDownLatch
@@ -41,6 +42,7 @@ class RearDesktopLaunchService : IntentService("RearDesktopLaunchService") {
         LogHelper.d(TAG, "onHandleIntent begin")
         acquireWakeLock(30_000L)
         try {
+            RearDisplayOpenHelper.wakeRearDisplay()
             val ts = RootTaskServiceConnector.ensureConnected(this, 2_500L)
             val privilegedOk =
                 if (ts != null) {

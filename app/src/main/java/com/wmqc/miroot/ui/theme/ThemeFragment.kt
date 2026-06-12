@@ -38,6 +38,7 @@ import com.wmqc.miroot.theme.AiWallpaperThemeHelper
 import com.wmqc.miroot.theme.AppliedRearTheme
 import com.wmqc.miroot.theme.AppliedRearThemeHelper
 import com.wmqc.miroot.theme.AiRearscreenLyricsGestureInjector
+import com.wmqc.miroot.theme.GestureInjectOutcome
 import com.wmqc.miroot.theme.DirectoryCoverBindingHelper
 import com.wmqc.miroot.theme.ThemeMetadataInjector
 import com.wmqc.miroot.theme.ThemeWorkspaceCleaner
@@ -521,16 +522,25 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                         }
                         val ts = taskService
                         if (ts == null) {
-                            snack(R.string.theme_replace_fail)
+                            snack(R.string.theme_gesture_inject_fail_service)
                             return@setItems
                         }
                         viewLifecycleOwner.lifecycleScope.launch {
                             snack(R.string.theme_preparing_gesture_incremental)
-                            val ok =
+                            val workDir =
                                 withContext(Dispatchers.IO) {
-                                    AiRearscreenLyricsGestureInjector.inject(ts, item.name)
+                                    AiWallpaperThemeHelper.gestureInjectWorkDir(requireContext().applicationContext)
                                 }
-                            if (ok) {
+                            val outcome =
+                                withContext(Dispatchers.IO) {
+                                    AiRearscreenLyricsGestureInjector.inject(
+                                        requireContext().applicationContext,
+                                        ts,
+                                        item.name,
+                                        workDir,
+                                    )
+                                }
+                            if (outcome == GestureInjectOutcome.OK) {
                                 snack(R.string.theme_inject_gesture_ok, longDuration = true)
                                 selectedDirName = item.name
                                 binding.textSelectedDir.text = getString(R.string.theme_selected_dir_fmt, item.name)
@@ -543,7 +553,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                                     sourceVideoPath = null,
                                 )
                             } else {
-                                snack(R.string.theme_replace_fail)
+                                snack(gestureInjectFailureMessage(outcome), longDuration = true)
                             }
                         }
                     }
@@ -560,9 +570,18 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                         }
                         viewLifecycleOwner.lifecycleScope.launch {
                             snack(R.string.theme_gesture_inject_working)
+                            val workDir =
+                                withContext(Dispatchers.IO) {
+                                    AiWallpaperThemeHelper.gestureInjectWorkDir(requireContext().applicationContext)
+                                }
                             val ok =
                                 withContext(Dispatchers.IO) {
-                                    AiRearscreenLyricsGestureInjector.remove(ts, item.name)
+                                    AiRearscreenLyricsGestureInjector.remove(
+                                        requireContext().applicationContext,
+                                        ts,
+                                        item.name,
+                                        workDir,
+                                    )
                                 }
                             if (ok) {
                                 snack(R.string.theme_applied_gesture_removed_ok, longDuration = true)
@@ -781,7 +800,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             }
             val patched =
                 withContext(Dispatchers.IO) {
-                    AiRearscreenLyricsGestureInjector.injectGestureIntoLocalZipFile(inputFile, outTemp)
+                    AiRearscreenLyricsGestureInjector.injectGestureIntoLocalZipFile(ctx, inputFile, outTemp)
                 }
             if (!patched || !outTemp.isFile || outTemp.length() == 0L) {
                 snack(R.string.theme_gesture_inject_fail)
@@ -1318,6 +1337,16 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             }
             .show()
     }
+
+    private fun gestureInjectFailureMessage(outcome: GestureInjectOutcome): Int =
+        when (outcome) {
+            GestureInjectOutcome.OK -> R.string.theme_inject_gesture_ok
+            GestureInjectOutcome.REARSCREEN_NOT_FOUND -> R.string.theme_gesture_inject_fail_no_rearscreen
+            GestureInjectOutcome.ZIP_READ_FAILED -> R.string.theme_gesture_inject_fail_write
+            GestureInjectOutcome.MANIFEST_MISSING -> R.string.theme_gesture_inject_fail_manifest_missing
+            GestureInjectOutcome.MANIFEST_INCOMPATIBLE -> R.string.theme_gesture_inject_fail_manifest_incompatible
+            GestureInjectOutcome.WRITE_FAILED -> R.string.theme_gesture_inject_fail_write
+        }
 
     override fun onDestroyView() {
         _binding = null

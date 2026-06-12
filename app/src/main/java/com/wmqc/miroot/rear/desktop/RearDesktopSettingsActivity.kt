@@ -195,7 +195,7 @@ private fun RearDesktopSettingsScreen() {
 
             // Actions
             Button(
-                onClick = { RearDesktopLaunchHelper.startDesktopOnRearDisplay(ctx) },
+                onClick = { RearDesktopLaunchHelper.requestOpenDesktop(ctx) },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColorsPrimary(),
             ) { Text(stringResource(R.string.rear_desktop_open_on_rear_button)) }

@@ -9,6 +9,9 @@
   <Var name="resType" type="number" expression="#bgmode_resType"/>
   <Var name="isImageResType" type="number" expression="((#resType == 0) || (#resType == 2))"/>
   <Var name="vsy" type="number" expression="(#view_height / 572)"/>
+  <Var name="miroot_bottom_swipe_up_on" type="number" expression="1" const="true"/>
+  <Var name="miroot_bottom_swipe_left_on" type="number" expression="1" const="true"/>
+  <Var name="miroot_bottom_swipe_right_on" type="number" expression="1" const="true"/>
   <Rectangle w="#view_width" h="#view_height" visibility="(#bgmode == 3)" fillColor="#000000"/>
   <Group>
     <!-- Ai.vue -->
@@ -250,8 +253,8 @@
     <FolmeState name="folme_state_5" alpha="0"/>
     <FolmeConfig name="folme_config_5" ease="-2, 1,0.5"/>
   </Group>
-  <!-- MiRoot 参考：三方向手势发通用槽位广播（与 AiRearscreenLyricsGestureInjector 注入结果一致）；主题开关见 var_config.xml -->
-  <Group name="miroot_gesture_inject" visibility="(((#miroot_bottom_swipe_up_on == 1) || (#miroot_bottom_swipe_left_on == 1)) || (#miroot_bottom_swipe_right_on == 1))">
+  <!-- MiRoot: 三槽位手势广播（变量写死在 manifest；var_config 仅 miroot_gesture_injected 标识注入成功） -->
+  <Group name="miroot_gesture_inject">
     <Function name="miroot_emit_s1">
       <IntentCommand action="com.wmqc.miroot.rear.ACTION_REAR_BOTTOM_GESTURE" broadcast="true" package="com.wmqc.miroot">
         <Extra name="com.wmqc.miroot.rear.EXTRA_GESTURE_SLOT" type="number" expression="1"/>
@@ -274,17 +277,17 @@
       </Pressed>
       <Triggers>
         <Trigger action="up,cancel">
-          <IfCommand ifCondition="((#miroot_bottom_swipe_up_on == 1) ** (#touch_begin_y }= (#view_height - (80 * #vsy))) ** ((#touch_begin_y - #touch_y) }= (50 * #vsy)) ** ((#touch_begin_y - #touch_y) }= (abs(#touch_x - #touch_begin_x) + (24 * #vsy))))">
+          <IfCommand ifCondition="((#touch_begin_y }= (#view_height - (80 * #vsy))) ** ((#touch_begin_y - #touch_y) }= (50 * #vsy)) ** ((#touch_begin_y - #touch_y) }= (abs(#touch_x - #touch_begin_x) + (24 * #vsy))))">
             <Consequent>
               <FunctionCommand target="miroot_emit_s1"/>
             </Consequent>
           </IfCommand>
-          <IfCommand ifCondition="((#miroot_bottom_swipe_left_on == 1) ** (#touch_begin_y }= (#view_height - (80 * #vsy))) ** ((#touch_begin_x - #touch_x) }= (0.07 * #view_width)) ** ((#touch_begin_x - #touch_x) }= (abs(#touch_begin_y - #touch_y) + (24 * #vsy))))">
+          <IfCommand ifCondition="((#touch_begin_y }= (#view_height - (80 * #vsy))) ** ((#touch_begin_x - #touch_x) }= (0.07 * #view_width)) ** ((#touch_begin_x - #touch_x) }= (abs(#touch_begin_y - #touch_y) + (24 * #vsy))))">
             <Consequent>
               <FunctionCommand target="miroot_emit_s2"/>
             </Consequent>
           </IfCommand>
-          <IfCommand ifCondition="((#miroot_bottom_swipe_right_on == 1) ** (#touch_begin_y }= (#view_height - (80 * #vsy))) ** ((#touch_x - #touch_begin_x) }= (0.07 * #view_width)) ** ((#touch_x - #touch_begin_x) }= (abs(#touch_begin_y - #touch_y) + (24 * #vsy))))">
+          <IfCommand ifCondition="((#touch_begin_y }= (#view_height - (80 * #vsy))) ** ((#touch_x - #touch_begin_x) }= (0.07 * #view_width)) ** ((#touch_x - #touch_begin_x) }= (abs(#touch_begin_y - #touch_y) + (24 * #vsy))))">
             <Consequent>
               <FunctionCommand target="miroot_emit_s3"/>
             </Consequent>

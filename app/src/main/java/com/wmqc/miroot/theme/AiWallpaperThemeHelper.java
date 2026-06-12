@@ -11,6 +11,7 @@ import android.os.Environment;
 import android.os.RemoteException;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.wmqc.miroot.lyrics.ITaskService;
@@ -116,6 +117,32 @@ public final class AiWallpaperThemeHelper {
      * MiRoot 写入的背屏预览 {@code preview_rearscreen_0.png}。换视频后用它作为源，覆盖拷贝到
      * {@link DirectoryCoverBindingHelper} 里用户手动绑定的列表略缩图路径。
      */
+    /** AI 目录下的 {@code rearscreen} 主题包（视频替换 / 手势注入均读写此文件）。 */
+    @Nullable
+    public static String resolveExistingMamlRearscreenPath(
+            ITaskService taskService, String directory) {
+        if (taskService == null || directory == null || directory.isEmpty()) {
+            return null;
+        }
+        String tail = directory + "/rearscreen";
+        for (String base : AI_MAML_BASES) {
+            String path = base + tail;
+            if (rootFileExists(taskService, path)) {
+                LogHelper.dDebug(
+                        TAG,
+                        "rearscreen exists: " + LogHelper.truncateForLog(path, 220));
+                return path;
+            }
+        }
+        LogHelper.dDebug(
+                TAG,
+                "rearscreen missing for mamlDir="
+                        + directory
+                        + " triedTail="
+                        + LogHelper.truncateForLog(tail, 160));
+        return null;
+    }
+
     @Nullable
     public static String resolveExistingMamlPreviewRearscreen0Path(
             ITaskService taskService, String directory) {
@@ -296,6 +323,32 @@ public final class AiWallpaperThemeHelper {
         } catch (Exception e) {
             LogHelper.e(TAG, "openThemeManager failed", e);
         }
+    }
+
+    /** 手势注入/删除的本地 zip 工作目录（应用 externalFilesDir，shell 与 App 进程均可读写）。 */
+    @NonNull
+    public static File gestureInjectWorkDir(@NonNull Context context) {
+        File dir = context.getExternalFilesDir("theme_temp");
+        if (dir == null) {
+            dir = new File(context.getCacheDir(), "theme_temp");
+        }
+        //noinspection ResultOfMethodCallIgnored
+        dir.mkdirs();
+        return dir;
+    }
+
+    /** 主题文件操作 shell：优先 root，回退 Shizuku/shell。 */
+    public static boolean themeShellCommand(ITaskService ts, String cmd) {
+        return shellCommandRootFirst(ts, cmd);
+    }
+
+    public static String themeShellResult(ITaskService ts, String cmd) {
+        return shellResultRootFirst(ts, cmd);
+    }
+
+    public static boolean themeShellResultOk(ITaskService ts, String cmd) {
+        String r = shellResultRootFirst(ts, cmd);
+        return r != null && "ok".equals(r.trim());
     }
 
     /** 优先 {@code su -c}（读他应用 /data/data），失败再回退 Shizuku/原 shell。 */
@@ -1270,7 +1323,11 @@ public final class AiWallpaperThemeHelper {
         try {
             String checkNewFileCmd = "test -f \"" + newFile + "\" && stat -c%s \"" + newFile + "\" || echo '0'";
             String checkNewFileResult = shellResultRootFirst(taskService,checkNewFileCmd);
-            if (checkNewFileResult == null || checkNewFileResult.trim().equals("0")) {
+            long newFileSize = parseRemoteFileSizeBytes(checkNewFileResult);
+            if (newFileSize <= 0L) {
+                LogHelper.w(TAG, "replaceFileWithBackup: new file missing or size=0 path="
+                        + LogHelper.truncateForLog(newFile, 120)
+                        + " stat=" + LogHelper.truncateForLog(checkNewFileResult, 40));
                 return false;
             }
             String backupFile = originalFile + ".backup";
@@ -1281,31 +1338,36 @@ public final class AiWallpaperThemeHelper {
             }
             boolean success = shellCommandRootFirst(taskService,"cp \"" + newFile + "\" \"" + originalFile + "\"");
             if (!success) {
+                LogHelper.w(TAG, "replaceFileWithBackup: cp failed dest="
+                        + LogHelper.truncateForLog(originalFile, 120));
                 return false;
             }
             Thread.sleep(100);
             String verifyCmd = "test -f \"" + originalFile + "\" && stat -c%s \"" + originalFile + "\" || echo '0'";
             String verifyResult = shellResultRootFirst(taskService,verifyCmd);
-            if (verifyResult == null || verifyResult.trim().equals("0")) {
+            long replacedFileSize = parseRemoteFileSizeBytes(verifyResult);
+            if (replacedFileSize <= 0L) {
                 String backupExists =
                         shellResultRootFirst(taskService,
                                 "test -f \"" + backupFile + "\" && echo exists || echo not_exists");
                 if (backupExists != null && backupExists.trim().equals("exists")) {
                     shellCommandRootFirst(taskService,"cp \"" + backupFile + "\" \"" + originalFile + "\"");
                 }
+                LogHelper.w(TAG, "replaceFileWithBackup: verify missing dest="
+                        + LogHelper.truncateForLog(originalFile, 120));
                 return false;
             }
-            long newFileSize = Long.parseLong(checkNewFileResult.trim());
-            long replacedFileSize = Long.parseLong(verifyResult.trim());
             if (replacedFileSize != newFileSize) {
                 shellCommandRootFirst(taskService,"cp \"" + newFile + "\" \"" + originalFile + "\"");
                 Thread.sleep(100);
                 verifyResult = shellResultRootFirst(taskService,verifyCmd);
-                if (verifyResult == null || verifyResult.trim().equals("0")) {
+                replacedFileSize = parseRemoteFileSizeBytes(verifyResult);
+                if (replacedFileSize <= 0L) {
                     return false;
                 }
-                replacedFileSize = Long.parseLong(verifyResult.trim());
                 if (replacedFileSize != newFileSize) {
+                    LogHelper.w(TAG, "replaceFileWithBackup: size mismatch want=" + newFileSize
+                            + " got=" + replacedFileSize);
                     return false;
                 }
             }
@@ -1317,6 +1379,24 @@ public final class AiWallpaperThemeHelper {
             LogHelper.e(TAG, "replaceFileWithBackup", e);
             return false;
         }
+    }
+
+    /** 解析 {@code stat -c%s} 输出；忽略非数字行。 */
+    private static long parseRemoteFileSizeBytes(@Nullable String statOutput) {
+        if (statOutput == null || statOutput.isEmpty()) {
+            return -1L;
+        }
+        for (String line : statOutput.trim().split("\n")) {
+            String t = line.trim();
+            if (t.matches("\\d+")) {
+                try {
+                    return Long.parseLong(t);
+                } catch (NumberFormatException ignored) {
+                    // continue
+                }
+            }
+        }
+        return -1L;
     }
 
     /** content:// 或文档 URI 转为可读绝对路径（失败则返回原串）。 */
