@@ -5,8 +5,6 @@
 
 package com.wmqc.miroot.theme;
 
-import android.os.RemoteException;
-
 import com.wmqc.miroot.lyrics.ITaskService;
 import com.wmqc.miroot.lyrics.LogHelper;
 import android.media.MediaMetadataRetriever;
@@ -67,7 +65,6 @@ public class VideoReplacer {
     private static final String VIDEO_EXT = ".mp4";
     private static final String PNG_EXT = ".png";
     private static final String ZIP_EXT = ".zip";
-    private static final String BACKUP_EXT = ".backup";
     
     private final ITaskService taskService;
     private final ProgressCallback progressCallback;
@@ -81,6 +78,26 @@ public class VideoReplacer {
         this.taskService = taskService;
         this.progressCallback = callback;
         this.context = context;
+    }
+
+    private boolean shellCmd(String cmd) {
+        return AiWallpaperThemeHelper.themeShellCommand(taskService, cmd);
+    }
+
+    private String shellResult(String cmd) {
+        return AiWallpaperThemeHelper.themeShellResult(taskService, cmd);
+    }
+
+    private void afterAppWrite(String path) {
+        AiWallpaperThemeHelper.ensureShellReadable(taskService, path);
+    }
+
+    private static boolean shellCmd(ITaskService ts, String cmd) {
+        return AiWallpaperThemeHelper.themeShellCommand(ts, cmd);
+    }
+
+    private static String shellResult(ITaskService ts, String cmd) {
+        return AiWallpaperThemeHelper.themeShellResult(ts, cmd);
     }
     
     /**
@@ -108,41 +125,19 @@ public class VideoReplacer {
                 return false;
             }
             
-            // 准备底包并解压
+            // 准备底包并解压：优先 rearscreen.bak，否则从含 assets/ai/ 的 rearscreen 创建 .bak
             String tempRearscreen = getWorkDir() + "rearscreen_temp";
-            boolean useBackupFile = false;
-            
-            // 优先检查主题替换的备份文件（rearscreen.backup）
-            String backupFile = rearscreenFile + ".backup";
-            String checkBackupCmd = "test -f \"" + backupFile + "\" && echo 'exists' || echo 'not found'";
-            String checkBackupResult = taskService.executeShellCommandWithResult(checkBackupCmd);
-            
-            if (checkBackupResult != null && checkBackupResult.contains("exists")) {
-                LogHelper.d(TAG, "找到主题替换备份文件，使用备份文件作为底包: " + backupFile);
-                if (taskService.executeShellCommand("cp \"" + backupFile + "\" \"" + tempRearscreen + "\"")) {
-                    useBackupFile = true;
-                } else {
-                    LogHelper.w(TAG, "复制主题替换备份文件失败，尝试使用rearscreen文件");
-                }
+            String baseRearscreen =
+                    AiWallpaperThemeHelper.resolveVideoReplaceBaseRearscreen(taskService, rearscreenFile);
+            if (baseRearscreen == null) {
+                LogHelper.e(TAG, "无可用视频底包（需 rearscreen.bak 或含 assets/ai/ 的 rearscreen）");
+                return false;
             }
-            
-            // 如果未使用备份文件，检查目标目录的rearscreen文件是否存在
-            if (!useBackupFile) {
-                String checkCmd = "test -f \"" + rearscreenFile + "\" && echo 'exists' || echo 'not found'";
-                String checkResult = taskService.executeShellCommandWithResult(checkCmd);
-                
-                if (checkResult != null && checkResult.contains("exists")) {
-                    LogHelper.d(TAG, "使用rearscreen文件作为底包: " + rearscreenFile);
-                    if (!taskService.executeShellCommand("cp \"" + rearscreenFile + "\" \"" + tempRearscreen + "\"")) {
-                        LogHelper.e(TAG, "复制目录内rearscreen文件失败");
-                        return false;
-                    } else {
-                        useBackupFile = true; // 标记已使用rearscreen文件
-                    }
-                } else {
-                    LogHelper.e(TAG, "未找到备份文件或rearscreen文件，无法准备底包");
-                    return false;
-                }
+            LogHelper.d(TAG, "使用视频底包: " + baseRearscreen);
+            if (!AiWallpaperThemeHelper.themeShellCommand(taskService,
+                    "cp \"" + baseRearscreen + "\" \"" + tempRearscreen + "\"")) {
+                LogHelper.e(TAG, "复制视频底包到工作目录失败");
+                return false;
             }
             
             // 解压文件
@@ -291,12 +286,7 @@ public class VideoReplacer {
      * 准备工作目录
      */
     private boolean prepareWorkDirectory() {
-        try {
-            return taskService.executeShellCommand("mkdir -p \"" + getWorkDir() + "\"");
-        } catch (RemoteException e) {
-            LogHelper.e(TAG, "准备工作目录失败", e);
-            return false;
-        }
+        return AiWallpaperThemeHelper.prepareThemeShellWorkDirs(taskService);
     }
     
     /**
@@ -323,7 +313,7 @@ public class VideoReplacer {
                 } else {
                     // 外部路径，使用 Shell 命令
                     String checkVideoCmd = "test -f \"" + videoPath + "\" && echo 'exists' || echo 'not found'";
-                    String checkVideoResult = taskService.executeShellCommandWithResult(checkVideoCmd);
+                    String checkVideoResult = AiWallpaperThemeHelper.themeShellResult(taskService,checkVideoCmd);
                     videoExists = (checkVideoResult != null && checkVideoResult.contains("exists"));
                     LogHelper.d(TAG, "使用Shell命令检查视频文件: " + videoPath + ", 结果: " + checkVideoResult);
                 }
@@ -335,7 +325,7 @@ public class VideoReplacer {
             }
             
             return true;
-        } catch (RemoteException e) {
+        } catch (Exception e) {
             LogHelper.e(TAG, "验证视频文件失败", e);
             return false;
         }
@@ -401,6 +391,7 @@ public class VideoReplacer {
             
             // 验证文件
             if (targetFile.exists() && targetFile.length() > 0) {
+                afterAppWrite(targetPath);
                 LogHelper.d(TAG, "✅ rearscreen底包已从assets复制: " + targetPath + " (大小: " + targetFile.length() + " bytes)");
                 return true;
             } else {
@@ -445,14 +436,14 @@ public class VideoReplacer {
             if (needCopy) {
                 // 复制文件到工作目录
                 LogHelper.d(TAG, "复制rearscreen文件到工作目录...");
-                if (!taskService.executeShellCommand("cp \"" + sourceFile + "\" \"" + tempFile + "\"")) {
+                if (!AiWallpaperThemeHelper.themeShellCommand(taskService,"cp \"" + sourceFile + "\" \"" + tempFile + "\"")) {
                     LogHelper.e(TAG, "❌ 复制rearscreen文件到工作目录失败");
                     return false;
                 }
                 
                 // 验证复制成功
                 String verifyCmd = "test -f \"" + tempFile + "\" && stat -c%s \"" + tempFile + "\" || echo '0'";
-                String verifyResult = taskService.executeShellCommandWithResult(verifyCmd);
+                String verifyResult = AiWallpaperThemeHelper.themeShellResult(taskService,verifyCmd);
                 LogHelper.d(TAG, "临时文件验证结果: " + verifyResult);
                 
                 if (verifyResult == null || verifyResult.trim().equals("0")) {
@@ -463,7 +454,7 @@ public class VideoReplacer {
             } else {
                 // 验证源文件是否存在
                 String verifyCmd = "test -f \"" + sourceFile + "\" && stat -c%s \"" + sourceFile + "\" || echo '0'";
-                String verifyResult = taskService.executeShellCommandWithResult(verifyCmd);
+                String verifyResult = AiWallpaperThemeHelper.themeShellResult(taskService,verifyCmd);
                 LogHelper.d(TAG, "源文件验证结果: " + verifyResult);
                 
                 if (verifyResult == null || verifyResult.trim().equals("0")) {
@@ -476,25 +467,25 @@ public class VideoReplacer {
             // 创建解压目录
             String extractDir = getExtractDir();
             LogHelper.d(TAG, "创建解压目录: " + extractDir);
-            if (!taskService.executeShellCommand("mkdir -p \"" + extractDir + "\"")) {
+            if (!AiWallpaperThemeHelper.themeShellCommand(taskService,"mkdir -p \"" + extractDir + "\"")) {
                 LogHelper.e(TAG, "❌ 创建解压目录失败");
                 return false;
             }
             
             // 清理解压目录（如果已存在）
-            taskService.executeShellCommand("rm -rf \"" + extractDir + "*\"");
+            AiWallpaperThemeHelper.themeShellCommand(taskService,"rm -rf \"" + extractDir + "*\"");
             
             // 解压 ZIP 文件
             LogHelper.d(TAG, "开始解压ZIP文件...");
             String unzipCmd = "cd \"" + extractDir + "\" && unzip -q -o \"" + tempFile + "\"";
             LogHelper.d(TAG, "解压命令: " + unzipCmd);
-            boolean unzipSuccess = taskService.executeShellCommand(unzipCmd);
+            boolean unzipSuccess = AiWallpaperThemeHelper.themeShellCommand(taskService,unzipCmd);
             LogHelper.d(TAG, "解压命令执行结果: " + unzipSuccess);
             
             if (!unzipSuccess) {
                 LogHelper.e(TAG, "❌ 解压rearscreen文件失败");
                 // 尝试获取解压错误信息
-                String unzipError = taskService.executeShellCommandWithResult("cd \"" + extractDir + "\" && unzip -o \"" + tempFile + "\" 2>&1");
+                String unzipError = AiWallpaperThemeHelper.themeShellResult(taskService,"cd \"" + extractDir + "\" && unzip -o \"" + tempFile + "\" 2>&1");
                 LogHelper.e(TAG, "解压错误信息: " + (unzipError != null ? unzipError : "无错误信息"));
                 return false;
             }
@@ -508,27 +499,27 @@ public class VideoReplacer {
             
             // 验证解压结果：检查关键文件是否存在
             String manifestCheck = "test -f \"" + extractDir + "manifest.xml\" && echo 'exists' || echo 'not found'";
-            String manifestResult = taskService.executeShellCommandWithResult(manifestCheck);
+            String manifestResult = AiWallpaperThemeHelper.themeShellResult(taskService,manifestCheck);
             LogHelper.d(TAG, "manifest.xml验证结果: " + manifestResult);
             
             if (manifestResult == null || !manifestResult.contains("exists")) {
                 LogHelper.e(TAG, "❌ 解压后manifest.xml文件不存在，解压可能失败");
                 // 列出解压目录内容以便调试
                 String listCmd = "ls -la \"" + extractDir + "\"";
-                String listResult = taskService.executeShellCommandWithResult(listCmd);
+                String listResult = AiWallpaperThemeHelper.themeShellResult(taskService,listCmd);
                 LogHelper.e(TAG, "解压目录内容: " + (listResult != null ? listResult : "无法列出"));
                 return false;
             }
             
             // 检查assets目录是否存在
             String assetsCheck = "test -d \"" + extractDir + "assets\" && echo 'exists' || echo 'not found'";
-            String assetsResult = taskService.executeShellCommandWithResult(assetsCheck);
+            String assetsResult = AiWallpaperThemeHelper.themeShellResult(taskService,assetsCheck);
             LogHelper.d(TAG, "assets目录验证结果: " + assetsResult);
             
             LogHelper.d(TAG, "✅ rearscreen文件解压成功");
             LogHelper.d(TAG, "═══════════════════════════════════════");
             return true;
-        } catch (RemoteException e) {
+        } catch (Exception e) {
             LogHelper.e(TAG, "❌ 解压rearscreen文件失败", e);
             return false;
         }
@@ -545,7 +536,7 @@ public class VideoReplacer {
             
             // 检查解压目录是否存在
             String checkDirCmd = "test -d \"" + extractDir + "\" && echo 'exists' || echo 'not found'";
-            String dirResult = taskService.executeShellCommandWithResult(checkDirCmd);
+            String dirResult = AiWallpaperThemeHelper.themeShellResult(taskService,checkDirCmd);
             if (dirResult == null || !dirResult.contains("exists")) {
                 LogHelper.d(TAG, "解压目录不存在，需要重新解压");
                 return false;
@@ -553,7 +544,7 @@ public class VideoReplacer {
             
             // 检查关键文件 manifest.xml 是否存在
             String manifestCheck = "test -f \"" + extractDir + "manifest.xml\" && echo 'exists' || echo 'not found'";
-            String manifestResult = taskService.executeShellCommandWithResult(manifestCheck);
+            String manifestResult = AiWallpaperThemeHelper.themeShellResult(taskService,manifestCheck);
             if (manifestResult == null || !manifestResult.contains("exists")) {
                 LogHelper.d(TAG, "manifest.xml不存在，需要重新解压");
                 return false;
@@ -561,7 +552,7 @@ public class VideoReplacer {
             
             // 检查 assets 目录是否存在
             String assetsCheck = "test -d \"" + extractDir + "assets\" && echo 'exists' || echo 'not found'";
-            String assetsResult = taskService.executeShellCommandWithResult(assetsCheck);
+            String assetsResult = AiWallpaperThemeHelper.themeShellResult(taskService,assetsCheck);
             if (assetsResult == null || !assetsResult.contains("exists")) {
                 LogHelper.d(TAG, "assets目录不存在，需要重新解压");
                 return false;
@@ -569,7 +560,7 @@ public class VideoReplacer {
             
             // 检查 assets/ai 目录是否存在（视频替换需要此目录）
             String aiCheck = "test -d \"" + extractDir + "assets/ai\" && echo 'exists' || echo 'not found'";
-            String aiResult = taskService.executeShellCommandWithResult(aiCheck);
+            String aiResult = AiWallpaperThemeHelper.themeShellResult(taskService,aiCheck);
             if (aiResult == null || !aiResult.contains("exists")) {
                 LogHelper.d(TAG, "assets/ai目录不存在，需要重新解压");
                 return false;
@@ -577,63 +568,8 @@ public class VideoReplacer {
             
             LogHelper.d(TAG, "✅ 临时目录已有完整的解压文件，可以直接使用");
             return true;
-        } catch (RemoteException e) {
+        } catch (Exception e) {
             LogHelper.w(TAG, "检查临时目录失败，需要重新解压", e);
-            return false;
-        }
-    }
-    
-    /**
-     * 检查rearscreen文件格式（是否包含assets/ai目录）
-     * @param rearscreenPath rearscreen文件路径
-     * @return true表示格式正确（包含assets/ai目录），false表示格式不正确
-     */
-    private boolean checkRearscreenFormat(String rearscreenPath) {
-        try {
-            LogHelper.d(TAG, "检查rearscreen文件格式: " + rearscreenPath);
-            
-            // 创建临时解压目录用于检查
-            String checkExtractDir = getWorkDir() + "format_check/";
-            if (!taskService.executeShellCommand("mkdir -p \"" + checkExtractDir + "\"")) {
-                LogHelper.e(TAG, "创建格式检查目录失败");
-                return false;
-            }
-            
-            // 清空检查目录
-            taskService.executeShellCommand("rm -rf \"" + checkExtractDir + "*\"");
-            
-            // 解压文件到检查目录
-            String unzipCmd = "cd \"" + checkExtractDir + "\" && unzip -q -o \"" + rearscreenPath + "\" 2>&1";
-            boolean unzipSuccess = taskService.executeShellCommand(unzipCmd);
-            
-            if (!unzipSuccess) {
-                LogHelper.w(TAG, "解压失败，无法检查格式");
-                // 清理检查目录
-                taskService.executeShellCommand("rm -rf \"" + checkExtractDir + "\"");
-                return false;
-            }
-            
-            // 等待解压完成（优化：减少等待时间）
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            
-            // 检查是否存在assets/ai目录
-            String checkAssetsAiCmd = "test -d \"" + checkExtractDir + "assets/ai\" && echo 'exists' || echo 'not found'";
-            String checkResult = taskService.executeShellCommandWithResult(checkAssetsAiCmd);
-            LogHelper.d(TAG, "assets/ai目录检查结果: " + checkResult);
-            
-            // 清理检查目录
-            taskService.executeShellCommand("rm -rf \"" + checkExtractDir + "\"");
-            
-            boolean hasAssetsAi = (checkResult != null && checkResult.contains("exists"));
-            LogHelper.d(TAG, "rearscreen文件格式检查结果: " + (hasAssetsAi ? "包含assets/ai目录" : "不包含assets/ai目录"));
-            
-            return hasAssetsAi;
-        } catch (RemoteException e) {
-            LogHelper.e(TAG, "检查rearscreen文件格式失败", e);
             return false;
         }
     }
@@ -651,14 +587,14 @@ public class VideoReplacer {
             // 创建视频目录
             String aiVideoDir = getExtractDir() + "assets/ai/";
             LogHelper.d(TAG, "创建视频目录: " + aiVideoDir);
-            if (!taskService.executeShellCommand("mkdir -p \"" + aiVideoDir + "\"")) {
+            if (!AiWallpaperThemeHelper.themeShellCommand(taskService,"mkdir -p \"" + aiVideoDir + "\"")) {
                 LogHelper.e(TAG, "创建视频目录失败");
                 return false;
             }
             
             // 验证目录是否创建成功
             String verifyDirCmd = "test -d \"" + aiVideoDir + "\" && echo 'exists' || echo 'not found'";
-            String verifyDirResult = taskService.executeShellCommandWithResult(verifyDirCmd);
+            String verifyDirResult = AiWallpaperThemeHelper.themeShellResult(taskService,verifyDirCmd);
             LogHelper.d(TAG, "视频目录验证结果: " + verifyDirResult);
             
             if (verifyDirResult == null || !verifyDirResult.contains("exists")) {
@@ -666,13 +602,13 @@ public class VideoReplacer {
                 // 逐级创建目录
                 String extractDir = getExtractDir();
                 String assetsDir = extractDir + "assets";
-                taskService.executeShellCommand("mkdir -p \"" + assetsDir + "\"");
-                taskService.executeShellCommand("mkdir -p \"" + aiVideoDir + "\"");
+                AiWallpaperThemeHelper.themeShellCommand(taskService,"mkdir -p \"" + assetsDir + "\"");
+                AiWallpaperThemeHelper.themeShellCommand(taskService,"mkdir -p \"" + aiVideoDir + "\"");
                 // 设置目录权限
-                taskService.executeShellCommand("chmod -R 777 \"" + extractDir + "\"");
+                AiWallpaperThemeHelper.themeShellCommand(taskService,"chmod -R 777 \"" + extractDir + "\"");
                 
                 // 再次验证
-                verifyDirResult = taskService.executeShellCommandWithResult(verifyDirCmd);
+                verifyDirResult = AiWallpaperThemeHelper.themeShellResult(taskService,verifyDirCmd);
                 if (verifyDirResult == null || !verifyDirResult.contains("exists")) {
                     LogHelper.e(TAG, "无法创建视频目录: " + aiVideoDir);
                     return false;
@@ -694,7 +630,7 @@ public class VideoReplacer {
             
             // 验证源文件是否存在
             String verifySrcCmd = "test -f \"" + actualSourcePath + "\" && stat -c%s \"" + actualSourcePath + "\" || echo '0'";
-            String verifySrcResult = taskService.executeShellCommandWithResult(verifySrcCmd);
+            String verifySrcResult = AiWallpaperThemeHelper.themeShellResult(taskService,verifySrcCmd);
             LogHelper.d(TAG, "源文件验证结果: " + verifySrcResult);
             
             if (verifySrcResult == null || verifySrcResult.trim().equals("0")) {
@@ -704,12 +640,12 @@ public class VideoReplacer {
             
             // 验证目标目录是否可写
             String testWriteCmd = "touch \"" + aiVideoDir + "test.tmp\" && rm \"" + aiVideoDir + "test.tmp\" && echo 'writable' || echo 'not writable'";
-            String testWriteResult = taskService.executeShellCommandWithResult(testWriteCmd);
+            String testWriteResult = AiWallpaperThemeHelper.themeShellResult(taskService,testWriteCmd);
             LogHelper.d(TAG, "目标目录可写性测试: " + testWriteResult);
             
             if (testWriteResult == null || !testWriteResult.contains("writable")) {
                 LogHelper.w(TAG, "目标目录不可写，尝试设置权限");
-                taskService.executeShellCommand("chmod -R 777 \"" + getExtractDir() + "\"");
+                AiWallpaperThemeHelper.themeShellCommand(taskService,"chmod -R 777 \"" + getExtractDir() + "\"");
             }
             
             // 使用多种方法尝试复制文件（降级重试）
@@ -718,7 +654,7 @@ public class VideoReplacer {
             // 方法1: 使用 cp 命令
             String copyCmd = "cp \"" + actualSourcePath + "\" \"" + targetVideoPath + "\"";
             LogHelper.d(TAG, "执行复制命令 (cp): " + copyCmd);
-            cpVideoSuccess = taskService.executeShellCommand(copyCmd);
+            cpVideoSuccess = AiWallpaperThemeHelper.themeShellCommand(taskService,copyCmd);
             LogHelper.d(TAG, "cp命令结果: " + cpVideoSuccess);
             
             if (!cpVideoSuccess) {
@@ -726,7 +662,7 @@ public class VideoReplacer {
                 LogHelper.w(TAG, "cp命令失败，尝试使用cat命令");
                 String catCmd = "cat \"" + actualSourcePath + "\" > \"" + targetVideoPath + "\"";
                 LogHelper.d(TAG, "执行cat命令: " + catCmd);
-                cpVideoSuccess = taskService.executeShellCommand(catCmd);
+                cpVideoSuccess = AiWallpaperThemeHelper.themeShellCommand(taskService,catCmd);
                 LogHelper.d(TAG, "cat命令结果: " + cpVideoSuccess);
                 
                 if (!cpVideoSuccess) {
@@ -734,7 +670,7 @@ public class VideoReplacer {
                     LogHelper.w(TAG, "cat命令失败，尝试使用dd命令");
                     String ddCmd = "dd if=\"" + actualSourcePath + "\" of=\"" + targetVideoPath + "\" bs=4096 2>&1";
                     LogHelper.d(TAG, "执行dd命令: " + ddCmd);
-                    String ddResult = taskService.executeShellCommandWithResult(ddCmd);
+                    String ddResult = AiWallpaperThemeHelper.themeShellResult(taskService,ddCmd);
                     LogHelper.d(TAG, "dd命令输出: " + ddResult);
                     // dd命令总是返回true，需要检查输出文件
                     cpVideoSuccess = true;
@@ -752,14 +688,14 @@ public class VideoReplacer {
             
             // 验证目标文件是否存在
             String verifyVideoCmd = "test -f \"" + targetVideoPath + "\" && echo 'exists' || echo 'not found'";
-            String verifyVideoResult = taskService.executeShellCommandWithResult(verifyVideoCmd);
+            String verifyVideoResult = AiWallpaperThemeHelper.themeShellResult(taskService,verifyVideoCmd);
             LogHelper.d(TAG, "目标文件存在性验证: " + verifyVideoResult);
             
             if (verifyVideoResult == null || !verifyVideoResult.contains("exists")) {
                 // 文件不存在，尝试再次复制
                 LogHelper.w(TAG, "目标文件不存在，尝试再次复制");
                 String retryCopyCmd = "cp \"" + actualSourcePath + "\" \"" + targetVideoPath + "\"";
-                taskService.executeShellCommand(retryCopyCmd);
+                AiWallpaperThemeHelper.themeShellCommand(taskService,retryCopyCmd);
                 
                 // 再次验证
                 try {
@@ -768,7 +704,7 @@ public class VideoReplacer {
                     Thread.currentThread().interrupt();
                     return false;
                 }
-                verifyVideoResult = taskService.executeShellCommandWithResult(verifyVideoCmd);
+                verifyVideoResult = AiWallpaperThemeHelper.themeShellResult(taskService,verifyVideoCmd);
                 if (verifyVideoResult == null || !verifyVideoResult.contains("exists")) {
                     LogHelper.e(TAG, "视频文件复制失败，目标文件不存在: " + targetVideoPath);
                     return false;
@@ -777,7 +713,7 @@ public class VideoReplacer {
             
             // 验证文件大小
             String sizeCmd = "stat -c%s \"" + targetVideoPath + "\" 2>/dev/null || echo '0'";
-            String sizeResult = taskService.executeShellCommandWithResult(sizeCmd);
+            String sizeResult = AiWallpaperThemeHelper.themeShellResult(taskService,sizeCmd);
             LogHelper.d(TAG, "目标文件大小验证结果: " + sizeResult);
             
             if (sizeResult != null && !sizeResult.trim().isEmpty() && !sizeResult.trim().equals("0")) {
@@ -789,7 +725,7 @@ public class VideoReplacer {
                         // 文件大小为0，尝试使用dd命令重新复制
                         LogHelper.w(TAG, "文件大小为0，尝试使用dd命令重新复制");
                         String ddRetryCmd = "dd if=\"" + actualSourcePath + "\" of=\"" + targetVideoPath + "\" bs=4096 2>/dev/null";
-                        taskService.executeShellCommand(ddRetryCmd);
+                        AiWallpaperThemeHelper.themeShellCommand(taskService,ddRetryCmd);
                         
                         // 再次验证文件大小
                         try {
@@ -798,7 +734,7 @@ public class VideoReplacer {
                             Thread.currentThread().interrupt();
                             return false;
                         }
-                        String retrySizeResult = taskService.executeShellCommandWithResult(sizeCmd);
+                        String retrySizeResult = AiWallpaperThemeHelper.themeShellResult(taskService,sizeCmd);
                         if (retrySizeResult != null && !retrySizeResult.trim().isEmpty() && !retrySizeResult.trim().equals("0")) {
                             long retryFileSize = Long.parseLong(retrySizeResult.trim());
                             if (retryFileSize == 0) {
@@ -824,7 +760,7 @@ public class VideoReplacer {
                 LogHelper.e(TAG, "视频文件大小为0或无法获取文件大小，复制失败");
                 return false;
             }
-        } catch (RemoteException e) {
+        } catch (Exception e) {
             LogHelper.e(TAG, "替换视频文件失败", e);
             return false;
         }
@@ -874,6 +810,9 @@ public class VideoReplacer {
             
             boolean success = targetFile.exists() && targetFile.length() == sourceFile.length();
             if (success) {
+                if (AiWallpaperThemeHelper.isUnderMiRootThemeWorkDir(targetPath)) {
+                    afterAppWrite(targetPath);
+                }
                 LogHelper.d(TAG, "✅ 文件复制成功: " + sourcePath + " -> " + targetPath + " (大小: " + fileSize + " bytes)");
             } else {
                 LogHelper.e(TAG, "文件复制失败: 大小不匹配 - 源=" + sourceFile.length() + ", 目标=" + targetFile.length());
@@ -908,7 +847,7 @@ public class VideoReplacer {
      */
     private boolean updateManifestLoop(String manifestFile, boolean loopEnabled) {
         try {
-            String manifestContent = taskService.executeShellCommandWithResult("cat \"" + manifestFile + "\" 2>/dev/null");
+            String manifestContent = AiWallpaperThemeHelper.themeShellResult(taskService,"cat \"" + manifestFile + "\" 2>/dev/null");
             if (manifestContent == null || manifestContent.trim().isEmpty()) {
                 LogHelper.e(TAG, "manifest.xml文件为空或不存在");
                 return false;
@@ -1012,12 +951,13 @@ public class VideoReplacer {
                 fos.write(modifiedContent.getBytes("UTF-8"));
                 fos.flush();
                 fos.close();
-                
+                afterAppWrite(tempManifest);
+
                 // 替换原文件
-                boolean cpSuccess = taskService.executeShellCommand("cp \"" + tempManifest + "\" \"" + manifestFile + "\"");
+                boolean cpSuccess = shellCmd("cp \"" + tempManifest + "\" \"" + manifestFile + "\"");
                 if (cpSuccess) {
                     // 删除临时文件
-                    taskService.executeShellCommand("rm -f \"" + tempManifest + "\"");
+                    AiWallpaperThemeHelper.themeShellCommand(taskService,"rm -f \"" + tempManifest + "\"");
                     LogHelper.d(TAG, "manifest.xml修改成功：找到" + alternateCount + "个<Alternate>标签，成功修改" + modifiedCount + "个loop属性为" + loopValue);
                     return true;
                 } else {
@@ -1035,9 +975,6 @@ public class VideoReplacer {
                 return true; // 即使没有修改，也算成功（可能已经是目标值）
             }
             
-        } catch (RemoteException e) {
-            LogHelper.e(TAG, "更新 manifest.xml 失败", e);
-            return false;
         } catch (Exception e) {
             LogHelper.e(TAG, "更新 manifest.xml 失败", e);
             return false;
@@ -1054,7 +991,7 @@ public class VideoReplacer {
      */
     private boolean updateManifestSound(String manifestFile, boolean soundEnabled, int volume) {
         try {
-            String manifestContent = taskService.executeShellCommandWithResult("cat \"" + manifestFile + "\" 2>/dev/null");
+            String manifestContent = AiWallpaperThemeHelper.themeShellResult(taskService,"cat \"" + manifestFile + "\" 2>/dev/null");
             if (manifestContent == null || manifestContent.trim().isEmpty()) {
                 LogHelper.e(TAG, "manifest.xml文件为空或不存在");
                 return false;
@@ -1240,12 +1177,13 @@ public class VideoReplacer {
                 fos.write(modifiedContent.getBytes("UTF-8"));
                 fos.flush();
                 fos.close();
-                
+                afterAppWrite(tempManifest);
+
                 // 替换原文件
-                boolean cpSuccess = taskService.executeShellCommand("cp \"" + tempManifest + "\" \"" + manifestFile + "\"");
+                boolean cpSuccess = shellCmd("cp \"" + tempManifest + "\" \"" + manifestFile + "\"");
                 if (cpSuccess) {
                     // 删除临时文件
-                    taskService.executeShellCommand("rm -f \"" + tempManifest + "\"");
+                    AiWallpaperThemeHelper.themeShellCommand(taskService,"rm -f \"" + tempManifest + "\"");
                     LogHelper.d(TAG, "manifest.xml声音设置修改成功：" + (soundEnabled ? "添加" : "删除") + "了setVolume命令，volume=\"" + volumeValue + "\"");
                     return true;
                 } else {
@@ -1257,9 +1195,6 @@ public class VideoReplacer {
                 return true;
             }
             
-        } catch (RemoteException e) {
-            LogHelper.e(TAG, "更新 manifest.xml 声音设置失败", e);
-            return false;
         } catch (Exception e) {
             LogHelper.e(TAG, "更新 manifest.xml 声音设置失败", e);
             return false;
@@ -1282,12 +1217,9 @@ public class VideoReplacer {
         }
         String previewDir = BASE_DIR + directory + "/preview/";
         LogHelper.d(TAG, "复制绑定/主题预览源图到: " + previewDir + " 源: " + sourcePngPath);
-        try {
-            taskService.executeShellCommand("mkdir -p \"" + previewDir + "\"");
-        } catch (RemoteException e) {
-            LogHelper.e(TAG, "创建预览目录失败", e);
-            return false;
-        }
+        AiWallpaperThemeHelper.prepareThemeShellWorkDirs(taskService);
+        AiWallpaperThemeHelper.ensureShellReadable(taskService, sourcePngPath);
+        shellCmd(taskService, "mkdir -p \"" + previewDir + "\"");
 
         String[] previewFiles = {
             previewDir + "preview_rearscreen_0" + PNG_EXT,
@@ -1297,7 +1229,7 @@ public class VideoReplacer {
         boolean replaced = false;
         for (String previewFile : previewFiles) {
             try {
-                taskService.executeShellCommand("rm -f \"" + previewFile + "\"");
+                AiWallpaperThemeHelper.themeShellCommand(taskService,"rm -f \"" + previewFile + "\"");
                 try {
                     Thread.sleep(PREVIEW_DELETE_WAIT_MS);
                 } catch (InterruptedException e) {
@@ -1306,13 +1238,13 @@ public class VideoReplacer {
                 }
 
                 String cpCmd = "cp -f \"" + sourcePngPath + "\" \"" + previewFile + "\"";
-                boolean pngCpSuccess = taskService.executeShellCommand(cpCmd);
+                boolean pngCpSuccess = AiWallpaperThemeHelper.themeShellCommand(taskService,cpCmd);
                 if (!pngCpSuccess) {
                     String catCmd = "cat \"" + sourcePngPath + "\" > \"" + previewFile + "\"";
-                    pngCpSuccess = taskService.executeShellCommand(catCmd);
+                    pngCpSuccess = AiWallpaperThemeHelper.themeShellCommand(taskService,catCmd);
                     if (!pngCpSuccess) {
                         String ddCmd = "dd if=\"" + sourcePngPath + "\" of=\"" + previewFile + "\" bs=4096 2>/dev/null";
-                        pngCpSuccess = taskService.executeShellCommand(ddCmd);
+                        pngCpSuccess = AiWallpaperThemeHelper.themeShellCommand(taskService,ddCmd);
                     }
                 }
 
@@ -1324,13 +1256,13 @@ public class VideoReplacer {
                         continue;
                     }
                     String pngVerifyCmd = "test -f \"" + previewFile + "\" && echo 'exists' || echo 'not found'";
-                    String pngVerifyResult = taskService.executeShellCommandWithResult(pngVerifyCmd);
+                    String pngVerifyResult = AiWallpaperThemeHelper.themeShellResult(taskService,pngVerifyCmd);
                     if (pngVerifyResult != null && pngVerifyResult.contains("exists")) {
                         LogHelper.d(TAG, "✅ 预览图已写入: " + previewFile);
                         replaced = true;
                     }
                 }
-            } catch (RemoteException e) {
+            } catch (Exception e) {
                 LogHelper.w(TAG, "写入预览失败: " + previewFile, e);
             }
         }
@@ -1338,7 +1270,7 @@ public class VideoReplacer {
         if (!replaced) {
             String defaultPreviewPath = previewDir + "preview_rearscreen_0" + PNG_EXT;
             try {
-                boolean copySuccess = taskService.executeShellCommand(
+                boolean copySuccess = AiWallpaperThemeHelper.themeShellCommand(taskService,
                         "cp -f \"" + sourcePngPath + "\" \"" + defaultPreviewPath + "\"");
                 if (copySuccess) {
                     try {
@@ -1348,12 +1280,12 @@ public class VideoReplacer {
                         return false;
                     }
                     String verifyCmd = "test -f \"" + defaultPreviewPath + "\" && echo 'exists' || echo 'not found'";
-                    String verifyResult = taskService.executeShellCommandWithResult(verifyCmd);
+                    String verifyResult = AiWallpaperThemeHelper.themeShellResult(taskService,verifyCmd);
                     if (verifyResult != null && verifyResult.contains("exists")) {
                         replaced = true;
                     }
                 }
-            } catch (RemoteException e) {
+            } catch (Exception e) {
                 LogHelper.w(TAG, "写入默认预览失败", e);
             }
         }
@@ -1476,9 +1408,9 @@ public class VideoReplacer {
             // 清理临时预览图文件 preview_frame.png
             try {
                 String previewPng = getWorkDir() + "preview_frame" + PNG_EXT;
-                taskService.executeShellCommand("rm -f \"" + previewPng + "\"");
+                AiWallpaperThemeHelper.themeShellCommand(taskService,"rm -f \"" + previewPng + "\"");
                 LogHelper.d(TAG, "已清理临时预览图文件: " + previewPng);
-            } catch (RemoteException e) {
+            } catch (Exception e) {
                 LogHelper.w(TAG, "清理临时预览图文件失败", e);
             }
         }
@@ -1594,7 +1526,7 @@ public class VideoReplacer {
             
             // 验证源目录是否存在
             String checkDirCmd = "test -d \"" + sourceDir + "\" && echo 'exists' || echo 'not found'";
-            String checkDirResult = taskService.executeShellCommandWithResult(checkDirCmd);
+            String checkDirResult = AiWallpaperThemeHelper.themeShellResult(taskService,checkDirCmd);
             LogHelper.d(TAG, "源目录验证结果: " + checkDirResult);
             
             if (checkDirResult == null || !checkDirResult.contains("exists")) {
@@ -1604,7 +1536,7 @@ public class VideoReplacer {
             
             // 验证源目录中是否有文件
             String checkFilesCmd = "ls -A \"" + sourceDir + "\" 2>/dev/null | head -1";
-            String checkFilesResult = taskService.executeShellCommandWithResult(checkFilesCmd);
+            String checkFilesResult = AiWallpaperThemeHelper.themeShellResult(taskService,checkFilesCmd);
             LogHelper.d(TAG, "源目录文件检查结果: " + checkFilesResult);
             
             if (checkFilesResult == null || checkFilesResult.trim().isEmpty()) {
@@ -1613,8 +1545,8 @@ public class VideoReplacer {
             }
             
             // 先删除可能存在的旧压缩文件
-            taskService.executeShellCommand("rm -f \"" + targetFile + ZIP_EXT + "\"");
-            taskService.executeShellCommand("rm -f \"" + targetFile + "\"");
+            AiWallpaperThemeHelper.themeShellCommand(taskService,"rm -f \"" + targetFile + ZIP_EXT + "\"");
+            AiWallpaperThemeHelper.themeShellCommand(taskService,"rm -f \"" + targetFile + "\"");
             
             // 直接使用 Java 原生 API 压缩（不依赖系统 zip 命令，更可靠）
             String zipFilePath = targetFile + ZIP_EXT;
@@ -1625,7 +1557,7 @@ public class VideoReplacer {
                 
                 // 验证压缩文件是否存在
                 String verifyZipCmd = "test -f \"" + zipFilePath + "\" && stat -c%s \"" + zipFilePath + "\" || echo '0'";
-                String verifyZipResult = taskService.executeShellCommandWithResult(verifyZipCmd);
+                String verifyZipResult = AiWallpaperThemeHelper.themeShellResult(taskService,verifyZipCmd);
                 LogHelper.d(TAG, "压缩文件验证结果: " + verifyZipResult);
                 
                 if (verifyZipResult == null || verifyZipResult.trim().equals("0")) {
@@ -1640,13 +1572,14 @@ public class VideoReplacer {
                     return false;
                 }
                 LogHelper.d(TAG, "✅ 压缩文件验证通过: " + zipFilePath + " (大小: " + zipFile.length() + " bytes)");
+                afterAppWrite(zipFilePath);
             } catch (IOException e) {
                 LogHelper.e(TAG, "Java原生压缩失败", e);
                 return false;
             }
             
             // 移除 .zip 扩展名
-            boolean mvSuccess = taskService.executeShellCommand("mv \"" + zipFilePath + "\" \"" + targetFile + "\"");
+            boolean mvSuccess = AiWallpaperThemeHelper.themeShellCommand(taskService,"mv \"" + zipFilePath + "\" \"" + targetFile + "\"");
             LogHelper.d(TAG, "重命名命令执行结果: " + mvSuccess);
             
             if (!mvSuccess) {
@@ -1656,7 +1589,7 @@ public class VideoReplacer {
             
             // 验证最终文件
             String verifyFinalCmd = "test -f \"" + targetFile + "\" && stat -c%s \"" + targetFile + "\" || echo '0'";
-            String verifyFinalResult = taskService.executeShellCommandWithResult(verifyFinalCmd);
+            String verifyFinalResult = AiWallpaperThemeHelper.themeShellResult(taskService,verifyFinalCmd);
             LogHelper.d(TAG, "最终文件验证结果: " + verifyFinalResult);
             
             if (verifyFinalResult == null || verifyFinalResult.trim().equals("0")) {
@@ -1667,11 +1600,8 @@ public class VideoReplacer {
             long fileSize = Long.parseLong(verifyFinalResult.trim());
             LogHelper.d(TAG, "✅ 目录压缩成功: " + targetFile + " (大小: " + fileSize + " bytes)");
             return true;
-        } catch (RemoteException e) {
+        } catch (Exception e) {
             LogHelper.e(TAG, "压缩目录失败", e);
-            return false;
-        } catch (NumberFormatException e) {
-            LogHelper.e(TAG, "解析文件大小失败", e);
             return false;
         }
     }
@@ -1680,110 +1610,8 @@ public class VideoReplacer {
      * 替换原文件（带备份和详细验证）
      */
     private boolean replaceOriginalFile(String originalFile, String newFile) {
-        try {
-            LogHelper.d(TAG, "开始替换原文件: " + originalFile);
-            LogHelper.d(TAG, "新文件: " + newFile);
-            
-            // 验证新文件是否存在
-            String checkNewFileCmd = "test -f \"" + newFile + "\" && stat -c%s \"" + newFile + "\" || echo '0'";
-            String checkNewFileResult = taskService.executeShellCommandWithResult(checkNewFileCmd);
-            LogHelper.d(TAG, "新文件验证结果: " + checkNewFileResult);
-            
-            if (checkNewFileResult == null || checkNewFileResult.trim().equals("0")) {
-                LogHelper.e(TAG, "新文件不存在或为空: " + newFile);
-                return false;
-            }
-            
-            // 备份原文件（检查是否已有备份）
-            String backupFile = originalFile + BACKUP_EXT;
-            String checkBackupCmd = "test -f \"" + backupFile + "\" && echo 'exists' || echo 'not found'";
-            String checkBackupResult = taskService.executeShellCommandWithResult(checkBackupCmd);
-            
-            if (checkBackupResult != null && checkBackupResult.contains("exists")) {
-                LogHelper.d(TAG, "备份文件已存在，跳过备份: " + backupFile);
-            } else {
-                // 没有备份文件，执行备份
-                if (!taskService.executeShellCommand("cp \"" + originalFile + "\" \"" + backupFile + "\"")) {
-                    LogHelper.w(TAG, "备份原文件失败，继续执行");
-                } else {
-                    LogHelper.d(TAG, "✅ 原文件已备份: " + backupFile);
-                }
-            }
-            
-            // 替换文件
-            boolean success = taskService.executeShellCommand("cp \"" + newFile + "\" \"" + originalFile + "\"");
-            LogHelper.d(TAG, "替换文件命令执行结果: " + success);
-            
-            // 验证替换成功
-            if (success) {
-                // 等待文件写入完成
-                try {
-                    Thread.sleep(FILE_VERIFY_WAIT_MS);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return false;
-                }
-                
-                String verifyCmd = "test -f \"" + originalFile + "\" && stat -c%s \"" + originalFile + "\" || echo '0'";
-                String verifyResult = taskService.executeShellCommandWithResult(verifyCmd);
-                LogHelper.d(TAG, "替换后文件验证结果: " + verifyResult);
-                
-                if (verifyResult == null || verifyResult.trim().equals("0")) {
-                    LogHelper.e(TAG, "替换后文件不存在或为空，尝试恢复备份");
-                    // 恢复备份
-                    if (new File(backupFile).exists()) {
-                        taskService.executeShellCommand("cp \"" + backupFile + "\" \"" + originalFile + "\"");
-                        LogHelper.d(TAG, "已恢复备份文件");
-                    }
-                    return false;
-                }
-                
-                // 验证文件大小是否匹配
-                long newFileSize = Long.parseLong(checkNewFileResult.trim());
-                long replacedFileSize = Long.parseLong(verifyResult.trim());
-                
-                if (replacedFileSize != newFileSize) {
-                    LogHelper.w(TAG, "文件大小不匹配: 新文件=" + newFileSize + ", 替换后=" + replacedFileSize);
-                    // 尝试再次替换
-                    taskService.executeShellCommand("cp \"" + newFile + "\" \"" + originalFile + "\"");
-                    try {
-                        Thread.sleep(FILE_VERIFY_WAIT_MS);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        return false;
-                    }
-                    verifyResult = taskService.executeShellCommandWithResult(verifyCmd);
-                    if (verifyResult != null && !verifyResult.trim().equals("0")) {
-                        replacedFileSize = Long.parseLong(verifyResult.trim());
-                        if (replacedFileSize == newFileSize) {
-                            LogHelper.d(TAG, "✅ 重试后文件替换成功");
-                        } else {
-                            LogHelper.e(TAG, "重试后文件大小仍不匹配");
-                            return false;
-                        }
-                    } else {
-                        LogHelper.e(TAG, "重试后文件不存在");
-                        return false;
-                    }
-                } else {
-                    LogHelper.d(TAG, "✅ 文件替换成功，大小匹配: " + replacedFileSize + " bytes");
-                }
-            } else {
-                LogHelper.e(TAG, "替换文件命令失败");
-                return false;
-            }
-            
-            // 删除备份
-            taskService.executeShellCommand("rm -f \"" + backupFile + "\"");
-            
-            return true;
-        } catch (RemoteException e) {
-            LogHelper.e(TAG, "替换原文件失败", e);
-            return false;
-        } catch (NumberFormatException e) {
-            LogHelper.e(TAG, "解析文件大小失败", e);
-            return false;
-        }
+        afterAppWrite(newFile);
+        return AiWallpaperThemeHelper.replaceRootOwnedFile(taskService, originalFile, newFile, true);
     }
     
     /**
@@ -1791,8 +1619,8 @@ public class VideoReplacer {
      */
     private void cleanup() {
         try {
-            taskService.executeShellCommand("rm -rf \"" + getWorkDir() + "\"");
-        } catch (RemoteException e) {
+            AiWallpaperThemeHelper.themeShellCommand(taskService,"rm -rf \"" + getWorkDir() + "\"");
+        } catch (Exception e) {
             LogHelper.w(TAG, "清理临时文件失败", e);
         }
     }

@@ -1,0 +1,64 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/9.1.0/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:syncCarControlAssets UP-TO-DATE
+> Task :app:syncShellAssets UP-TO-DATE
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:compileDebugAidl UP-TO-DATE
+> Task :app:dataBindingMergeDependencyArtifactsDebug UP-TO-DATE
+> Task :app:generateDebugResources UP-TO-DATE
+> Task :app:mergeDebugResources UP-TO-DATE
+> Task :app:packageDebugResources UP-TO-DATE
+> Task :app:processDebugNavigationResources UP-TO-DATE
+> Task :app:parseDebugLocalResources UP-TO-DATE
+> Task :app:dataBindingGenBaseClassesDebug UP-TO-DATE
+> Task :app:generateDebugBuildConfig UP-TO-DATE
+> Task :app:generateDebugRFile UP-TO-DATE
+> Task :app:compileDebugKotlin
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/capability/RuntimePermissionGate.kt:264:20 'fun unsafeCheckOpNoThrow(p0: String, p1: Int, p2: String): Int' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/car/CarAmapEmbeddedMap.kt:66:38 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/car/CarModelImageLoader.kt:178:13 'field inDither: Boolean' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/car/CarModelImageLoader.kt:180:17 'field inPreferQualityOverSpeed: Boolean' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/car/VehicleDataHistoryUi.kt:265:5 'fun ScrollableTabRow(selectedTabIndex: Int, modifier: Modifier = ..., containerColor: Color = ..., contentColor: Color = ..., edgePadding: Dp = ..., indicator: ComposableFunction1<List<TabPosition>, Unit> = ..., divider: ComposableFunction0<Unit> = ..., tabs: ComposableFunction0<Unit>): Unit' is deprecated. Replaced with PrimaryScrollableTabRow and SecondaryScrollableTabRow tab variants.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/charging/ChargingPlaceholderActivity.kt:29:17 'fun overridePendingTransition(p0: Int, p1: Int): Unit' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/charging/ChargingPlaceholderActivity.kt:40:21 'fun overridePendingTransition(p0: Int, p1: Int): Unit' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/charging/ChargingPlaceholderActivity.kt:49:9 'fun overridePendingTransition(p0: Int, p1: Int): Unit' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/charging/ChargingPlaceholderActivity.kt:86:9 'fun overridePendingTransition(p0: Int, p1: Int): Unit' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/AppProjectionService.kt:3:8 'class IntentService : Service' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/RearAppLaunchService.kt:4:8 'class IntentService : Service' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/RearAppLaunchService.kt:165:35 Condition is always 'true'.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/RearAppLaunchService.kt:192:32 Condition is always 'true'.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/RearBottomGestureBroadcastReceiver.kt:185:40 'fun get(p0: String!): Any?' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/RearMirootProjectionLifecycle.kt:123:5 '@JvmOverloads' annotation has no effect for methods without default arguments.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/RearMirootProjectionLifecycle.kt:130:48 'static field FLAG_SHOW_WHEN_LOCKED: Int' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/RearMirootProjectionLifecycle.kt:131:48 'static field FLAG_TURN_SCREEN_ON: Int' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/RearMirootProjectionLifecycle.kt:298:5 '@JvmOverloads' annotation has no effect for methods without default arguments.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/RearProjectionLaunchWake.kt:54:5 '@JvmOverloads' annotation has no effect for methods without default arguments.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/balance/RearBalanceGameActivity.kt:245:20 'fun setDecorFitsSystemWindows(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/balance/RearBalanceGameLaunchService.kt:3:8 'class IntentService : Service' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/desktop/RearDesktopHoneycombTestActivity.kt:193:20 'fun setDecorFitsSystemWindows(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/desktop/RearDesktopLaunchService.kt:3:8 'class IntentService : Service' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/desktop/RearScreenDesktopActivity.kt:523:20 'fun setDecorFitsSystemWindows(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/heartrate/BleHeartRateMonitor.kt:135:26 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/heartrate/BleHeartRateMonitor.kt:139:61 'var value: ByteArray!' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/heartrate/RearHeartRateActivity.kt:295:20 'fun setDecorFitsSystemWindows(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/heartrate/RearHeartRateLaunchService.kt:3:8 'class IntentService : Service' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/truthdare/RearTruthDareWheelActivity.kt:238:20 'fun setDecorFitsSystemWindows(p0: Boolean): Unit' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/truthdare/RearTruthDareWheelLaunchService.kt:3:8 'class IntentService : Service' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/rear/truthdare/TruthDareQuestionSpeaker.kt:41:38 This declaration overrides a deprecated member but is not marked as deprecated itself. Add the '@Deprecated' annotation or suppress the diagnostic.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/ui/MiRootPageStyle.kt:37:12 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/ui/MiRootPageStyle.kt:38:12 'var navigationBarColor: Int' is deprecated. Deprecated in Java.
+w: file:///F:/Android/App/MiRoot2.1/app/src/main/java/com/wmqc/miroot/ui/music/MusicScreen.kt:481:21 'val LocalClipboardManager: ProvidableCompositionLocal<ClipboardManager>' is deprecated. Use LocalClipboard instead which supports suspend functions.
+
+> Task :app:javaPreCompileDebug UP-TO-DATE
+
+> Task :app:compileDebugJavaWithJavac
+注: F:\Android\App\MiRoot2.1\app\src\main\java\com\wmqc\miroot\theme\ThemeMetadataInjector.java使用或覆盖了已过时的 API。
+注: 有关详细信息, 请使用 -Xlint:deprecation 重新编译。
+
+[Incubating] Problems report is available at: file:///F:/Android/App/MiRoot2.1/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 51s
+15 actionable tasks: 2 executed, 13 up-to-date
+Consider enabling configuration cache to speed up this build: https://docs.gradle.org/9.1.0/userguide/configuration_cache_enabling.html
+EXIT_OK  

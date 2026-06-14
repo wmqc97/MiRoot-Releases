@@ -1,4 +1,4 @@
-<resources>
+﻿<resources>
     <string name="app_name">MiRoot</string>
 
     <string name="welcome_dialog_confirm">知道了</string>
@@ -178,8 +178,6 @@
     <string name="theme_applied_menu_edit_config">编辑主题配置</string>
     <string name="theme_applied_gesture_ok">手势已写入该主题</string>
     <string name="theme_applied_gesture_fail">手势写入失败</string>
-    <string name="theme_applied_gesture_removed_ok">已删除该主题内的手势注入</string>
-    <string name="theme_applied_gesture_removed_fail">删除手势失败</string>
     <string name="theme_applied_config_title">编辑主题配置（one_config）</string>
     <string name="theme_applied_config_json_hint">one_config.json 内容</string>
     <string name="theme_applied_config_json_tip">注意：该配置存放于系统 theme_magic 目录。写入失败通常是权限不足或路径不可写。</string>
@@ -189,7 +187,7 @@
     <string name="theme_section_directories">AI 目录</string>
     <string name="theme_refresh">刷新</string>
     <string name="theme_no_dir_selected">未选择目录：点选下方卡片开始替换视频</string>
-    <string name="theme_long_press_hint">点选目录：替换视频。长按目录：删除目录或替换主题包。</string>
+    <string name="theme_long_press_hint">点选目录：替换视频。长按目录：删除、替换主题包或注入手势。</string>
     <string name="theme_selected_dir_fmt">已选目录：%1$s</string>
     <string name="theme_current_applied_fmt">当前应用主题：%1$s</string>
     <string name="theme_current_applied_unknown">当前应用主题：未读取到</string>
@@ -208,10 +206,10 @@
     <string name="theme_menu_delete">删除目录</string>
     <string name="theme_menu_replace_theme">替换主题</string>
     <string name="theme_menu_bind_cover">绑定封面</string>
-    <string name="theme_menu_inject_lyrics_gesture">手势启动（注入手势）</string>
-    <string name="theme_menu_remove_lyrics_gesture">删除已注入手势</string>
+    <string name="theme_menu_inject_lyrics_gesture">注入手势</string>
     <string name="theme_menu_cover_unbind">已绑定封面（点击解除）</string>
     <string name="theme_menu_clear_cover">清除封面绑定</string>
+    <string name="theme_no_backup">无可用备份，无法恢复</string>
     <string name="theme_delete_confirm">确定删除目录「%1$s」？不可恢复。</string>
     <string name="theme_bind_pick_title">绑定封面</string>
     <string name="theme_bind_pick_message">点选Ai生成的图片作为绑定封面。</string>
@@ -225,8 +223,11 @@
     <string name="theme_apply_confirm">将主题包写入该目录的 rearscreen 文件（保留 .backup 供视频替换）。确定？</string>
     <string name="theme_apply">应用</string>
     <string name="theme_preparing">正在准备临时文件…</string>
-    <string name="theme_preparing_gesture_incremental">正在注入 rearscreen 手势…</string>
+    <string name="theme_preparing_gesture_incremental">处理中…</string>
     <string name="theme_inject_gesture_ok">手势注入成功</string>
+    <string name="theme_gesture_inject_applied_title">手势注入成功</string>
+    <string name="theme_gesture_inject_applied_message">已注入，需应用视频主题使其生效。可跳转主题壁纸，或直接替换已应用的背屏主题。</string>
+    <string name="theme_gesture_inject_apply_theme">应用视频主题</string>
     <string name="theme_author_fmt">作者：%1$s</string>
     <string name="theme_desc_fmt">描述：%1$s</string>
 
@@ -251,7 +252,7 @@
     <string name="theme_meta_ok_new_fmt">已另存为：%1$s</string>
     <string name="theme_meta_ok_uri_copy_fmt">无法写回原文件，已另存为：%1$s</string>
     <string name="theme_meta_fail">保存失败</string>
-    <string name="theme_gesture_inject_one_tap">一键注入手势</string>
+    <string name="theme_gesture_inject_one_tap">注入手势</string>
     <string name="theme_gesture_inject_working">处理中…</string>
     <string name="theme_gesture_inject_ok_fmt">已保存：%1$s</string>
     <string name="theme_gesture_inject_fail">注入失败（需为主题 zip 且含 manifest.xml）</string>

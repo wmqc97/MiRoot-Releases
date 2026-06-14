@@ -408,21 +408,24 @@ object AppliedRearThemeHelper {
         val tmpIn = "${workDir}applied_mrc_in_$now.zip"
         val tmpOut = "${workDir}applied_mrc_out_$now.zip"
         return try {
-            ts.executeShellCommand("mkdir -p \"$workDir\"")
+            AiWallpaperThemeHelper.prepareThemeShellWorkDirs(ts)
             val ok =
-                ts.executeShellCommandWithResult(
+                AiWallpaperThemeHelper.themeShellResultOk(
+                    ts,
                     "test -f \"$mrc\" && cp \"$mrc\" \"$tmpIn\" && echo ok || echo no",
-                )?.trim() == "ok"
+                )
             if (!ok) return false
+            AiWallpaperThemeHelper.ensureAppReadable(tmpIn)
             val inputZip = File(tmpIn)
             val outputZip = File(tmpOut)
             if (!AiRearscreenLyricsGestureInjector.injectGestureIntoLocalZipFile(context, inputZip, outputZip)) return false
             if (!outputZip.isFile || outputZip.length() == 0L) return false
+            AiWallpaperThemeHelper.ensureShellReadable(ts, outputZip)
             AiWallpaperThemeHelper.replaceRootOwnedFile(ts, mrc, outputZip.absolutePath, true)
         } catch (_: Exception) {
             false
         } finally {
-            runCatching { ts.executeShellCommand("rm -f \"$tmpIn\" \"$tmpOut\"") }
+            runCatching { AiWallpaperThemeHelper.themeShellCommand(ts, "rm -f \"$tmpIn\" \"$tmpOut\"") }
         }
     }
 
@@ -435,21 +438,24 @@ object AppliedRearThemeHelper {
         val tmpIn = "${workDir}applied_mrc_in_$now.zip"
         val tmpOut = "${workDir}applied_mrc_out_$now.zip"
         return try {
-            ts.executeShellCommand("mkdir -p \"$workDir\"")
+            AiWallpaperThemeHelper.prepareThemeShellWorkDirs(ts)
             val ok =
-                ts.executeShellCommandWithResult(
+                AiWallpaperThemeHelper.themeShellResultOk(
+                    ts,
                     "test -f \"$mrc\" && cp \"$mrc\" \"$tmpIn\" && echo ok || echo no",
-                )?.trim() == "ok"
+                )
             if (!ok) return false
+            AiWallpaperThemeHelper.ensureAppReadable(tmpIn)
             val inputZip = File(tmpIn)
             val outputZip = File(tmpOut)
             if (!AiRearscreenLyricsGestureInjector.removeGestureFromLocalZipFile(context, inputZip, outputZip)) return false
             if (!outputZip.isFile || outputZip.length() == 0L) return false
+            AiWallpaperThemeHelper.ensureShellReadable(ts, outputZip)
             AiWallpaperThemeHelper.replaceRootOwnedFile(ts, mrc, outputZip.absolutePath, true)
         } catch (_: Exception) {
             false
         } finally {
-            runCatching { ts.executeShellCommand("rm -f \"$tmpIn\" \"$tmpOut\"") }
+            runCatching { AiWallpaperThemeHelper.themeShellCommand(ts, "rm -f \"$tmpIn\" \"$tmpOut\"") }
         }
     }
 
@@ -477,21 +483,22 @@ object AppliedRearThemeHelper {
         val p = resolveOneConfigPath(ts, theme) ?: "$dirBase/one_config.json"
         val dir = File(p).parent ?: return false
         val tmpDir = AiWallpaperThemeHelper.THEME_TEMP_DIR
-        File(tmpDir).mkdirs()
+        AiWallpaperThemeHelper.prepareThemeShellWorkDirs(ts)
         val tmpFile = File(tmpDir, "one_config_${System.currentTimeMillis()}.json")
         return try {
             tmpFile.writeText(json, Charsets.UTF_8)
             if (!tmpFile.isFile || tmpFile.length() == 0L) return false
-            ts.executeShellCommand("mkdir -p \"$dir\"")
+            AiWallpaperThemeHelper.ensureShellReadable(ts, tmpFile)
+            AiWallpaperThemeHelper.themeShellCommand(ts, "mkdir -p \"$dir\"")
             // Copy then restore owner/mode if possible.
             val stat =
-                ts.executeShellCommandWithResult("stat -c '%u:%g %a' \"$p\" 2>/dev/null")?.trim().orEmpty()
-            val ok = ts.executeShellCommand("cp \"${tmpFile.absolutePath}\" \"$p\"")
+                AiWallpaperThemeHelper.themeShellResult(ts, "stat -c '%u:%g %a' \"$p\" 2>/dev/null")?.trim().orEmpty()
+            val ok = AiWallpaperThemeHelper.themeShellCommand(ts, "cp \"${tmpFile.absolutePath}\" \"$p\"")
             if (!ok) return false
             val parts = stat.split(Regex("\\s+")).filter { it.isNotEmpty() }
             if (parts.size >= 2) {
-                ts.executeShellCommand("chown ${parts[0]} \"$p\"")
-                ts.executeShellCommand("chmod ${parts[1]} \"$p\"")
+                AiWallpaperThemeHelper.themeShellCommand(ts, "chown ${parts[0]} \"$p\"")
+                AiWallpaperThemeHelper.themeShellCommand(ts, "chmod ${parts[1]} \"$p\"")
             }
             restartOfficialSubscreenCenter(ts)
             true

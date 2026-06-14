@@ -32,6 +32,7 @@ import com.wmqc.miroot.R
 import com.wmqc.miroot.ui.common.showSectionHelp
 import com.wmqc.miroot.capability.PermissionSnapshot
 import com.wmqc.miroot.databinding.FragmentThemeBinding
+import com.wmqc.miroot.lyrics.LogHelper
 import com.wmqc.miroot.lyrics.ITaskService
 import com.wmqc.miroot.lyrics.RootTaskService
 import com.wmqc.miroot.theme.AiWallpaperThemeHelper
@@ -216,7 +217,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
         }
 
     private val pickThemeForMetaLauncher =
-        registerForActivityResult(OpenPersistableDocumentContract(writable = true)) { result ->
+        registerForActivityResult(OpenPersistableDocumentContract(writable = false)) { result ->
             if (result == null) return@registerForActivityResult
             val ctx = requireContext()
             runCatching {
@@ -496,7 +497,6 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                 getString(R.string.theme_menu_replace_theme),
                 coverAction,
                 getString(R.string.theme_menu_inject_lyrics_gesture),
-                getString(R.string.theme_menu_remove_lyrics_gesture),
             )
         MaterialAlertDialogBuilder(ctx)
             .setTitle(item.name)
@@ -526,7 +526,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                             return@setItems
                         }
                         viewLifecycleOwner.lifecycleScope.launch {
-                            snack(R.string.theme_preparing_gesture_incremental)
+                            snack(R.string.theme_gesture_inject_working)
                             val workDir =
                                 withContext(Dispatchers.IO) {
                                     AiWallpaperThemeHelper.gestureInjectWorkDir(requireContext().applicationContext)
@@ -541,53 +541,17 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                                     )
                                 }
                             if (outcome == GestureInjectOutcome.OK) {
-                                snack(R.string.theme_inject_gesture_ok, longDuration = true)
                                 selectedDirName = item.name
                                 binding.textSelectedDir.text = getString(R.string.theme_selected_dir_fmt, item.name)
                                 refreshDirectoryList()
                                 binding.recyclerDirectories.post {
                                     directoryAdapter.syncVisibleSelectionOverlay(binding.recyclerDirectories)
                                 }
-                                showAfterVideoReplaceDialog(
+                                showGestureInjectSuccessDialog(
                                     aiDirectoryName = item.name,
-                                    sourceVideoPath = null,
                                 )
                             } else {
                                 snack(gestureInjectFailureMessage(outcome), longDuration = true)
-                            }
-                        }
-                    }
-                    4 -> {
-                        val snap = permissionViewModel.snapshot.value
-                        if (snap?.privileged != true) {
-                            snack(R.string.theme_need_privilege)
-                            return@setItems
-                        }
-                        val ts = taskService
-                        if (ts == null) {
-                            snack(R.string.theme_replace_fail)
-                            return@setItems
-                        }
-                        viewLifecycleOwner.lifecycleScope.launch {
-                            snack(R.string.theme_gesture_inject_working)
-                            val workDir =
-                                withContext(Dispatchers.IO) {
-                                    AiWallpaperThemeHelper.gestureInjectWorkDir(requireContext().applicationContext)
-                                }
-                            val ok =
-                                withContext(Dispatchers.IO) {
-                                    AiRearscreenLyricsGestureInjector.remove(
-                                        requireContext().applicationContext,
-                                        ts,
-                                        item.name,
-                                        workDir,
-                                    )
-                                }
-                            if (ok) {
-                                snack(R.string.theme_applied_gesture_removed_ok, longDuration = true)
-                                refreshDirectoryList()
-                            } else {
-                                snack(R.string.theme_applied_gesture_removed_fail, longDuration = true)
                             }
                         }
                     }
@@ -701,6 +665,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             withContext(Dispatchers.IO) {
                 AiWallpaperThemeHelper.resolvePickedFilePath(ctx, pickedUriString) ?: pickedUriString
             }
+        android.util.Log.e("GestureSave", "resolved=" + resolved)
         val writeRef = themeMetadataWriteRef(pickedUriString, resolved, ctx)
         val themeFile = File(resolved)
         if (!themeFile.isFile || themeFile.length() == 0L) {
@@ -769,10 +734,14 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
     private suspend fun runInjectGestureOnPickedThemeZip(pickedUriString: String) {
         val ctx = requireContext().applicationContext
         snack(R.string.theme_gesture_inject_working)
+        withContext(Dispatchers.IO) {
+            AiWallpaperThemeHelper.prepareThemeShellWorkDirs(taskService)
+        }
         val resolved =
             withContext(Dispatchers.IO) {
                 AiWallpaperThemeHelper.resolvePickedFilePath(ctx, pickedUriString) ?: pickedUriString
             }
+        android.util.Log.e("GestureSave", "resolved=" + resolved)
         var tempIn: File? = null
         val outTemp =
             File(
@@ -806,6 +775,9 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                 snack(R.string.theme_gesture_inject_fail)
                 return
             }
+            withContext(Dispatchers.IO) {
+                AiWallpaperThemeHelper.ensureShellReadable(taskService, outTemp)
+            }
             val savedPath =
                 withContext(Dispatchers.IO) {
                     saveGestureInjectedZipToDisk(ctx, pickedUriString, resolved, outTemp)
@@ -813,7 +785,7 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
             if (savedPath == null) {
                 snack(R.string.theme_replace_fail)
             } else {
-                snack(getString(R.string.theme_gesture_inject_ok_fmt, savedPath))
+                snack(R.string.theme_inject_gesture_ok)
             }
         } finally {
             withContext(Dispatchers.IO) {
@@ -903,18 +875,41 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
     ): String? {
         val injectedName =
             buildInjectedZipFileName(displayNameForThemeZip(ctx, pickedUriString))
+        // 1) 稳定存储路径：在原目录保存带已注入标识的文件，原文件不动
+        android.util.Log.e("GestureSave", "save: stable path=" + resolvedPath + " injectedName=" + injectedName)
         if (isStableStorageThemeZipPath(resolvedPath, ctx)) {
-            val src = File(resolvedPath)
-            val parent = src.parentFile ?: return null
-            val dest = uniquifyZipInDirectory(parent, injectedName)
+            val parent = File(resolvedPath).parentFile ?: return null
+            val dest = File(parent, injectedName)
             return if (copyZipFileOrNull(patchedTemp, dest)) dest.absolutePath else null
         }
+        // 2) content:// URI：手动解析真实路径（兼容 externalstorage / fileexplorer 文档选择器）
+        android.util.Log.e("GestureSave", "save: content:// URI parsing, pickedUriString=" + pickedUriString)
+        if (pickedUriString.startsWith("content://")) {
+            val realPath = try {
+                val uri = Uri.parse(pickedUriString)
+                val docId = android.provider.DocumentsContract.getDocumentId(uri)
+                val parts = docId.split(":")
+                if (parts.size >= 2 && "primary".equals(parts[0], ignoreCase = true)) {
+                    val subPath = parts.subList(1, parts.size).joinToString(":")
+                    val fullPath = if (subPath.startsWith("/")) subPath
+                        else android.os.Environment.getExternalStorageDirectory().toString() + "/" + subPath
+                    if (File(fullPath).isFile) fullPath else null
+                } else null
+            } catch (_: Exception) { null }
+            android.util.Log.e("GestureSave", "save: content:// parsing failed")
+            if (realPath != null) {
+                val parent = File(realPath).parentFile ?: return null
+                val dest = uniquifyZipInDirectory(parent, injectedName)
+                return if (copyZipFileOrNull(patchedTemp, dest)) dest.absolutePath else null
+            }
+        }
+        // 3) 兜底：保存到 MiRoot 临时目录
+        android.util.Log.e("GestureSave", "save: falling back to theme_temp")
         val dir = File(AiWallpaperThemeHelper.THEME_TEMP_DIR)
         dir.mkdirs()
         val dest = uniquifyZipInDirectory(dir, sanitizeZipDisplayName(injectedName))
         return if (copyZipFileOrNull(patchedTemp, dest)) dest.absolutePath else null
     }
-
     private suspend fun runThemeMetadataInject(
         themeRef: String,
         author: String,
@@ -1008,11 +1003,11 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
                 AiWallpaperThemeHelper.invalidateAiDirectoryRearscreenPreviewCaches(appCtx, dir)
                 directoryAdapter.evictThumbnailMemoryCache()
                 refreshDirectoryList()
-            }
             showAfterVideoReplaceDialog(
                 aiDirectoryName = dir,
                 sourceVideoPath = video,
             )
+            }
         } else {
             snack(R.string.theme_replace_fail)
         }
@@ -1048,6 +1043,36 @@ class ThemeFragment : Fragment(R.layout.fragment_theme) {
         actions.findViewById<MaterialButton>(R.id.btn_after_video_jump).setOnClickListener {
             dialog.dismiss()
             AiWallpaperThemeHelper.openThemeManager(ctx)
+        }
+        dialog.show()
+    }
+
+    /** 手势注入成功后弹窗：跳转主题壁纸 / 替换已应用背屏主题。 */
+    private fun showGestureInjectSuccessDialog(
+        aiDirectoryName: String,
+    ) {
+        if (!isAdded) return
+        val ctx = requireContext()
+        val actions = LayoutInflater.from(ctx).inflate(R.layout.dialog_after_video_replace_actions, null, false)
+        val dialog =
+            MaterialAlertDialogBuilder(ctx)
+                .setTitle(R.string.theme_gesture_inject_applied_title)
+                .setMessage(R.string.theme_gesture_inject_applied_message)
+                .setView(actions)
+                .create()
+        actions.findViewById<MaterialButton>(R.id.btn_after_video_cancel).setOnClickListener {
+            dialog.dismiss()
+        }
+        actions.findViewById<MaterialButton>(R.id.btn_after_video_jump).setOnClickListener {
+            dialog.dismiss()
+            AiWallpaperThemeHelper.openThemeManager(ctx)
+        }
+        actions.findViewById<MaterialButton>(R.id.btn_after_video_replace).setOnClickListener {
+            dialog.dismiss()
+            showSignatureAppliedReplacePicker(
+                aiDirectoryName = aiDirectoryName,
+                sourceVideoPath = null,
+            )
         }
         dialog.show()
     }

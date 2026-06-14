@@ -30,6 +30,7 @@ object PublicMediaExport {
     /**
      * 特权 shell 写入后修正属主/权限，使应用进程可读（screenrecord / screencap 中间文件）。
      */
+    @JvmStatic
     fun ensureAppReadable(path: String): Boolean {
         if (path.isBlank()) return false
         val uid = android.os.Process.myUid()

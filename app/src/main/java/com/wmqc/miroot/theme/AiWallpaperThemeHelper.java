@@ -1,4 +1,4 @@
-package com.wmqc.miroot.theme;
+﻿package com.wmqc.miroot.theme;
 
 import android.content.ComponentName;
 import android.content.Context;
@@ -14,8 +14,10 @@ import android.provider.OpenableColumns;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.wmqc.miroot.capability.PrivilegedShell;
 import com.wmqc.miroot.lyrics.ITaskService;
 import com.wmqc.miroot.lyrics.LogHelper;
+import com.wmqc.miroot.shell.PublicMediaExport;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -197,10 +199,18 @@ public final class AiWallpaperThemeHelper {
 
     /** 主题 zip 根目录效果图文件名（与主题商店约定一致） */
     public static final String THEME_EFFECT_PNG_ENTRY = "effect.png";
-    /** 主题注入、SAF 解压等临时 zip 目录（可安全整体按策略清理） */
+    /**
+     * 主题注入、SAF 解压等临时 zip 目录（shell 与 App 交换文件，见 docs/Shizuku权限注意事项.md）。
+     */
     public static final String THEME_TEMP_DIR = "/sdcard/MiRoot/theme_temp/";
     /** 视频替换解压与中间文件目录 */
     public static final String VIDEO_REPLACE_DIR = "/sdcard/MiRoot/video_replace/";
+    /** 手势注入 shell↔App 工作目录（位于公共 MiRoot 目录，Shizuku 可读写）。 */
+    public static final String GESTURE_WORK_DIR = THEME_TEMP_DIR + "gesture_work/";
+    /** AI 目录 {@code rearscreen} 视频底包备份后缀（仅备份一次，供视频替换解压）。 */
+    public static final String REARSCREEN_BAK_SUFFIX = ".bak";
+    /** 兼容旧版视频主题备份后缀，新备份统一使用 {@link #REARSCREEN_BAK_SUFFIX}。*/
+    public static final String REARSCREEN_LEGACY_BACKUP_SUFFIX = ".backup";
 
     /** @deprecated 使用 {@link #THEME_TEMP_DIR} */
     @Deprecated
@@ -325,16 +335,113 @@ public final class AiWallpaperThemeHelper {
         }
     }
 
-    /** 手势注入/删除的本地 zip 工作目录（应用 externalFilesDir，shell 与 App 进程均可读写）。 */
+    /**
+     * 手势注入/删除的 zip 工作目录（{@link #GESTURE_WORK_DIR}，与背屏录屏 capture 目录同类约定）。
+     */
     @NonNull
     public static File gestureInjectWorkDir(@NonNull Context context) {
-        File dir = context.getExternalFilesDir("theme_temp");
-        if (dir == null) {
-            dir = new File(context.getCacheDir(), "theme_temp");
-        }
+        prepareThemeShellWorkDirs(null);
+        File dir = new File(GESTURE_WORK_DIR);
         //noinspection ResultOfMethodCallIgnored
         dir.mkdirs();
         return dir;
+    }
+
+    /**
+     * 创建主题/视频替换 shell 工作目录并放宽权限（参考 {@code RecordPaths.SHELL_CAPTURE_DIR}）。
+     */
+    public static boolean prepareThemeShellWorkDirs(@Nullable ITaskService ts) {
+        String cmd =
+                "mkdir -p \""
+                        + THEME_TEMP_DIR
+                        + "\" \""
+                        + VIDEO_REPLACE_DIR
+                        + "\" \""
+                        + GESTURE_WORK_DIR
+                        + "\" && chmod 777 \""
+                        + THEME_TEMP_DIR
+                        + "\" \""
+                        + VIDEO_REPLACE_DIR
+                        + "\" \""
+                        + GESTURE_WORK_DIR
+                        + "\" 2>/dev/null";
+        if (ts != null) {
+            return themeShellCommand(ts, cmd);
+        }
+        return PrivilegedShell.execCmd(cmd);
+    }
+
+    /** 特权 shell 写入后修正属主/权限，使 App 进程可读。 */
+    public static boolean ensureAppReadable(@NonNull String path) {
+        return PublicMediaExport.ensureAppReadable(path);
+    }
+
+    /** App 写入 MiRoot 工作区后，令 shell 可读（Shizuku 下 cp 源文件）。 */
+    public static void ensureShellReadable(@Nullable ITaskService ts, @NonNull String path) {
+        if (path.isEmpty()) {
+            return;
+        }
+        String cmd = "chmod a+rw \"" + path + "\" 2>/dev/null";
+        if (ts != null) {
+            themeShellCommand(ts, cmd);
+        } else {
+            PrivilegedShell.execCmd(cmd);
+        }
+    }
+
+    public static void ensureShellReadable(@Nullable ITaskService ts, @Nullable File file) {
+        if (file != null) {
+            ensureShellReadable(ts, file.getAbsolutePath());
+        }
+    }
+
+    public static boolean isUnderMiRootThemeWorkDir(@Nullable String path) {
+        if (path == null || path.isEmpty()) {
+            return false;
+        }
+        return path.startsWith(THEME_TEMP_DIR) || path.startsWith(VIDEO_REPLACE_DIR);
+    }
+
+    /**
+     * 若 shell 无法直接读源路径（如 App 私有 cache），则拷到 {@link #THEME_TEMP_DIR} 并 chmod。
+     */
+    @Nullable
+    static String stageFileForShellRead(@Nullable ITaskService ts, @NonNull String sourcePath) {
+        if (sourcePath.isEmpty()) {
+            return null;
+        }
+        prepareThemeShellWorkDirs(ts);
+        String statCmd = "test -f \"" + sourcePath + "\" && stat -c%s \"" + sourcePath + "\" || echo 0";
+        if (ts != null && parseRemoteFileSizeBytes(shellResultRootFirst(ts, statCmd)) > 0L) {
+            return sourcePath;
+        }
+        File src = new File(sourcePath);
+        if (!src.isFile() || src.length() <= 0L) {
+            return null;
+        }
+        String dest = THEME_TEMP_DIR + "replace_src_" + System.currentTimeMillis() + ".bin";
+        try (FileInputStream in = new FileInputStream(src);
+                FileOutputStream out = new FileOutputStream(dest)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+            }
+            out.flush();
+        } catch (IOException e) {
+            LogHelper.w(TAG, "stageFileForShellRead", e);
+            return null;
+        }
+        ensureShellReadable(ts, dest);
+        if (ts != null) {
+            String verifyCmd = "test -f \"" + dest + "\" && stat -c%s \"" + dest + "\" || echo 0";
+            if (parseRemoteFileSizeBytes(shellResultRootFirst(ts, verifyCmd)) <= 0L) {
+                //noinspection ResultOfMethodCallIgnored
+                new File(dest).delete();
+                return null;
+            }
+        }
+        return dest;
     }
 
     /** 主题文件操作 shell：优先 root，回退 Shizuku/shell。 */
@@ -500,6 +607,7 @@ public final class AiWallpaperThemeHelper {
             if (checkResult == null || !checkResult.contains("exists")) {
                 return false;
             }
+            // rm -rf 会一并删除目录内 rearscreen / rearscreen.bak 等全部文件
             if (!shellCommandRootFirst(taskService,"rm -rf \"" + targetDir + "\"")) {
                 return false;
             }
@@ -999,6 +1107,7 @@ public final class AiWallpaperThemeHelper {
                 return null;
             }
             File outFolder = new File(THEME_METADATA_WORK_DIR);
+            prepareThemeShellWorkDirs(null);
             if (!outFolder.exists()) {
                 //noinspection ResultOfMethodCallIgnored
                 outFolder.mkdirs();
@@ -1016,8 +1125,140 @@ public final class AiWallpaperThemeHelper {
                 }
             }
             if (tmpZip.exists() && tmpZip.length() > 0) {
+                ensureShellReadable(null, tmpZip);
                 return tmpZip;
             }
+        }
+        return null;
+    }
+
+    @NonNull
+    public static String rearscreenBakPath(@NonNull String rearscreenPath) {
+        return rearscreenPath + REARSCREEN_BAK_SUFFIX;
+    }
+
+    private static boolean isAiMamlRearscreenPath(@Nullable String path) {
+        return path != null && path.endsWith("/rearscreen");
+    }
+
+    public static boolean rearscreenBakExists(ITaskService taskService, String rearscreenPath) {
+        return rootFileExists(taskService, rearscreenBakPath(rearscreenPath));
+    }
+
+    /**
+     * 查找已存在的视频主题备份路径：优先 {@code .bak}；若无则兼容旧版 {@code .backup}，
+     * 发现旧版时将其重命名为 {@code .bak}（{@code .bak} 作为视频主题专用底包后缀）。
+     * @return 备份文件路径（{@code .bak}），若都不存在返回 {@code null}
+     */
+    @Nullable
+    public static String findExistingVideoBakPath(ITaskService taskService, String rearscreenPath) {
+        if (taskService == null || rearscreenPath == null || rearscreenPath.isEmpty()) {
+            return null;
+        }
+        String bak = rearscreenBakPath(rearscreenPath);
+        if (rootFileExists(taskService, bak)) {
+            return bak;
+        }
+        // 兼容旧版：.bak 不存在时，若 .backup 存在则重命名为 .bak
+        String legacy = rearscreenPath + REARSCREEN_LEGACY_BACKUP_SUFFIX;
+        if (rootFileExists(taskService, legacy)) {
+            if (shellCommandRootFirst(taskService, "mv \"" + legacy + "\" \"" + bak + "\"")) {
+                // mv 可能在 Shizuku 下静默失败，校验目标文件是否确实存在
+                if (rootFileExists(taskService, bak)) {
+                    LogHelper.d(TAG, "findExistingVideoBakPath: migrated legacy .backup -> .bak: " + bak);
+                    return bak;
+                }
+                LogHelper.w(TAG, "findExistingVideoBakPath: mv returned ok but .bak not found, fallback to cp");
+            }
+            // mv 失败或校验不通过，回退用 cp 复制（保留原 .backup 不动）
+            if (shellCommandRootFirst(taskService, "cp \"" + legacy + "\" \"" + bak + "\"")) {
+                if (rootFileExists(taskService, bak)) {
+                    LogHelper.d(TAG, "findExistingVideoBakPath: copied legacy .backup -> .bak: " + bak);
+                    return bak;
+                }
+            }
+            LogHelper.w(TAG, "findExistingVideoBakPath: failed to migrate .backup -> .bak: " + legacy);
+        }
+        return null;
+    }
+
+    /**
+     * 解压 rearscreen zip 检查是否含 {@code assets/ai/}（视频主题底包）。
+     */
+    public static boolean rearscreenZipHasAssetsAi(ITaskService taskService, String rearscreenPath) {
+        if (taskService == null || rearscreenPath == null || rearscreenPath.isEmpty()) {
+            return false;
+        }
+        if (!rootFileExists(taskService, rearscreenPath)) {
+            return false;
+        }
+        prepareThemeShellWorkDirs(taskService);
+        String checkExtractDir = THEME_TEMP_DIR + "format_check_" + System.currentTimeMillis() + "/";
+        try {
+            if (!themeShellCommand(taskService, "mkdir -p \"" + checkExtractDir + "\"")) {
+                return false;
+            }
+            themeShellCommand(taskService, "rm -rf \"" + checkExtractDir + "*\"");
+            String unzipCmd =
+                    "cd \"" + checkExtractDir + "\" && unzip -q -o \"" + rearscreenPath + "\" 2>&1";
+            if (!themeShellCommand(taskService, unzipCmd)) {
+                return false;
+            }
+            String checkAssetsAiCmd =
+                    "test -d \"" + checkExtractDir + "assets/ai\" && echo ok || echo no";
+            String checkResult = shellResultRootFirst(taskService, checkAssetsAiCmd);
+            return checkResult != null && checkResult.trim().equals("ok");
+        } catch (Exception e) {
+            LogHelper.w(TAG, "rearscreenZipHasAssetsAi", e);
+            return false;
+        } finally {
+            themeShellCommand(taskService, "rm -rf \"" + checkExtractDir + "\"");
+        }
+    }
+
+    /**
+     * 若视频主题备份（{@code .bak} 或旧版 {@code .backup}）均不存在且当前 rearscreen 含 {@code assets/ai/}，
+     * 则创建 {@code .bak} 备份（只写一次）。
+     */
+    public static boolean ensureRearscreenVideoBakOnce(ITaskService taskService, String rearscreenPath) {
+        if (taskService == null || rearscreenPath == null || rearscreenPath.isEmpty()) {
+            return false;
+        }
+        if (rearscreenBakExists(taskService, rearscreenPath)) {
+            return true;
+        }
+        if (!rootFileExists(taskService, rearscreenPath)) {
+            return false;
+        }
+        if (!rearscreenZipHasAssetsAi(taskService, rearscreenPath)) {
+            LogHelper.d(TAG, "ensureRearscreenVideoBakOnce: skip, no assets/ai in " + rearscreenPath);
+            return false;
+        }
+        String bak = rearscreenBakPath(rearscreenPath);
+        if (!shellCommandRootFirst(taskService, "cp \"" + rearscreenPath + "\" \"" + bak + "\"")) {
+            return false;
+        }
+        return rootFileExists(taskService, bak);
+    }
+
+    /**
+     * 视频替换底包：优先 {@code rearscreen.bak}，兼容旧版 {@code rearscreen.backup}；
+     * 若都不存在则从含 {@code assets/ai/} 的 rearscreen 创建 {@code .bak}。
+     */
+    @Nullable
+    public static String resolveVideoReplaceBaseRearscreen(
+            ITaskService taskService, String rearscreenPath) {
+        if (taskService == null || rearscreenPath == null || rearscreenPath.isEmpty()) {
+            return null;
+        }
+        // 优先查找已有的备份：.bak > .backup（兼容旧版）
+        String existing = findExistingVideoBakPath(taskService, rearscreenPath);
+        if (existing != null) {
+            return existing;
+        }
+        // 尝试从当前含 assets/ai/ 的 rearscreen 创建 .bak 备份
+        if (ensureRearscreenVideoBakOnce(taskService, rearscreenPath)) {
+            return rearscreenBakPath(rearscreenPath);
         }
         return null;
     }
@@ -1104,6 +1345,7 @@ public final class AiWallpaperThemeHelper {
             try (FileOutputStream fos = new FileOutputStream(out)) {
                 fos.write(raw);
             }
+            ensureShellReadable(taskService, out);
             if (VideoReplacer.copySourcePngToRearscreenPreviews(taskService, directory, tmp)) {
                 try {
                     boolean coverSyncOk =
@@ -1131,15 +1373,21 @@ public final class AiWallpaperThemeHelper {
         if (taskService == null || directory == null || themeFilePath == null) {
             return false;
         }
+        String stagedPath = null;
         try {
+            prepareThemeShellWorkDirs(taskService);
             String targetDir = AI_MAML_BASE + directory + "/";
             String rearscreenFile = targetDir + "rearscreen";
             File themeFile = new File(themeFilePath);
             if (!themeFile.exists() || !themeFile.isFile() || themeFile.length() == 0) {
                 return false;
             }
+            stagedPath = stageFileForShellRead(taskService, themeFilePath);
+            if (stagedPath == null) {
+                return false;
+            }
             boolean success =
-                    replaceFileWithBackup(taskService, rearscreenFile, themeFilePath, true);
+                    replaceFileWithBackup(taskService, rearscreenFile, stagedPath, true);
             if (success) {
                 applyThemeZipEffectToAiPreviews(context, taskService, directory, themeFilePath);
             }
@@ -1147,6 +1395,13 @@ public final class AiWallpaperThemeHelper {
         } catch (Exception e) {
             LogHelper.e(TAG, "replaceThemeFile", e);
             return false;
+        } finally {
+            if (stagedPath != null
+                    && !stagedPath.equals(themeFilePath)
+                    && stagedPath.startsWith(THEME_TEMP_DIR)) {
+                //noinspection ResultOfMethodCallIgnored
+                new File(stagedPath).delete();
+            }
         }
     }
 
@@ -1321,6 +1576,10 @@ public final class AiWallpaperThemeHelper {
     private static boolean replaceFileWithBackup(
             ITaskService taskService, String originalFile, String newFile, boolean keepBackup) {
         try {
+            prepareThemeShellWorkDirs(taskService);
+            if (isUnderMiRootThemeWorkDir(newFile)) {
+                ensureShellReadable(taskService, newFile);
+            }
             String checkNewFileCmd = "test -f \"" + newFile + "\" && stat -c%s \"" + newFile + "\" || echo '0'";
             String checkNewFileResult = shellResultRootFirst(taskService,checkNewFileCmd);
             long newFileSize = parseRemoteFileSizeBytes(checkNewFileResult);
@@ -1330,11 +1589,20 @@ public final class AiWallpaperThemeHelper {
                         + " stat=" + LogHelper.truncateForLog(checkNewFileResult, 40));
                 return false;
             }
-            String backupFile = originalFile + ".backup";
+            String backupFile =
+                    isAiMamlRearscreenPath(originalFile)
+                            ? rearscreenBakPath(originalFile)
+                            : originalFile + ".backup";
             String checkBackupCmd = "test -f \"" + backupFile + "\" && echo 'exists' || echo 'not found'";
             String checkBackupResult = shellResultRootFirst(taskService,checkBackupCmd);
             if (checkBackupResult == null || !checkBackupResult.contains("exists")) {
-                shellCommandRootFirst(taskService,"cp \"" + originalFile + "\" \"" + backupFile + "\"");
+                boolean shouldBackup =
+                        isAiMamlRearscreenPath(originalFile)
+                                ? rearscreenZipHasAssetsAi(taskService, originalFile)
+                                : rootFileExists(taskService, originalFile);
+                if (shouldBackup) {
+                    shellCommandRootFirst(taskService,"cp \"" + originalFile + "\" \"" + backupFile + "\"");
+                }
             }
             boolean success = shellCommandRootFirst(taskService,"cp \"" + newFile + "\" \"" + originalFile + "\"");
             if (!success) {
@@ -1452,6 +1720,16 @@ public final class AiWallpaperThemeHelper {
                             if (realPath != null) {
                                 return realPath;
                             }
+                        }
+                    }
+                } else if ("com.android.fileexplorer.documents".equals(authority)) {
+                    // Xiaomi file explorer: docId = "primary:/storage/emulated/0/xxx.zip"
+                    if (docId.startsWith("primary:")) {
+                        String fullPath = docId.substring("primary:".length());
+                        File file = new File(fullPath);
+                        if (file.exists() && file.isFile()) {
+                            android.util.Log.e("GestureSave", "resolvePickedFilePath fileexplorer: " + fullPath);
+                            return fullPath;
                         }
                     }
                 }
