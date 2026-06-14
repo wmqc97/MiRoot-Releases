@@ -1,4 +1,4 @@
-﻿package com.wmqc.miroot.theme;
+package com.wmqc.miroot.theme;
 
 import android.content.ComponentName;
 import android.content.Context;
