@@ -1,4 +1,4 @@
-package com.wmqc.miroot.car
+﻿package com.wmqc.miroot.car
 import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.Context
@@ -97,6 +97,11 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
 import kotlin.math.roundToInt
+import com.wmqc.miroot.car.ble.DigitalCarKeyConstants
+import com.wmqc.miroot.car.ble.DigitalCarKeyPermissionHelper
+import com.wmqc.miroot.car.ble.DigitalCarKeyService
+import com.wmqc.miroot.car.ble.DigitalCarKeyState
+import com.wmqc.miroot.car.ble.BleDeviceEntry
 
 /**
  * 车控设置（界面风格 [Miuix](https://github.com/compose-miuix-ui/miuix)）。
@@ -307,6 +312,8 @@ private fun DashboardScreen(
     }
     var mapRefreshKey by remember { mutableIntStateOf(0) }
     var showButtonEditDialog by remember { mutableStateOf(false) }
+    var showDigitalKeyDialog by remember { mutableStateOf(false) }
+    val dkService = remember { DigitalCarKeyService(appCtx) }
     val scope = rememberCoroutineScope()
 
     // 先展示缓存，再在后台静默刷新（避免进入页空白）
@@ -494,6 +501,7 @@ private fun DashboardScreen(
                 acStatus = acStatus,
                 seatHeatingStatus = seatHeatingStatus,
                 onEditButtons = { showButtonEditDialog = true },
+                onOpenDigitalKeyScan = { showDigitalKeyDialog = true },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = scrollPad),
@@ -795,6 +803,14 @@ private fun TopBar(
                         onOpenVehicleHistory()
                     },
                 )
+                DropdownMenuItem(
+                    text = { Text("蓝牙数字钥匙") },
+                    onClick = {
+                        expanded = false
+                        ctx.startActivity(com.wmqc.miroot.car.DigitalCarKeyDebugActivity.intent(ctx))
+                    },
+                )
+
                 DropdownMenuItem(
                     text = { Text("注销登录") },
                     onClick = {
@@ -1111,6 +1127,7 @@ private fun RearButtonGrid(
     acStatus: Boolean,
     seatHeatingStatus: Boolean,
     onEditButtons: (() -> Unit)? = null,
+    onOpenDigitalKeyScan: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -1176,6 +1193,7 @@ private fun RearButtonGrid(
                         acStatus = acStatus,
                         seatHeatingStatus = seatHeatingStatus,
                         onEditButtons = onEditButtons,
+                        onOpenDigitalKeyScan = onOpenDigitalKeyScan,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -1221,6 +1239,7 @@ private fun RearButtonCell(
     acStatus: Boolean,
     seatHeatingStatus: Boolean,
     onEditButtons: (() -> Unit)? = null,
+    onOpenDigitalKeyScan: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -1311,7 +1330,13 @@ private fun RearButtonCell(
                 .background(bg)
                 .pointerInput(text) {
                     detectTapGestures(
-                        onTap = { showDialog = true },
+                        onTap = {
+                            if (text == "数字蓝牙钥匙") {
+                                onOpenDigitalKeyScan?.invoke()
+                            } else {
+                                showDialog = true
+                            }
+                        },
                         onLongPress = { onEditButtons?.invoke() },
                     )
                 },
@@ -1371,6 +1396,7 @@ private fun resolveDisplayTextV2(
         "主驾加热" -> if (seatHeatingStatus) "关闭主驾加热" else "主驾加热"
         "副驾加热" -> if (seatHeatingStatus) "关闭副驾加热" else "副驾加热"
         "寻车" -> "寻车"
+        "数字蓝牙钥匙" -> "数字蓝牙钥匙"
         else -> text
     }
 }
@@ -1392,11 +1418,13 @@ private fun isButtonAlertStateV2(
             "锁车/解锁" -> !prefs.getBoolean(CarControlVehiclePrefsSync.KEY_IS_LOCKED, false)
             "空调" -> acStatus
             "座椅加热", "主驾加热", "副驾加热" -> seatHeatingStatus
+            "数字蓝牙钥匙" -> true
             else -> false
         }
     }
     return when (text) {
         "寻车" -> false
+        "数字蓝牙钥匙" -> true
         // 与背屏一致：已锁→灰底「解锁」；未锁→蓝底「锁车」
         "锁车/解锁" -> !("已锁" == VehicleStatusService.translateDoorLockStatus(vehicleStatus.doorLockStatusDriver))
         "点火/熄火" -> "运行中" == VehicleStatusService.translateEngineStatus(vehicleStatus.engineStatus)
@@ -1408,13 +1436,240 @@ private fun isButtonAlertStateV2(
         }
         "开后备箱" -> "已开" == VehicleStatusService.translateTrunkStatus(vehicleStatus.trunkOpenStatus)
         "座椅加热", "主驾加热", "副驾加热" -> seatHeatingStatus
-        else -> false
+                else -> false
     }
 }
 
 
 
 private const val KEY_CAR_MODEL_PATH = "car_model_path"
+
+// ─── DigitalKeyScanDialog ──────────────────────────────────────────────────────
+
+@Composable
+private fun DigitalKeyScanDialog(
+    dkService: DigitalCarKeyService,
+    onDismiss: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    val appCtx = ctx.applicationContext
+    val discoveredDevices = remember { mutableStateListOf<BleDeviceEntry>() }
+    var isScanning by remember { mutableStateOf(false) }
+    var stateText by remember { mutableStateOf("就绪") }
+
+    // 设备发现回调
+    LaunchedEffect(dkService) {
+        dkService.onDeviceFoundDetailed = { device, rssi, uuids ->
+            synchronized(discoveredDevices) {
+                val idx = discoveredDevices.indexOfFirst { it.device.address == device.address }
+                val entry = BleDeviceEntry(device, rssi, uuids)
+                if (idx >= 0) {
+                    discoveredDevices[idx] = entry
+                } else {
+                    discoveredDevices.add(entry)
+                }
+            }
+        }
+    }
+
+    // 状态监听
+    LaunchedEffect(dkService) {
+        dkService.state.collect { event ->
+            stateText = when (event.state) {
+                DigitalCarKeyState.IDLE -> "就绪"
+                DigitalCarKeyState.SCANNING -> "正在扫描..."
+                DigitalCarKeyState.SCANNING_ALL -> "正在扫描（全部 BLE）..."
+                DigitalCarKeyState.CONNECTING -> "连接中... ${event.message}"
+                DigitalCarKeyState.DISCOVERING_SERVICES -> "发现服务..."
+                DigitalCarKeyState.AUTHENTICATING -> "认证中..."
+                DigitalCarKeyState.READY -> "已就绪 \u2713"
+                DigitalCarKeyState.RECONNECTING -> "重连中... ${event.message}"
+                DigitalCarKeyState.FAILED -> "失败: ${event.message}"
+                DigitalCarKeyState.DISCONNECTED -> "已断开"
+            }
+            isScanning = event.state == DigitalCarKeyState.SCANNING
+                    || event.state == DigitalCarKeyState.SCANNING_ALL
+        }
+    }
+
+    val dark = isSystemInDarkTheme()
+    val scope = rememberCoroutineScope()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("数字蓝牙钥匙扫描", fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp),
+            ) {
+                // 状态指示
+                Text(
+                    text = stateText,
+                    fontSize = 13.sp,
+                    color = if (isScanning) Color(0xFF4CAF50) else Color.Gray,
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                Text(
+                    text = "Service UUID: ${DigitalCarKeyConstants.digitalKeyServiceUuid}",
+                    fontSize = 10.sp,
+                    color = Color.Gray,
+                )
+
+                Spacer(Modifier.height(8.dp))
+
+                // 操作按钮
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    top.yukonga.miuix.kmp.basic.Button(
+                        onClick = {
+                            if (!DigitalCarKeyPermissionHelper.hasAll(appCtx)) {
+                                android.widget.Toast.makeText(ctx, "缺少 BLE 权限", android.widget.Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            if (!DigitalCarKeyPermissionHelper.isBluetoothEnabled(appCtx)) {
+                                android.widget.Toast.makeText(ctx, "请先开启蓝牙", android.widget.Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            discoveredDevices.clear()
+                            dkService.startScan()
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("按 UUID", fontSize = 12.sp)
+                    }
+
+                    top.yukonga.miuix.kmp.basic.Button(
+                        onClick = {
+                            if (!DigitalCarKeyPermissionHelper.hasAll(appCtx)) {
+                                android.widget.Toast.makeText(ctx, "缺少 BLE 权限", android.widget.Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            if (!DigitalCarKeyPermissionHelper.isBluetoothEnabled(appCtx)) {
+                                android.widget.Toast.makeText(ctx, "请先开启蓝牙", android.widget.Toast.LENGTH_SHORT).show()
+                                return@Button
+                            }
+                            discoveredDevices.clear()
+                            dkService.startScanAllDevices()
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("全部 BLE", fontSize = 12.sp)
+                    }
+
+                    top.yukonga.miuix.kmp.basic.Button(
+                        onClick = {
+                            dkService.stopScan()
+                            isScanning = false
+                            stateText = "已停止"
+                        },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("停止", fontSize = 12.sp)
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                Text(
+                    text = "发现 ${discoveredDevices.size} 个设备",
+                    fontSize = 12.sp,
+                    color = Color.Gray,
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                // 设备列表
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    items(discoveredDevices.toList(), key = { it.device.address }) { entry ->
+                        val device = entry.device
+                        val name = device.name ?: "(未命名)"
+                        val addr = device.address
+                        val rssi = entry.rssi
+                        val isKnown = entry.serviceUuids?.any { pu ->
+                            DigitalCarKeyConstants.knownServiceUuids.any { it.equals(pu.uuid.toString(), ignoreCase = true) }
+                        } ?: false
+                        val isConnected = dkService.getConnectedDeviceAddress() == addr
+
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch {
+                                        dkService.stopScan()
+                                        dkService.connectToDevice(device)
+                                    }
+                                },
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        text = name,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isConnected) Color(0xFF4CAF50)
+                                            else if (isKnown) Color(0xFF2196F3)
+                                            else (if (dark) Color.White else Color.Black),
+                                    )
+                                    Row {
+                                        if (isConnected) {
+                                            Text(
+                                                "已连接",
+                                                fontSize = 10.sp,
+                                                color = Color.White,
+                                                modifier = Modifier.background(Color(0xFF4CAF50), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp),
+                                            )
+                                        } else if (isKnown) {
+                                            Text(
+                                                "DK",
+                                                fontSize = 10.sp,
+                                                color = Color.White,
+                                                modifier = Modifier.background(Color(0xFF2196F3), RoundedCornerShape(4.dp)).padding(horizontal = 4.dp, vertical = 1.dp),
+                                            )
+                                        }
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("${rssi} dBm", fontSize = 11.sp, color = Color.Gray)
+                                    }
+                                }
+                                Text(text = addr, fontSize = 10.sp, color = Color.Gray)
+                            }
+                        }
+                    }
+
+                    if (discoveredDevices.isEmpty()) {
+                        item {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text("点击上方按钮开始扫描", fontSize = 13.sp, color = Color.Gray)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (isScanning) dkService.stopScan()
+                onDismiss()
+            }) {
+                Text("关闭")
+            }
+        },
+    )
+}
 
 // ─── Buttons helpers (same as CarControlSettingsActivity original) ─────────────
 
@@ -1460,6 +1715,7 @@ private fun getCarControlIconName(
         "关闭主驾加热" -> "ic_seat_heating_driver_on"
         "副驾加热" -> "ic_seat_heating_passenger"
         "关闭副驾加热" -> "ic_seat_heating_passenger_on"
+        "数字蓝牙钥匙" -> "ic_bluetooth_digital_key"
         else -> "ic_car_index_find_car"
     }
 }
@@ -1553,3 +1809,5 @@ private fun executeByText(context: Context, text: String) {
 private fun refreshVehicleStatePrefs(context: Context) {
     CarControlVehiclePrefsSync.refreshFromVehicleStatus(context)
 }
+
+

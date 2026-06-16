@@ -29,6 +29,7 @@ object RearButtonConfigDialog {
         "锁车/解锁",
         "寻车",
         "点火/熄火",
+        "数字蓝牙钥匙",
         "空调",
         "开窗/关窗",
         "透气",
@@ -43,6 +44,7 @@ object RearButtonConfigDialog {
         "锁车/解锁" -> "ic_car_index_lock"
         "寻车" -> "ic_car_index_find_car"
         "点火/熄火" -> "ic_car_index_engine"
+        "数字蓝牙钥匙" -> "ic_bluetooth_digital_key"
         "空调" -> "ic_ac_unit"
         "开窗/关窗" -> "ic_car_index_open_window"
         "透气" -> "ic_car_index_wind"
