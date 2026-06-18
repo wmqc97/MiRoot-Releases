@@ -75,8 +75,8 @@ import com.wmqc.miroot.ui.miRootPageTitleTextUnit
 import com.wmqc.miroot.ui.miRootPageTopPadding
 
 /**
- * ����Ͷ������ҳ����ѭ [Miuix](https://github.com/compose-miuix-ui/miuix) �� README �е� `MiuixTheme` �÷���
- * ��Ƭ��ҳ��ͬ��ɫ������ߣ���״̬/����ҳһ�¡�
+ * 音乐投屏设置页面，遵循 [Miuix](https://github.com/compose-miuix-ui/miuix) README 中的 `MiuixTheme` 用法；
+ * 与卡片页面同配色和圆角，状态/功能页一致。
  */
 @Composable
 fun MusicScreen(
@@ -322,8 +322,8 @@ fun MusicScreen(
                             checked = settings.powerSavingMode,
                             hint = stringResource(R.string.music_power_saving_hint),
                         ) { on ->
-                            // ʡ��ģʽֻ�л�����ʱ���ԣ�����д�û�����ƫ�ã�
-                            // �ر�ʡ��ģʽ��Ӧ�ָ�ԭ�����á�
+                            // 省电模式只在切换歌词时生效，其他项没有额外偏好；
+                            // 关闭省电模式应恢复原先设置。
                             onSettingsChange(settings.copy(powerSavingMode = on))
                         }
                         if (!settings.abyssalMirror && !settings.powerSavingMode) {
@@ -380,7 +380,7 @@ fun MusicScreen(
                                         settings.marqueeLightDurationMs.toFloat(),
                                         1200f..12000f,
                                         step = 200f,
-                                        valueText = "${settings.marqueeLightDurationMs} ms/Ȧ",
+                                        valueText = "${settings.marqueeLightDurationMs} ms/圈",
                                     ) {
                                         onSettingsChange(settings.copy(marqueeLightDurationMs = it.roundToInt()))
                                     }
@@ -408,7 +408,7 @@ fun MusicScreen(
                                         settings.breathingBpm.toFloat(),
                                         1f..100f,
                                         step = 1f,
-                                        valueText = "${settings.breathingBpm} ��/����",
+                                        valueText = "${settings.breathingBpm} 次/分钟",
                                     ) {
                                         onSettingsChange(settings.copy(breathingBpm = it.roundToInt()))
                                     }
@@ -540,7 +540,7 @@ private fun LyricsDictFormatDialog(onDismiss: () -> Unit) {
 }
 
 /**
- * Ͷ�����Ʊ������Ҳࣺ����ť��ʾ״̬������Ͷ�� / ��ʼͶ�� / δ�������֣���
+ * 投屏状态卡片右侧：按钮显示状态（开始投屏 / 停止投屏 / 未连接等）。
  */
 @Composable
 private fun ProjectionControlStateButton(
@@ -934,7 +934,7 @@ private fun LyricsFontChoiceRow(
     }
 }
 
-/** ���ģʽ��ť���·�������ǰģʽ��չʾ��Ӧ�������������ء� */
+/** 省电模式按钮切换时，根据当前模式来展示对应的参数设置项。 */
 @Composable
 private fun LyricsModeDynamicParams(
     settings: LyricsUiSettings,
@@ -1025,7 +1025,7 @@ private fun LyricsModeDynamicParams(
     }
 }
 
-/** �� [LyricsSourceModeRow] ��ͬ�����ȷְ�ť��ʽ������ / �ִ� / ��Ԩ�����ⵥѡ�� */
+/** 与 [LyricsSourceModeRow] 不同，这里用确认按钮样式（单行 / 分屏 / 深渊）的单选 */
 @Composable
 private fun LyricsDisplayModeRow(
     settings: LyricsUiSettings,
