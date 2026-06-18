@@ -5,7 +5,7 @@
     <color name="charging_window_bg">#FF0A1628</color>
     <color name="white">#FFFFFFFF</color>
 
-    <!-- Miuix 风格主色（与 compose-miuix-ui/miuix README ThemeController keyColor 一致） -->
+    <!-- ========== Miuix 风格主色体系 ========== -->
     <color name="miuix_primary">#FF3482FF</color>
     <color name="miuix_on_primary">#FFFFFFFF</color>
     <color name="miuix_primary_container">#FFD6E6FF</color>
@@ -13,22 +13,30 @@
     <color name="miuix_surface">#FFFFFFFF</color>
     <color name="miuix_surface_container">#FFF7F8FA</color>
 
-    <!-- 权限状态（Root / Shizuku 等仍用绿/红语义） -->
-    <color name="perm_green">#FF4CAF50</color>
-    <color name="perm_red">#FFF44336</color>
-    <color name="perm_green_container">#FFE8F5E9</color>
-    <color name="perm_red_container">#FFFFEBEE</color>
+    <!-- ========== 权限状态语义色 ========== -->
+    <color name="perm_green">#FF34A853</color>
+    <color name="perm_red">#FFEA4335</color>
+    <color name="perm_green_container">#FFE6F4EA</color>
+    <color name="perm_red_container">#FFFCE8E6</color>
 
-    <!-- 页面与卡片：偏冷灰底 + 白卡片，贴近 Miuix / 系统设置页 -->
-    <color name="mi_page_bg">#FFE9EBEF</color>
+    <!-- ========== 页面与卡片体系 ========== -->
+    <!-- 页面背景：柔和暖灰，减少冷感 -->
+    <color name="mi_page_bg">#FFF2F3F5</color>
+    <!-- 卡片表面：纯白 -->
     <color name="mi_card_surface">#FFFFFFFF</color>
-    <color name="mi_text_primary">#FF1A1C1E</color>
-    <color name="mi_text_secondary">#FF5F6368</color>
-    <!-- 车控刷新按钮（浅色底上深色图标） -->
-    <color name="car_control_refresh_icon">#FF374151</color>
-    <color name="mi_divider">#14000000</color>
+    <!-- 主文字：深沉但不过于生硬 -->
+    <color name="mi_text_primary">#FF1D1D1F</color>
+    <!-- 次要文字：适中灰度 -->
+    <color name="mi_text_secondary">#FF86868B</color>
+    <!-- 分割线：极淡 -->
+    <color name="mi_divider">#0F000000</color>
+    <!-- 轻微强调色：用于链接、状态指示 -->
+    <color name="mi_accent_soft">#FF6AA2FF</color>
 
-    <!-- 外框颜色 Chip：未选中文案色；选中时底图与此色相同 -->
+    <!-- 车控刷新按钮 -->
+    <color name="car_control_refresh_icon">#FF374151</color>
+
+    <!-- 外框颜色 Chip -->
     <color name="shell_chip_green">@color/perm_green</color>
     <color name="shell_chip_white">#FF5F6368</color>
     <color name="shell_chip_gray">#FF757575</color>

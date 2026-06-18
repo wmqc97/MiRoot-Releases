@@ -1299,7 +1299,12 @@ private fun VehicleRecordDetailPane(
             detailRow(colors, "续航", "${fmt0(record.distanceToEmpty)} km")
             detailRow(colors, "发动机", if (record.engineStart == 1) "运行" else "熄火")
             detailRow(colors, "机油/保养标志", record.addOliFlag.toString())
-            detailRow(colors, stringResource(R.string.car_control_vehicle_history_record_address), record.address.orEmpty())
+            if (record.latitude != null && record.longitude != null) {
+                detailRow(colors, stringResource(R.string.car_control_vehicle_history_record_address), record.address.orEmpty())
+                detailRow(colors, "坐标", String.format(java.util.Locale.getDefault(), "%.5f, %.5f", record.latitude, record.longitude))
+            } else {
+                detailRow(colors, stringResource(R.string.car_control_vehicle_history_record_address), record.address.orEmpty())
+            }
             detailRow(colors, "车辆ID", record.vehicleId.toString())
         }
 

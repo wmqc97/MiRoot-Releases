@@ -1,6 +1,7 @@
 package com.wmqc.miroot.ui.music
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -12,9 +13,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +37,8 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -67,8 +75,8 @@ import com.wmqc.miroot.ui.miRootPageTitleTextUnit
 import com.wmqc.miroot.ui.miRootPageTopPadding
 
 /**
- * 音乐投屏设置页：遵循 [Miuix](https://github.com/compose-miuix-ui/miuix) 与 README 中的 `MiuixTheme` 用法，
- * 卡片与页面同底色、无描边，与状态/功能页一致。
+ * ����Ͷ������ҳ����ѭ [Miuix](https://github.com/compose-miuix-ui/miuix) �� README �е� `MiuixTheme` �÷���
+ * ��Ƭ��ҳ��ͬ��ɫ������ߣ���״̬/����ҳһ�¡�
  */
 @Composable
 fun MusicScreen(
@@ -237,6 +245,8 @@ fun MusicScreen(
                                             abyssalMirror = false,
                                             wordByWord = false,
                                             gestureControl = false,
+                                            showTranslation = false,
+                                            showTransliteration = false,
                                         ),
                                     )
                                 },
@@ -276,6 +286,23 @@ fun MusicScreen(
                                     ) {
                                         onSettingsChange(settings.copy(projectionSyncOffsetMs = it.roundToInt()))
                                     }
+                                    ToggleRowWithHint(
+                                        label = stringResource(R.string.music_char_jump),
+                                        checked = settings.charJumpEnabled,
+                                        hint = stringResource(R.string.music_char_jump_hint),
+                                    ) { on ->
+                                        onSettingsChange(settings.copy(charJumpEnabled = on))
+                                    }
+                                    if (settings.charJumpEnabled) {
+                                        SliderRow(
+                                            stringResource(R.string.music_char_jump_height),
+                                            settings.charJumpHeightPx,
+                                            4f..60f,
+                                            step = 2f,
+                                        ) {
+                                            onSettingsChange(settings.copy(charJumpHeightPx = it))
+                                        }
+                                    }
                                 }
                             }
                             LyricsModeDynamicParams(
@@ -295,8 +322,8 @@ fun MusicScreen(
                             checked = settings.powerSavingMode,
                             hint = stringResource(R.string.music_power_saving_hint),
                         ) { on ->
-                            // 省电模式只切换运行时策略，不改写用户其它偏好；
-                            // 关闭省电模式后应恢复原先配置。
+                            // ʡ��ģʽֻ�л�����ʱ���ԣ�����д�û�����ƫ�ã�
+                            // �ر�ʡ��ģʽ��Ӧ�ָ�ԭ�����á�
                             onSettingsChange(settings.copy(powerSavingMode = on))
                         }
                         if (!settings.abyssalMirror && !settings.powerSavingMode) {
@@ -353,11 +380,11 @@ fun MusicScreen(
                                         settings.marqueeLightDurationMs.toFloat(),
                                         1200f..12000f,
                                         step = 200f,
-                                        valueText = "${settings.marqueeLightDurationMs} ms/圈",
+                                        valueText = "${settings.marqueeLightDurationMs} ms/Ȧ",
                                     ) {
                                         onSettingsChange(settings.copy(marqueeLightDurationMs = it.roundToInt()))
                                     }
-                                    SliderRow(stringResource(R.string.music_marquee_width), settings.marqueeLightSize, 4f..30f) {
+                                    SliderRow(stringResource(R.string.music_marquee_width), settings.marqueeLightSize, 4f..60f) {
                                         onSettingsChange(settings.copy(marqueeLightSize = it))
                                     }
                                 }
@@ -381,7 +408,7 @@ fun MusicScreen(
                                         settings.breathingBpm.toFloat(),
                                         1f..100f,
                                         step = 1f,
-                                        valueText = "${settings.breathingBpm} 次/分钟",
+                                        valueText = "${settings.breathingBpm} ��/����",
                                     ) {
                                         onSettingsChange(settings.copy(breathingBpm = it.roundToInt()))
                                     }
@@ -421,6 +448,11 @@ fun MusicScreen(
                                     ) {
                                         onSettingsChange(settings.copy(colorChangeIntervalMs = it.roundToInt()))
                                     }
+                                } else {
+                                    FixedColorPicker(
+                                        selectedColor = settings.fixedColor,
+                                        onColorSelected = { onSettingsChange(settings.copy(fixedColor = it)) },
+                                    )
                                 }
                             }
                             if (settings.shuffleSplitEffect) {
@@ -508,7 +540,7 @@ private fun LyricsDictFormatDialog(onDismiss: () -> Unit) {
 }
 
 /**
- * 投屏控制标题行右侧：单按钮表示状态（结束投屏 / 开始投屏 / 未播放音乐）。
+ * Ͷ�����Ʊ������Ҳࣺ����ť��ʾ״̬������Ͷ�� / ��ʼͶ�� / δ�������֣���
  */
 @Composable
 private fun ProjectionControlStateButton(
@@ -567,6 +599,114 @@ private fun ProjectionControlStateButton(
     }
 }
 
+/** 自定义颜色选择：颜色预览按钮 + HSV 色盘弹窗 */
+@Composable
+private fun FixedColorPicker(
+    selectedColor: Int,
+    onColorSelected: (Int) -> Unit,
+) {
+    val ctx = LocalContext.current
+    val labelMuted = Color(ContextCompat.getColor(ctx, R.color.mi_text_secondary))
+    var showDialog by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(
+                text = stringResource(R.string.music_fixed_color),
+                style = MiuixTheme.textStyles.body1,
+            )
+            // 点击打开自定义色盘
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .shadow(3.dp, CircleShape)
+                    .clip(CircleShape)
+                    .background(Color(selectedColor))
+                    .border(2.dp, Color.White.copy(alpha = 0.5f), CircleShape)
+                    .clickable { showDialog = true },
+            )
+        }
+        Text(
+            text = stringResource(R.string.music_fixed_color_hint),
+            style = MiuixTheme.textStyles.footnote1,
+            color = labelMuted,
+        )
+    }
+    if (showDialog) {
+        HsvColorWheelDialog(
+            initialColor = selectedColor,
+            onConfirm = { onColorSelected(it); showDialog = false },
+            onDismiss = { showDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun HsvColorWheelDialog(
+    initialColor: Int,
+    onConfirm: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val ctx = LocalContext.current
+    var currentColor by remember { mutableStateOf(initialColor) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { M3Text(stringResource(R.string.music_fixed_color)) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // 当前选中颜色预览 + HEX
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(currentColor))
+                            .border(1.5.dp, Color.White.copy(alpha = 0.6f), CircleShape),
+                    )
+                    M3Text(
+                        text = String.format("#%06X", 0xFFFFFF and currentColor),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                // HSV 色盘
+                androidx.compose.ui.viewinterop.AndroidView(
+                    factory = {
+                        com.wmqc.miroot.ui.features.HsvColorWheelView(ctx).apply {
+                            setColor(initialColor)
+                            onColorChanged = { currentColor = it }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(280.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(currentColor) }) {
+                M3Text(stringResource(R.string.welcome_dialog_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                M3Text(stringResource(R.string.music_lyrics_dict_close))
+            }
+        },
+    )
+}
 @Composable
 private fun rememberMusicCardColors(): CardColors {
     val ctx = LocalContext.current
@@ -662,23 +802,23 @@ private fun formatSliderValue(value: Float, range: ClosedFloatingPointRange<Floa
     val s = range.start
     val e = range.endInclusive
     return when {
-        abs(s - 30f) < 1e-3f && abs(e - 100f) < 1e-3f -> "${value.roundToInt()} 次/分钟"
+        abs(s - 30f) < 1e-3f && abs(e - 100f) < 1e-3f -> "${value.roundToInt()} px/sp"
         abs(s + 5000f) < 1e-3f && abs(e - 5000f) < 1e-3f -> {
             val v = value.roundToInt()
             (if (v > 0) "+" else "") + "$v ms"
         }
         abs(s - 500f) < 1e-3f && abs(e - 5000f) < 1e-3f -> "${value.roundToInt()} ms"
-        abs(s - 1000f) < 1e-3f && abs(e - 10000f) < 1e-3f -> "${value.roundToInt() / 1000} 秒"
+        abs(s - 1000f) < 1e-3f && abs(e - 10000f) < 1e-3f -> "${value.roundToInt() / 1000}s"
         abs(s - 600f) < 1e-3f && abs(e - 5000f) < 1e-3f -> "${value.roundToInt()} ms"
         abs(s) < 1e-3f && abs(e - 300f) < 1e-3f -> "${value.roundToInt()} ms"
         abs(s - 0.01f) < 1e-3f && abs(e - 0.20f) < 1e-3f -> "${"%.1f".format(value * 100f)}%"
         abs(s) < 1e-3f && abs(e - 30f) < 1e-3f -> "${value.roundToInt()}px"
         abs(s - 0.5f) < 1e-3f && abs(e - 3f) < 1e-3f -> "x${"%.2f".format(value)}"
         s >= 40f -> "${value.roundToInt()}px"
-        s >= 4f && e <= 30f -> "${value.roundToInt()}px"
+        s >= 4f && e <= 60f -> "${value.roundToInt()}px"
         abs(s - 0.5f) < 1e-3f && abs(e - 2f) < 1e-3f -> "%.2f".format(value)
         abs(s - 1f) < 1e-3f && abs(e - 4f) < 1e-3f -> "%.2f".format(value)
-        abs(s) < 1e-3f && abs(e - 20f) < 1e-3f -> "${value.roundToInt()}°"
+        abs(s) < 1e-3f && abs(e - 20f) < 1e-3f -> "${value.roundToInt()}\u00B0"
         abs(s) < 1e-3f && abs(e - 0.4f) < 1e-3f -> "${(value * 100f).roundToInt()}%"
         else -> "${value.roundToInt()}%"
     }
@@ -794,7 +934,7 @@ private fun LyricsFontChoiceRow(
     }
 }
 
-/** 歌词模式按钮组下方：按当前模式仅展示对应参数，其余隐藏。 */
+/** ���ģʽ��ť���·�������ǰģʽ��չʾ��Ӧ�������������ء� */
 @Composable
 private fun LyricsModeDynamicParams(
     settings: LyricsUiSettings,
@@ -821,29 +961,39 @@ private fun LyricsModeDynamicParams(
                 ) {
                     onSettingsChange(settings.copy(abyssalMovableRange = it))
                 }
-                ToggleRow(
-                    stringResource(R.string.music_gesture_abyssal),
-                    settings.gestureControl,
+                ToggleRowWithHint(
+                    label = stringResource(R.string.music_gesture_abyssal),
+                    checked = settings.gestureControl,
+                    hint = stringResource(R.string.music_gesture_hint),
                 ) { on ->
                     onSettingsChange(settings.copy(gestureControl = on))
                 }
             }
             settings.shuffleSplitEffect -> {
-                SliderRow("倾斜角度", settings.shuffleSplitTiltRatio, 0f..20f) {
+                SliderRow(stringResource(R.string.music_rear_debug_tilt_angle), settings.shuffleSplitTiltRatio, 0f..20f) {
                     onSettingsChange(settings.copy(shuffleSplitTiltRatio = it))
                 }
-                SliderRow("词组大小浮动", settings.shuffleSplitScaleVariance, 0f..0.4f) {
+                SliderRow(stringResource(R.string.music_rear_debug_scale_variance), settings.shuffleSplitScaleVariance, 0f..0.4f) {
                     onSettingsChange(settings.copy(shuffleSplitScaleVariance = it))
                 }
             }
             else -> {
-                ToggleRow(stringResource(R.string.music_gesture), settings.gestureControl) { on ->
+                ToggleRow(
+                    label = stringResource(R.string.music_gesture),
+                    checked = settings.gestureControl,
+                ) { on ->
                     onSettingsChange(
                         settings.copy(
                             gestureControl = on,
                             abyssalMirror = if (on) false else settings.abyssalMirror,
                         ),
                     )
+                }
+                ToggleRow(stringResource(R.string.music_show_translation), settings.showTranslation) { on ->
+                    onSettingsChange(settings.copy(showTranslation = on))
+                }
+                ToggleRow(stringResource(R.string.music_show_transliteration), settings.showTransliteration) { on ->
+                    onSettingsChange(settings.copy(showTransliteration = on))
                 }
                 ToggleRow(stringResource(R.string.music_texture_toggle), settings.backgroundTexture) { on ->
                     onSettingsChange(
@@ -875,7 +1025,7 @@ private fun LyricsModeDynamicParams(
     }
 }
 
-/** 与 [LyricsSourceModeRow] 相同的三等分按钮样式，逐行 / 分词 / 深渊镜互斥单选。 */
+/** �� [LyricsSourceModeRow] ��ͬ�����ȷְ�ť��ʽ������ / �ִ� / ��Ԩ�����ⵥѡ�� */
 @Composable
 private fun LyricsDisplayModeRow(
     settings: LyricsUiSettings,
@@ -1056,4 +1206,6 @@ private fun ToggleRowWithHint(
         )
     }
 }
+
+
 

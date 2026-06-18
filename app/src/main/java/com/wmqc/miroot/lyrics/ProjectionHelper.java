@@ -1,15 +1,3 @@
-/*
- * Author: AntiOblivionis
- * QQ: 319641317
- * Github: https://github.com/GoldenglowSusie/
- * Bilibili: 罗德岛T0驭械术师澄闪
- * 
- * Co-developed with AI assistants:
- * - Cursor
- * - Claude-4.5-Sonnet
- * - GPT-5
- * - Gemini-2.5-Pro
- */
 
 package com.wmqc.miroot.lyrics;
 
@@ -49,6 +37,39 @@ public class ProjectionHelper {
      * 主屏打开时由 {@code RearScreenLyricsActivity} 传入 false，跑马灯/深渊镜走系统圆角检测。
      */
     public static final float REAR_PROJECTION_FIXED_CORNER_RADIUS_PX = 99f;
+
+    /** 音乐歌词霓虹/深渊镜边框描边与屏幕物理边缘的内边距（px）；跑马灯轨迹不适用。 */
+    public static final float PROJECTION_EDGE_INSET_PX = 2f;
+
+    /** @deprecated 使用 {@link #PROJECTION_EDGE_INSET_PX} */
+    public static final float MAIN_SCREEN_PROJECTION_EDGE_INSET_PX = PROJECTION_EDGE_INSET_PX;
+
+    /** 圆角检测失败时的占位默认值，主屏不可直接采用。 */
+    private static final float UNTRUSTED_CORNER_RADIUS_PX = 100f;
+
+    /**
+     * 主屏横屏：仅丢弃占位默认值(100)与无效值；系统实测圆角（含大 R 角）直接采用。
+     */
+    public static float resolveMainScreenCornerRadiusPx(float detectedRadius, int viewWidth, int viewHeight) {
+        if (isTrustworthyMainScreenCornerRadiusPx(detectedRadius)) {
+            return detectedRadius;
+        }
+        return estimateMainScreenCornerRadiusPx(viewWidth, viewHeight);
+    }
+
+    private static boolean isTrustworthyMainScreenCornerRadiusPx(float detectedRadius) {
+        if (detectedRadius <= 12f) {
+            return false;
+        }
+        return Math.abs(detectedRadius - UNTRUSTED_CORNER_RADIUS_PX) > 1f;
+    }
+
+    /** 主屏横屏圆角估算：按视图短边 3.2%～4.2%。 */
+    public static float estimateMainScreenCornerRadiusPx(int viewWidth, int viewHeight) {
+        int minDim = Math.min(Math.max(1, viewWidth), Math.max(1, viewHeight));
+        float estimated = minDim < 1080 ? (minDim * 0.032f) : (minDim * 0.042f);
+        return Math.max(24f, Math.min(120f, estimated));
+    }
 
     /**
      * 启动音乐投屏的完整流程（可复用）

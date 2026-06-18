@@ -643,6 +643,7 @@ fun MapSection(
 
     var addressText by remember { mutableStateOf("") }
     var addressLoading by remember { mutableStateOf(true) }
+    var coordsText by remember { mutableStateOf("") }
     var mapBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var mapUsesOsm by remember { mutableStateOf(false) }
     var mapLoadFailed by remember { mutableStateOf(false) }
@@ -651,6 +652,7 @@ fun MapSection(
         if (!hasCoords) {
             addressLoading = false
             addressText = ""
+            coordsText = ""
             mapBitmap = null
             mapUsesOsm = false
             mapLoadFailed = false
@@ -671,6 +673,7 @@ fun MapSection(
             }
             withContext(Dispatchers.Main) {
                 addressText = addr.orEmpty()
+                coordsText = String.format(java.util.Locale.getDefault(), "%.5f, %.5f", lng, lat)
                 addressLoading = false
                 mapBitmap = bmp
                 mapUsesOsm = osm
@@ -728,33 +731,50 @@ fun MapSection(
 
             when {
                 addressText.isNotEmpty() -> {
-                    Row(
+                    Column(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("📍", fontSize = 11.sp)
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            text = addressText,
-                            fontSize = 11.sp,
-                            color = CarUiColors.textSecondary,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("📍", fontSize = 12.sp)
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                text = addressText,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = CarUiColors.textPrimary,
+                                maxLines = 3,
+                                lineHeight = 17.sp,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        if (coordsText.isNotEmpty()) {
+                            Spacer(Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("🌐", fontSize = 10.sp)
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = coordsText,
+                                    fontSize = 10.sp,
+                                    color = CarUiColors.textSecondary,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
                     }
                 }
                 hasCoords && addressLoading -> {
                     Text(
-                        "解析地址中…",
-                        fontSize = 11.sp,
+                        "📍 解析地址中…",
+                        fontSize = 12.sp,
                         color = CarUiColors.textSecondary,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                     )
                 }
                 hasCoords && !addressLoading && addressText.isEmpty() -> {
                     Text(
-                        "暂未解析到文字地址",
-                        fontSize = 11.sp,
+                        "📍 暂未解析到文字地址",
+                        fontSize = 12.sp,
                         color = CarUiColors.textSecondary,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                     )

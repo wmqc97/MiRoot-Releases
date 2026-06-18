@@ -15,7 +15,7 @@
         android:paddingStart="@dimen/mi_page_scroll_padding"
         android:paddingTop="@dimen/mi_page_content_padding_top"
         android:paddingEnd="@dimen/mi_page_scroll_padding"
-        android:paddingBottom="@dimen/mi_page_scroll_padding">
+        android:paddingBottom="24dp">
 
         <TextView
             android:id="@+id/text_theme_title"
@@ -35,17 +35,18 @@
             android:visibility="gone"
             tools:visibility="visible" />
 
+        <!-- 视频替换卡片 -->
         <com.google.android.material.card.MaterialCardView
             style="@style/Widget.MiRoot.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/mi_page_scroll_padding">
+            android:layout_marginTop="@dimen/mi_card_spacing">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:padding="@dimen/mi_card_inner_padding">
 
                 <TextView
                     android:id="@+id/text_section_theme_video"
@@ -61,7 +62,7 @@
                     android:id="@+id/switch_video_loop"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="10dp"
                     android:text="@string/theme_video_loop"
                     android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
 
@@ -69,7 +70,7 @@
                     android:id="@+id/switch_video_sound"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="4dp"
                     android:text="@string/theme_video_sound"
                     android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
 
@@ -90,17 +91,18 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- AI 目录管理卡片 -->
         <com.google.android.material.card.MaterialCardView
             style="@style/Widget.MiRoot.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/mi_page_scroll_padding">
+            android:layout_marginTop="@dimen/mi_card_spacing">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:padding="@dimen/mi_card_inner_padding">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -157,17 +159,18 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- 已应用主题卡片 -->
         <com.google.android.material.card.MaterialCardView
             style="@style/Widget.MiRoot.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/mi_page_scroll_padding">
+            android:layout_marginTop="@dimen/mi_card_spacing">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:padding="@dimen/mi_card_inner_padding">
 
                 <LinearLayout
                     android:id="@+id/header_applied_themes"
@@ -242,17 +245,18 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- 元数据编辑 / 缓存清理卡片 -->
         <com.google.android.material.card.MaterialCardView
             style="@style/Widget.MiRoot.Card"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="@dimen/mi_page_scroll_padding">
+            android:layout_marginTop="@dimen/mi_card_spacing">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="16dp">
+                android:padding="@dimen/mi_card_inner_padding">
 
                 <TextView
                     android:id="@+id/text_section_theme_meta_edit"
@@ -292,12 +296,13 @@
                     android:layout_width="match_parent"
                     android:layout_height="1dp"
                     android:layout_marginTop="16dp"
-                    android:background="?android:attr/listDivider" />
+                    android:background="@color/mi_divider" />
 
                 <TextView
                     android:id="@+id/text_section_theme_cache"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
                     android:background="?attr/selectableItemBackground"
                     android:clickable="true"
                     android:focusable="true"

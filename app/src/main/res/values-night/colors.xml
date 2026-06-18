@@ -5,18 +5,22 @@
     <color name="miuix_primary_container">#FF2A3F5C</color>
     <color name="miuix_on_primary_container">#FFD6E6FF</color>
     <color name="miuix_surface">#FF1C1C1E</color>
-    <color name="miuix_surface_container">#FF121316</color>
+    <color name="miuix_surface_container">#FF2C2C2E</color>
 
+    <color name="perm_green">#FF30D158</color>
+    <color name="perm_red">#FFFF453A</color>
     <color name="perm_green_container">#FF1B2E24</color>
     <color name="perm_red_container">#FF3E2528</color>
 
-    <color name="mi_page_bg">#FF0D0E10</color>
-    <color name="mi_card_surface">#FF1E1F22</color>
-    <color name="mi_text_primary">#FFE8EAED</color>
-    <color name="mi_text_secondary">#FF9AA0A6</color>
-    <!-- 车控刷新按钮（深色底上浅色图标） -->
+    <!-- 深色模式页面与卡片体系 -->
+    <color name="mi_page_bg">#FF000000</color>
+    <color name="mi_card_surface">#FF1C1C1E</color>
+    <color name="mi_text_primary">#FFE5E5EA</color>
+    <color name="mi_text_secondary">#FF6E6E73</color>
+    <!-- 车控刷新按钮 -->
     <color name="car_control_refresh_icon">#FFE8EAED</color>
-    <color name="mi_divider">#22FFFFFF</color>
+    <color name="mi_divider">#1CFFFFFF</color>
+    <color name="mi_accent_soft">#FF4A90D9</color>
 
     <color name="shell_chip_white">#FFB0BEC5</color>
     <color name="shell_chip_gray">#FF9E9E9E</color>

@@ -46,6 +46,7 @@ import com.wmqc.miroot.lyrics.DisplayInfoCache;
 import com.wmqc.miroot.lyrics.ITaskService;
 import com.wmqc.miroot.lyrics.LogHelper;
 import com.wmqc.miroot.lyrics.RearDisplayHelper;
+import com.wmqc.miroot.lyrics.RootTaskServiceConnector;
 import com.wmqc.miroot.rear.RearMirootProjectionLifecycle;
 import com.wmqc.miroot.rear.RearSwitchKeeperService;
 import com.wmqc.miroot.shell.SwitchToRearQsTileService;
@@ -105,8 +106,12 @@ public class RearScreenChargingActivity extends ComponentActivity {
     private boolean autoFinishScheduled;
     /** 仅拔电 / 8s 自动关闭 / 补偿 finish 等 MiRoot 主动结束；系统双击息屏销毁时为 false。 */
     private boolean finishRequestedByMiRoot;
+    /** 背屏投屏被新动画打断：不唤醒背屏、不恢复下层投屏，立即销毁。 */
+    private boolean interrupted;
     /** 背屏息屏期间暂停自动 finish，避免误关下层投屏。 */
     private boolean rearScreenOffPaused;
+    /** 是否已屏蔽官方手势服务（对齐音乐投屏逻辑）。 */
+    private boolean isOfficialGestureDisabled;
     private boolean screenStateReceiverRegistered;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Runnable resumeCompensateFinishRunnable = this::finishFromMiRoot;
@@ -127,6 +132,7 @@ public class RearScreenChargingActivity extends ComponentActivity {
                 finishFromMiRoot();
             } else if (ChargingIntents.ACTION_INTERRUPT_CHARGING_ANIMATION.equals(action)) {
                 LogHelper.d(TAG, "收到打断广播（新动画来了），立即销毁但不恢复背屏");
+                interrupted = true;
                 finishFromMiRoot();
             } else if (ChargingIntents.ACTION_UPDATE_CHARGING_BATTERY.equals(action)) {
                 int newLevel = intent.getIntExtra(EXTRA_BATTERY_LEVEL, -1);
@@ -170,7 +176,9 @@ public class RearScreenChargingActivity extends ComponentActivity {
         if (this == currentInstance) {
             ChargingService.requestStopWakeupLoop(getApplicationContext());
         }
-        prepareRearProjectionVisibleBeforeFinish();
+        if (!interrupted) {
+            prepareRearProjectionVisibleBeforeFinish();
+        }
         super.finish();
         overridePendingTransition(0, 0);
     }
@@ -272,6 +280,11 @@ public class RearScreenChargingActivity extends ComponentActivity {
                 LogHelper.d(TAG, "在主屏启动，保持透明占位符，等待移动");
                 RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(
                         this, RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_TRANSPARENT_PLACEHOLDER);
+                // 清除 Manifest 声明的锁屏显示/亮屏属性，防止占位窗口在主屏唤醒屏幕
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                    setShowWhenLocked(false);
+                    setTurnScreenOn(false);
+                }
                 registerFinishReceiverOnly();
                 registerScreenStateReceiverIfNeeded();
                 currentInstance = this;
@@ -302,8 +315,48 @@ public class RearScreenChargingActivity extends ComponentActivity {
             chargingUiInflated = true;
             currentInstance = this;
             startFillAndBatteryPresentation();
+            disableOfficialGesture();
         } finally {
             rearInflateInProgress = false;
+        }
+    }
+
+    /** 屏蔽官方手势服务（com.xiaomi.subscreencenter），对齐音乐投屏逻辑，防止双击退出投屏。 */
+    private void disableOfficialGesture() {
+        if (isOfficialGestureDisabled) return;
+        ITaskService ts = RootTaskServiceConnector.getIfConnected();
+        if (ts == null) {
+            LogHelper.w(TAG, "TaskService未连接，暂无法屏蔽官方手势服务");
+            return;
+        }
+        try {
+            boolean success = ts.disableSubScreenLauncher();
+            if (success) {
+                isOfficialGestureDisabled = true;
+                LogHelper.d(TAG, "已屏蔽官方手势服务（com.xiaomi.subscreencenter）");
+            } else {
+                LogHelper.w(TAG, "disableSubScreenLauncher返回false");
+            }
+        } catch (Exception e) {
+            LogHelper.e(TAG, "屏蔽官方手势服务失败", e);
+        }
+    }
+
+    /** 恢复官方手势服务（com.xiaomi.subscreencenter）。 */
+    private void enableOfficialGesture() {
+        if (!isOfficialGestureDisabled) return;
+        ITaskService ts = RootTaskServiceConnector.getIfConnected();
+        if (ts == null) {
+            isOfficialGestureDisabled = false;
+            return;
+        }
+        try {
+            boolean success = ts.enableSubScreenLauncher();
+            isOfficialGestureDisabled = false;
+            LogHelper.d(TAG, "已恢复官方手势服务（com.xiaomi.subscreencenter） ok=" + success);
+        } catch (Exception e) {
+            LogHelper.e(TAG, "恢复官方手势服务失败", e);
+            isOfficialGestureDisabled = false;
         }
     }
 
@@ -1119,6 +1172,11 @@ public class RearScreenChargingActivity extends ComponentActivity {
             if (RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode)) {
                 if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
                     finishFromMiRoot();
+                } else if (mainMode
+                    == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_TRANSPARENT_PLACEHOLDER) {
+                    // 占位态回到主屏：迁屏未生效或 task 被系统落回，立即销毁避免泄露到主屏
+                    LogHelper.w(TAG, "onConfigurationChanged: 占位态仍在主屏，强制结束");
+                    finishAndRemoveTask();
                 }
                 return;
             }
@@ -1257,11 +1315,14 @@ public class RearScreenChargingActivity extends ComponentActivity {
             }
             screenStateReceiverRegistered = false;
         }
+        enableOfficialGesture();
         final int displayIdBeforeDestroy =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ? getCurrentDisplayIdSafe() : Display.DEFAULT_DISPLAY;
         super.onDestroy();
 
         final boolean ownsSession = (this == currentInstance);
+        final boolean wasInterrupted = interrupted;
+        interrupted = false;
         boolean shouldRestore = false;
         if (ownsSession) {
             currentInstance = null;
@@ -1278,6 +1339,11 @@ public class RearScreenChargingActivity extends ComponentActivity {
             return;
         } else {
             LogHelper.w(TAG, "旧实例 onDestroy，跳过协调器与恢复");
+            return;
+        }
+
+        if (wasInterrupted) {
+            LogHelper.d(TAG, "充电动画被打断，跳过背屏恢复与唤醒");
             return;
         }
 

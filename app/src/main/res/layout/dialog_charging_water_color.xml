@@ -5,7 +5,7 @@
     android:layout_height="wrap_content"
     android:gravity="center_horizontal"
     android:orientation="vertical"
-    android:paddingHorizontal="20dp"
+    android:paddingHorizontal="@dimen/mi_card_inner_padding"
     android:paddingTop="8dp"
     android:paddingBottom="4dp">
 
@@ -34,7 +34,7 @@
             android:layout_marginStart="12dp"
             android:fontFamily="monospace"
             android:textAppearance="?attr/textAppearanceBodyMedium"
-            android:textColor="?android:attr/textColorPrimary" />
+            android:textColor="@color/mi_text_primary" />
     </LinearLayout>
 
     <LinearLayout
@@ -49,7 +49,7 @@
             android:layout_height="wrap_content"
             android:text="@string/features_charging_water_opacity"
             android:textAppearance="?attr/textAppearanceBodyMedium"
-            android:textColor="?android:attr/textColorPrimary" />
+            android:textColor="@color/mi_text_primary" />
 
         <TextView
             android:id="@+id/charging_water_opacity_value"
@@ -59,7 +59,7 @@
             android:layout_weight="1"
             android:gravity="end"
             android:textAppearance="?attr/textAppearanceBodyMedium"
-            android:textColor="?android:attr/textColorSecondary" />
+            android:textColor="@color/mi_text_secondary" />
     </LinearLayout>
 
     <com.google.android.material.slider.Slider

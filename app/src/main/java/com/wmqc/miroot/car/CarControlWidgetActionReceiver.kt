@@ -90,14 +90,17 @@ class CarControlWidgetActionReceiver : BroadcastReceiver() {
                     try {
                         val appCtx = context.applicationContext
                         val manager = AppWidgetManager.getInstance(appCtx)
-                        val component = android.content.ComponentName(
-                            appCtx,
-                            CarControlAppWidgetProvider::class.java,
-                        )
                         val targetIds = if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
                             intArrayOf(appWidgetId)
                         } else {
-                            manager.getAppWidgetIds(component)
+                            val components = listOf(
+                                android.content.ComponentName(appCtx, CarControlAppWidgetProvider::class.java),
+                                android.content.ComponentName(appCtx, CarControlWidget6x2Provider::class.java),
+                                android.content.ComponentName(appCtx, CarControlWidget6x4Provider::class.java),
+                            )
+                            components.flatMap {
+                                manager.getAppWidgetIds(it).toList()
+                            }.toIntArray()
                         }
                         if (targetIds.isNotEmpty()) {
                             CarControlAppWidgetProvider.updateAll(appCtx, manager, targetIds)

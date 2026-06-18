@@ -1,17 +1,3 @@
-/*
- * Author: AntiOblivionis
- * QQ: 319641317
- * Github: https://github.com/GoldenglowSusie/
- * Bilibili: 罗德岛T0驭械术师澄闪
- * 
- * Chief Tester: 汐木泽
- * 
- * Co-developed with AI assistants:
- * - Cursor
- * - Claude-4.5-Sonnet
- * - GPT-5
- * - Gemini-2.5-Pro
- */
 
 package com.wmqc.miroot.lyrics;
 
@@ -50,7 +36,6 @@ public class MarqueeLightView extends View {
     private static final int LIGHT_COLOR_HEAD = 0xFFFFFFFF; // 头部颜色（完全不透明白色）
     private static final int LIGHT_COLOR_TAIL = 0x00FFFFFF; // 尾部颜色（完全透明）
     private static final long ANIMATION_DURATION = 5000;    // 动画时长（毫秒）
-    private static final float EDGE_MARGIN = 0f;            // 边缘边距（像素）（V3.17: 紧贴屏幕边缘，完全占据外围）
     private static final float DEFAULT_CORNER_RADIUS = 100f;  // 默认圆角半径（像素）
     private float systemCornerRadius = DEFAULT_CORNER_RADIUS; // 系统圆角半径（从系统获取）
     
@@ -134,6 +119,8 @@ public class MarqueeLightView extends View {
     private int screenWidth = 0;
     private int screenHeight = 0;
     private Path borderPath;
+    /** zhuanti: biankuang yong de luijing, jin tie pingmu bianyuan (bufenkao marquee luzhong) */
+    private Path borderFramePath;
     private android.graphics.PathMeasure borderPathMeasure;  // 复用，避免 onDraw 内重复分配
     private float pathLength = 0f;
     /** 跑马灯轨迹单层外散光晕：复用 BlurMaskFilter */
@@ -225,7 +212,7 @@ public class MarqueeLightView extends View {
         for (int i = 0; i < LIGHT_COUNT; i++) {
             lightGlowPaints[i] = new Paint(Paint.ANTI_ALIAS_FLAG);
             lightGlowPaints[i].setStyle(Paint.Style.STROKE);
-            lightGlowPaints[i].setStrokeWidth(lightSize * 4f);  // 外散光效宽度是光线的4倍
+            lightGlowPaints[i].setStrokeWidth(lightSize * 2.5f);  // 外散光效宽度是光线的2.5倍
             lightGlowPaints[i].setStrokeCap(Paint.Cap.ROUND);
             lightGlowPaints[i].setStrokeJoin(Paint.Join.ROUND);
             // 使用 BlurMaskFilter 实现外散光效（OUTER模式实现向外扩散）
@@ -346,6 +333,7 @@ public class MarqueeLightView extends View {
                     if (detectedRadius > 0) {
                         systemCornerRadius = detectedRadius;
                         LogHelper.d(TAG, "✅ 从getRootWindowInsets检测到系统圆角半径: " + systemCornerRadius + "px");
+                        applyMainScreenCornerRadiusIfNeeded();
                         return;
                     }
                 }
@@ -365,6 +353,7 @@ public class MarqueeLightView extends View {
                                     if (detectedRadius > 0) {
                                         systemCornerRadius = detectedRadius;
                                         LogHelper.d(TAG, "✅ 从WindowManager检测到系统圆角半径: " + systemCornerRadius + "px");
+                                        applyMainScreenCornerRadiusIfNeeded();
                                         return;
                                     }
                                 }
@@ -387,6 +376,23 @@ public class MarqueeLightView extends View {
         } catch (Exception e) {
             LogHelper.w(TAG, "⚠️ 检测系统圆角失败，使用默认值: " + systemCornerRadius + "px, 错误: " + e.getMessage());
         }
+        applyMainScreenCornerRadiusIfNeeded();
+    }
+
+    private void applyMainScreenCornerRadiusIfNeeded() {
+        if (!isMainScreenLandscapeMode || fixedCornerRadiusPx != null) {
+            return;
+        }
+        int w = screenWidth > 0 ? screenWidth : getWidth();
+        int h = screenHeight > 0 ? screenHeight : getHeight();
+        if (w > 0 && h > 0) {
+            systemCornerRadius = ProjectionHelper.resolveMainScreenCornerRadiusPx(
+                    systemCornerRadius, w, h);
+        }
+    }
+
+    private float getBorderFrameEdgeInsetPx() {
+        return ProjectionHelper.PROJECTION_EDGE_INSET_PX;
     }
     
     /**
@@ -515,17 +521,18 @@ public class MarqueeLightView extends View {
         try {
             android.content.res.Resources res = getContext().getResources();
             android.util.DisplayMetrics metrics = res.getDisplayMetrics();
-            int screenWidth = metrics.widthPixels;
-            int screenHeight = metrics.heightPixels;
-            int minDimension = Math.min(screenWidth, screenHeight);
+            int w = this.screenWidth > 0 ? this.screenWidth : metrics.widthPixels;
+            int h = this.screenHeight > 0 ? this.screenHeight : metrics.heightPixels;
+            float estimatedRadius;
+            if (isMainScreenLandscapeMode) {
+                estimatedRadius = ProjectionHelper.estimateMainScreenCornerRadiusPx(w, h);
+            } else {
+                int minDimension = Math.min(w, h);
+                estimatedRadius = minDimension < 1080 ? (minDimension * 0.025f) : (minDimension * 0.035f);
+                estimatedRadius = Math.max(20f, Math.min(150f, estimatedRadius));
+            }
             
-            // 根据屏幕尺寸估算：小屏设备（< 1080px）约 2-3%，大屏设备约 3-4%
-            float estimatedRadius = minDimension < 1080 ? (minDimension * 0.025f) : (minDimension * 0.035f);
-            
-            // 限制在合理范围内（20px - 150px）
-            estimatedRadius = Math.max(20f, Math.min(150f, estimatedRadius));
-            
-            LogHelper.d(TAG, "📐 根据屏幕尺寸估算圆角: 屏幕=" + screenWidth + "x" + screenHeight + ", 估算半径=" + estimatedRadius + "px");
+            LogHelper.d(TAG, "📐 根据屏幕尺寸估算圆角: 屏幕=" + w + "x" + h + ", 估算半径=" + estimatedRadius + "px");
             return estimatedRadius;
         } catch (Exception e) {
             LogHelper.w(TAG, "⚠️ 估算圆角失败: " + e.getMessage());
@@ -539,24 +546,18 @@ public class MarqueeLightView extends View {
      */
     private void calculateBorderPath(int width, int height) {
         borderPath = new Path();
-        
-        // V3.17: 考虑线条宽度，让路径向内偏移线条宽度的一半，确保线条不超出屏幕
-        // 线条宽度是lightSize，所以路径需要向内偏移lightSize/2
-        // 微调：减小偏移量，让圆角更贴边
-        float strokeOffset = lightSize / 2f - 1f;  // 减小1px，让圆角更贴边
-        
-        // V3.17: 所有边都向内偏移，确保线条不超出屏幕范围
-        // 上边需要额外偏移，避免超出可显示范围
-        float left = EDGE_MARGIN + strokeOffset;
-        float top = EDGE_MARGIN + strokeOffset + 2f;  // 上边额外偏移2px，避免超出
-        float right = width - EDGE_MARGIN - strokeOffset - 1f;  // 右边额外偏移1px，向内移动
-        float bottom = height - EDGE_MARGIN - strokeOffset;
-        
-        // V3.17: 使用RectF和圆角矩形路径，适配系统圆角
-        // 使用检测到的系统圆角半径，确保圆角半径不超过可用空间
+
+        // 跑马灯轨迹：贴屏幕边缘（不加 PROJECTION_EDGE_INSET）
+        float strokeOffset = lightSize / 2f - 1f;
+        float left = strokeOffset;
+        float top = strokeOffset + 2f;
+        float right = width - strokeOffset - 1f;
+        float bottom = height - strokeOffset;
+
+        float pathInsetFromScreen = strokeOffset;
+        float cornerRadius = Math.max(0f, systemCornerRadius - pathInsetFromScreen);
         float maxRadius = Math.min(right - left, bottom - top) / 2f;
-        float actualRadius = Math.min(systemCornerRadius, maxRadius);
-        // 微调：如果实际半径接近最大半径，使用最大半径让圆角更贴边
+        float actualRadius = Math.min(cornerRadius, maxRadius);
         if (actualRadius > maxRadius * 0.9f) {
             actualRadius = maxRadius;
         }
@@ -578,6 +579,21 @@ public class MarqueeLightView extends View {
         if (segmentPath1 == null) segmentPath1 = new Path();
         if (segmentPath2 == null) segmentPath2 = new Path();
         
+
+        float frameEdgeInset = getBorderFrameEdgeInsetPx();
+        float borderStrokeHalf = NEON_BORDER_WIDTH / 2f;
+        float bLeft = frameEdgeInset + borderStrokeHalf;
+        float bTop = frameEdgeInset + borderStrokeHalf;
+        float bRight = width - frameEdgeInset - borderStrokeHalf;
+        float bBottom = height - frameEdgeInset - borderStrokeHalf;
+        float frameInsetFromScreen = frameEdgeInset + borderStrokeHalf;
+        float frameCornerRadius = Math.max(0f, systemCornerRadius - frameInsetFromScreen);
+        float bMaxRadius = Math.min(bRight - bLeft, bBottom - bTop) / 2f;
+        float bActualRadius = Math.min(frameCornerRadius, bMaxRadius);
+        if (bActualRadius < 0) bActualRadius = 0;
+        RectF bRect = new RectF(bLeft, bTop, bRight, bBottom);
+        borderFramePath = new Path();
+        borderFramePath.addRoundRect(bRect, bActualRadius, bActualRadius, Path.Direction.CW);
         LogHelper.d(TAG, "✅ 计算路径: " + width + "x" + height + ", pathLength=" + pathLength + 
                   ", actualRadius=" + actualRadius + ", strokeOffset=" + strokeOffset +
                   ", rect=[" + left + "," + top + "," + right + "," + bottom + "]");
@@ -678,29 +694,12 @@ public class MarqueeLightView extends View {
         if (colorSyncEnabled && colorSyncCallback != null) {
             try {
                 int c = colorSyncCallback.getSyncColor();
-                return sanitizeSyncedNeutralColor(c) & 0x00FFFFFF;
+                return c & 0x00FFFFFF;
             } catch (Exception e) {
                 return NEON_BORDER_COLOR & 0x00FFFFFF;
             }
         }
         return NEON_BORDER_COLOR & 0x00FFFFFF;
-    }
-
-    /**
-     * 当歌词侧关闭“随机颜色切换”时，回调通常会给出纯白/纯黑。
-     * 这里把纯白略微压暗、纯黑略微抬亮，边框/跑马灯更柔和且仍保持同色系。
-     */
-    private int sanitizeSyncedNeutralColor(int argb) {
-        int r = (argb >> 16) & 0xFF;
-        int g = (argb >> 8) & 0xFF;
-        int b = argb & 0xFF;
-        if (r >= 250 && g >= 250 && b >= 250) {
-            return 0xFFE6E6E6;
-        }
-        if (r <= 5 && g <= 5 && b <= 5) {
-            return 0xFF111111;
-        }
-        return argb;
     }
 
     private void noteDrawMetrics(long drawCostNs) {
@@ -759,28 +758,28 @@ public class MarqueeLightView extends View {
         }
         
         // 边框路径（边框显示开时始终绘制；霓虹效果由 neonEffectsEnabled 决定）
-        if (borderFrameEnabled && borderPath != null) {
+        if (borderFrameEnabled && borderFramePath != null) {
             int baseColor = resolveBorderBaseColor();
             if (neonEffectsEnabled) {
                 int alphaValue = (int) (neonBorderAlpha * 255);
                 if (!lightweightModeEnabled) {
                     int outerColor1 = (int)(alphaValue * 0.15f) << 24 | baseColor;
                     neonBorderGlowPaint1.setColor(outerColor1);
-                    canvas.drawPath(borderPath, neonBorderGlowPaint1);
+                    canvas.drawPath(borderFramePath, neonBorderGlowPaint1);
                     int outerColor2 = (int)(alphaValue * 0.30f) << 24 | baseColor;
                     neonBorderGlowPaint2.setColor(outerColor2);
-                    canvas.drawPath(borderPath, neonBorderGlowPaint2);
+                    canvas.drawPath(borderFramePath, neonBorderGlowPaint2);
                 }
                 int outerColor3 = (int)(alphaValue * 0.50f) << 24 | baseColor;
                 neonBorderGlowPaint3.setColor(outerColor3);
-                canvas.drawPath(borderPath, neonBorderGlowPaint3);
+                canvas.drawPath(borderFramePath, neonBorderGlowPaint3);
                 int borderColor = alphaValue << 24 | baseColor;
                 neonBorderPaint.setColor(borderColor);
-                canvas.drawPath(borderPath, neonBorderPaint);
+                canvas.drawPath(borderFramePath, neonBorderPaint);
             } else {
                 int borderColor = 0xDD000000 | baseColor;
                 neonBorderPaint.setColor(borderColor);
-                canvas.drawPath(borderPath, neonBorderPaint);
+                canvas.drawPath(borderFramePath, neonBorderPaint);
             }
         }
         
@@ -791,7 +790,7 @@ public class MarqueeLightView extends View {
                 // 颜色联动采样节流：避免每帧读取颜色回调导致额外负载。
                 if (lastColorSyncSampleTime == 0L || currentTime - lastColorSyncSampleTime >= COLOR_SYNC_SAMPLE_INTERVAL_MS) {
                     lastColorSyncSampleTime = currentTime;
-                    int lyricsColor = sanitizeSyncedNeutralColor(colorSyncCallback.getSyncColor());
+                    int lyricsColor = colorSyncCallback.getSyncColor();
                     if (lyricsColor != lastSyncedColor) {
                         for (int i = 0; i < LIGHT_COUNT; i++) {
                             lightColors[i] = lyricsColor;
@@ -858,30 +857,29 @@ public class MarqueeLightView extends View {
             
             if (neonEffectsEnabled) {
                 Paint glowPaint = lightGlowPaints[lineIndex];
-                int glowHead = (headColor & 0x00FFFFFF) | 0x42000000;   // ~26% 头部
-                int glowMid = (headColor & 0x00FFFFFF) | 0x1A000000;    // ~10% 中段
+                int glowHead = (headColor & 0x00FFFFFF) | 0x22000000;   // ~13% 头部
+                // 单层光晕（撤销中段两层高光）
                 LinearGradient glowGradient = new LinearGradient(
                     headPosResult[0], headPosResult[1],
                     tailPosResult[0], tailPosResult[1],
-                    new int[]{glowHead, glowMid, 0x00000000},
-                    new float[]{0f, 0.38f, 1f},
+                    new int[]{glowHead, 0x00000000},
+                    new float[]{0f, 1f},
                     Shader.TileMode.CLAMP
                 );
                 glowPaint.setShader(glowGradient);
-                glowPaint.setStrokeWidth(lightweightModeEnabled ? (lightSize * 2.4f) : (lightSize * 4f));
+                glowPaint.setStrokeWidth(lightweightModeEnabled ? (lightSize * 1.6f) : (lightSize * 2.5f));
                 glowPaint.setMaskFilter(marqueeGlowBlur);
                 if (!lightweightModeEnabled || lineIndex == 0) {
                     canvas.drawPath(snakePathReuse, glowPaint);
                 }
                 glowPaint.setShader(null);
             }
-            
             // V3.17: 确保线条粗细一致（在所有位置，包括圆角）
             LinearGradient gradient = new LinearGradient(
                 headPosResult[0], headPosResult[1],
                 tailPosResult[0], tailPosResult[1],
-                new int[]{headColor, (headColor & 0x00FFFFFF) | 0x80000000, LIGHT_COLOR_TAIL},  // 从高亮到半透明再到完全透明
-                new float[]{0f, 0.6f, 1f},  // 在60%位置开始变淡，与外散光效平滑过渡
+                new int[]{headColor, (headColor & 0x00FFFFFF) | 0xE0000000, (headColor & 0x00FFFFFF) | 0x70000000, LIGHT_COLOR_TAIL},  // 实心→半透明→透明
+                new float[]{0f, 0.45f, 0.75f, 1f},  // 延长实心段，在45%才淡出
                 Shader.TileMode.CLAMP
             );
             // 确保使用当前的lightSize值设置线条宽度
@@ -891,7 +889,6 @@ public class MarqueeLightView extends View {
             
             // 绘制贪吃蛇路径（使用 Path 确保圆角处宽度一致，绘制在光效之上）
             canvas.drawPath(snakePathReuse, paint);
-            
             // 清除shader，避免影响下一条光线
             paint.setShader(null);
         }
@@ -1003,18 +1000,9 @@ public class MarqueeLightView extends View {
         }
     }
 
-    /**
-     * 设置跑马灯颜色刷新节奏（毫秒），与歌词调试页保持同频。
-     */
+    /** 已改为换行触发，此方法保留兼容但不再生效。 */
     public void setColorChangeIntervalMs(long intervalMs) {
-        long safeInterval = Math.max(COLOR_CHANGE_INTERVAL_MIN_MS, Math.min(COLOR_CHANGE_INTERVAL_MAX_MS, intervalMs));
-        if (currentColorChangeInterval == safeInterval) {
-            return;
-        }
-        currentColorChangeInterval = safeInterval;
-        // 参数更新后尽快切到新节奏，避免体感滞后。
-        lastColorChangeTime = 0L;
-        postInvalidateOnAnimation();
+        // no-op: 换行触发模式下无需时间间隔
     }
     
     /**
@@ -1132,7 +1120,6 @@ public class MarqueeLightView extends View {
      */
     public void setLightSize(float size) {
         if (size < 4f) size = 4f;  // 最小4px
-        if (size > 30f) size = 30f;  // 最大30px
         
         if (Math.abs(lightSize - size) > 0.1f) {  // 使用浮点数比较，允许0.1px的误差
             lightSize = size;
@@ -1278,4 +1265,22 @@ public class MarqueeLightView extends View {
         
         return 0xFF000000 | (avgR << 16) | (avgG << 8) | avgB;
     }
+
+    /**
+     * 在视图挂载后重新评估系统圆角半径并刷新路径。
+     * 用于主屏启动后 View 尚未 attach 导致 detectSystemCornerRadius()
+     * 无法通过 getRootWindowInsets() 获取圆角的场景。
+     */
+    public void reevaluateCornerRadius() {
+        if (fixedCornerRadiusPx != null) {
+            return;
+        }
+        detectSystemCornerRadius();
+        if (screenWidth > 0 && screenHeight > 0) {
+            calculateBorderPath(screenWidth, screenHeight);
+            invalidate();
+        }
+        LogHelper.d(TAG, "reevaluate corner radius: " + systemCornerRadius + "px");
+    }
+
 }

@@ -1,4 +1,4 @@
-﻿package com.wmqc.miroot.capability
+package com.wmqc.miroot.capability
 
 import android.content.pm.PackageManager
 import rikka.shizuku.Shizuku

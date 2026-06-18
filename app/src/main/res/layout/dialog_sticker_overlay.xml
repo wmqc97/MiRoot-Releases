@@ -4,8 +4,8 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:fillViewport="true"
-    android:paddingStart="16dp"
-    android:paddingEnd="16dp"
+    android:paddingStart="@dimen/mi_card_inner_padding"
+    android:paddingEnd="@dimen/mi_card_inner_padding"
     android:paddingTop="8dp"
     android:paddingBottom="8dp">
 
@@ -19,7 +19,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/features_sticker_enable"
-            android:textAppearance="?attr/textAppearanceBodyLarge" />
+            android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -65,7 +65,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:text="@string/features_sticker_rounded"
-            android:textAppearance="?attr/textAppearanceBodyLarge" />
+            android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/til_sticker_corner_dp"
@@ -89,7 +89,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:text="@string/features_sticker_center_horizontal"
-            android:textAppearance="?attr/textAppearanceBodyLarge" />
+            android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
 
         <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switch_sticker_center_vertical"
@@ -97,7 +97,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:text="@string/features_sticker_center_vertical"
-            android:textAppearance="?attr/textAppearanceBodyLarge" />
+            android:textAppearance="@style/TextAppearance.MiRoot.SwitchLabel" />
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -191,8 +191,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
             android:text="@string/features_sticker_scale_section"
-            android:textAppearance="?attr/textAppearanceTitleSmall"
-            android:textColor="?attr/colorOnSurface" />
+            android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
 
         <com.google.android.material.button.MaterialButtonToggleGroup
             android:id="@+id/toggle_sticker_scale_mode"

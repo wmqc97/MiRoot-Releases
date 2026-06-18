@@ -18,7 +18,8 @@ import com.wmqc.miroot.license.OfflineActivationRepository
 import com.wmqc.miroot.ui.music.MusicProjectionController
 
 /**
- * 快捷设置磁贴：在主屏以横屏全屏打开音乐歌词界面（Intent 带 `isMainScreenLandscape`）。
+ * Quick settings tile: launch main screen landscape lyrics via MainScreenMusicActivity.
+ * Independent from back screen RearScreenLyricsActivity.
  */
 class MusicProjectionQsTileService : TileService() {
 
@@ -30,7 +31,6 @@ class MusicProjectionQsTileService : TileService() {
     }
 
     override fun onClick() {
-        // 仅在“下一步是启动投屏”时拦截；若当前已在主屏歌词展示中，则允许点击磁贴停止投屏。
         if (!isMainScreenMusicActive() && !OfflineActivationRepository.isActivated(applicationContext)) {
             MainDisplayUi.showToast(
                 this@MusicProjectionQsTileService,
@@ -49,7 +49,9 @@ class MusicProjectionQsTileService : TileService() {
         }
         unlockAndRun {
             if (isMainScreenMusicActive()) {
-                MusicProjectionController.stop(this)
+                MainScreenMusicActivity.getCurrentInstance()?.let {
+                    if (!it.isFinishing) it.finish()
+                }
                 scheduleRefreshTile()
                 return@unlockAndRun
             }
@@ -64,16 +66,12 @@ class MusicProjectionQsTileService : TileService() {
                     }
                     return@runInBackground
                 }
-                if (RearScreenLyricsActivity.hasConflictingLyricsActivityForMainScreenTile()) {
-                    MusicProjectionController.stop(applicationContext)
-                    Thread.sleep(800)
-                }
                 val cmp = ComponentName(
                     packageName,
-                    RearScreenLyricsActivity::class.java.name,
+                    MainScreenMusicActivity::class.java.name,
                 ).flattenToString()
                 val cmd =
-                    "am start -n $cmp --ez isMainScreenLandscape true --ez isBroadcast true"
+                    "am start -n $cmp"
                 PrivilegedShell.execCmd(cmd)
                 mainHandler.post { scheduleRefreshTile() }
             }
@@ -87,8 +85,8 @@ class MusicProjectionQsTileService : TileService() {
     }
 
     private fun isMainScreenMusicActive(): Boolean {
-        val act = RearScreenLyricsActivity.getCurrentInstance() ?: return false
-        return !act.isFinishing && act.isMainScreenLandscapeLyricsActive()
+        val act = MainScreenMusicActivity.getCurrentInstance() ?: return false
+        return !act.isFinishing && act.hasActiveLyricsUI()
     }
 
     private fun applyTileState() {

@@ -1,17 +1,3 @@
-/*
- * Author: AntiOblivionis
- * QQ: 319641317
- * Github: https://github.com/GoldenglowSusie/
- * Bilibili: 罗德岛T0驭械术师澄闪
- *
- * Chief Tester: 汐木泽
- *
- * Co-developed with AI assistants:
- * - Cursor
- * - Claude-4.5-Sonnet
- * - GPT-5
- * - Gemini-2.5-Pro
- */
 
 package com.wmqc.miroot.car;
 

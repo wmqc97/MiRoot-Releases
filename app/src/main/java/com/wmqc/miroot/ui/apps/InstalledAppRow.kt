@@ -1,4 +1,4 @@
-﻿package com.wmqc.miroot.ui.apps
+package com.wmqc.miroot.ui.apps
 
 import android.graphics.drawable.Drawable
 import com.wmqc.miroot.rear.AppProjectionDisplayPrefs.AppDisplayConfig

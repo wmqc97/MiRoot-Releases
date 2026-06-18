@@ -39,6 +39,46 @@ object CarControlWidgetDisplayLines {
         }
     }
 
+    fun avgConsumptionLine(context: Context, status: VehicleStatusService.VehicleStatusInfo?): String? {
+        val raw = status?.aveFuelConsumption?.trim()?.takeUnless { it.isEmpty() || it == "未知" }
+            ?: return null
+        val value = raw.replace(Regex("[^0-9.]"), "").takeIf { it.isNotEmpty() } ?: return null
+        return context.getString(R.string.car_control_widget_line_avg_consumption, value)
+    }
+
+    fun coolantTempLine(context: Context, status: VehicleStatusService.VehicleStatusInfo?): String? {
+        val raw = status?.engineCoolantTemperature?.trim()?.takeUnless { it.isEmpty() || it == "未知" }
+            ?: return null
+        val digits = raw.replace(Regex("[^\\d.-]"), "").trim().takeIf { it.isNotEmpty() } ?: return null
+        return context.getString(R.string.car_control_widget_line_coolant_temp, digits)
+    }
+
+    fun serviceDistanceLine(context: Context, status: VehicleStatusService.VehicleStatusInfo?): String? {
+        val raw = status?.distanceToService?.trim()?.takeUnless { it.isEmpty() || it == "未知" }
+            ?: return null
+        val value = raw.replace(Regex("[^0-9]"), "").takeIf { it.isNotEmpty() } ?: return null
+        return context.getString(R.string.car_control_widget_line_service_distance, value)
+    }
+
+    fun epbStatusLine(context: Context, status: VehicleStatusService.VehicleStatusInfo?): String? {
+        val raw = status?.electricParkBrakeStatus?.trim()?.takeUnless { it.isEmpty() || it == "未知" }
+            ?: return null
+        val isEngaged = raw == "1" || raw.equals("true", ignoreCase = true) ||
+            raw.contains("拉起") || raw.contains("engaged") || raw.contains("on")
+        return if (isEngaged) {
+            context.getString(R.string.car_control_widget_line_epb_on)
+        } else {
+            context.getString(R.string.car_control_widget_line_epb_off)
+        }
+    }
+
+    fun engineSpeedLine(context: Context, status: VehicleStatusService.VehicleStatusInfo?): String? {
+        val raw = status?.engineSpeed?.trim()?.takeUnless { it.isEmpty() || it == "未知" }
+            ?: return null
+        val value = raw.replace(Regex("[^0-9]"), "").takeIf { it.isNotEmpty() } ?: return null
+        return context.getString(R.string.car_control_widget_line_engine_speed, value)
+    }
+
     data class TirePressureCells(
         val lf: String,
         val rf: String,

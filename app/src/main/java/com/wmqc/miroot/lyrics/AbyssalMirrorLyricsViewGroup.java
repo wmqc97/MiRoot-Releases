@@ -193,10 +193,8 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
     /** 渐变：上/浅色（白）→ 下/深色（主题），用于圆角框与歌词；呼吸+随机换色时由成员覆盖 */
     private static final int GRADIENT_START_COLOR = 0xFFFFFFFF;
     private static final int GRADIENT_END_COLOR = 0xFF8ED2CD;
-    /** 随机换色间隔（与背屏音乐调试页「颜色变化节奏」保持一致） */
-    private static final long COLOR_CHANGE_INTERVAL_DEFAULT_MS = 5000L;
-    private static final long COLOR_CHANGE_INTERVAL_MIN_MS = 1000L;
-    private static final long COLOR_CHANGE_INTERVAL_MAX_MS = 10000L;
+    /** 换行触发颜色过渡时长（与 ModernLyricsView 一致） */
+    private static final long COLOR_FADE_DURATION_MS = 800L;
     /** 呼吸周期（ms） */
     private static final long BREATH_PERIOD_MS = 2500;
 
@@ -280,8 +278,8 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
     private int targetGradientEnd = GRADIENT_END_COLOR;
     private int transitionStartStart = GRADIENT_START_COLOR;
     private int transitionStartEnd = GRADIENT_END_COLOR;
-    private long lastColorChangeTime = 0;
-    private long colorChangeIntervalMs = COLOR_CHANGE_INTERVAL_DEFAULT_MS;
+    private long colorTransitionStartTime = 0;   // 本轮过渡开始时间戳
+    private int lastSharedSyncColor = 0;         // 上次检测到的共享颜色（用于变化检测）
     private boolean randomColorSwitchEnabled = true;
     private float breathFactor = 1f;
 
@@ -361,7 +359,7 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
         // 创建深渊镜歌词 View（3 层 + 雾化 + 光照）
         createAbyssalLyricView();
 
-        // 方案1：手势上一首/下一首，onFling 中 |velocityX|>400 且 |velocityX|>|velocityY| 时：左滑(velocityX>0)→下一首，右滑(velocityX<0)→上一首
+        // 方案1：手势上一首/下一首，onFling 中 |velocityX|>400 且 |velocityX|>|velocityY| 时：右滑(velocityX>0)→上一首，左滑(velocityX<0)→下一首
         gestureDetector = new GestureDetector(getContext(), new GestureDetector.SimpleOnGestureListener() {
             @Override
             public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
@@ -370,9 +368,9 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
                 float absVy = Math.abs(velocityY);
                 if (absVx <= FLING_VELOCITY_THRESHOLD || absVx <= absVy) return false;
                 if (velocityX > 0) {
-                    prevNextListener.onNext();
-                } else {
                     prevNextListener.onPrevious();
+                } else {
+                    prevNextListener.onNext();
                 }
                 return true;
             }
@@ -590,6 +588,7 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
                     if (detectedRadius > 0) {
                         systemCornerRadius = detectedRadius;
                         LogHelper.d("AbyssalMirrorLyrics", "✅ 从getRootWindowInsets检测到系统圆角半径: " + systemCornerRadius + "px");
+                        applyMainScreenCornerRadiusIfNeeded();
                         return;
                     }
                 }
@@ -609,6 +608,7 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
                                     if (detectedRadius > 0) {
                                         systemCornerRadius = detectedRadius;
                                         LogHelper.d("AbyssalMirrorLyrics", "✅ 从WindowManager检测到系统圆角半径: " + systemCornerRadius + "px");
+                                        applyMainScreenCornerRadiusIfNeeded();
                                         return;
                                     }
                                 }
@@ -630,6 +630,19 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
             }
         } catch (Exception e) {
             LogHelper.w("AbyssalMirrorLyrics", "⚠️ 检测系统圆角失败，使用默认值: " + systemCornerRadius + "px, 错误: " + e.getMessage());
+        }
+        applyMainScreenCornerRadiusIfNeeded();
+    }
+
+    private void applyMainScreenCornerRadiusIfNeeded() {
+        if (!isMainScreenLandscapeMode || fixedCornerRadiusPx != null) {
+            return;
+        }
+        int w = getWidth();
+        int h = getHeight();
+        if (w > 0 && h > 0) {
+            systemCornerRadius = ProjectionHelper.resolveMainScreenCornerRadiusPx(
+                    systemCornerRadius, w, h);
         }
     }
     
@@ -759,17 +772,17 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
         try {
             android.content.res.Resources res = getContext().getResources();
             android.util.DisplayMetrics metrics = res.getDisplayMetrics();
-            int screenWidth = metrics.widthPixels;
-            int screenHeight = metrics.heightPixels;
-            int minDimension = Math.min(screenWidth, screenHeight);
-            
-            // 根据屏幕尺寸估算：小屏设备（< 1080px）约 2-3%，大屏设备约 3-4%
-            float estimatedRadius = minDimension < 1080 ? (minDimension * 0.025f) : (minDimension * 0.035f);
-            
-            // 限制在合理范围内（20px - 150px）
-            estimatedRadius = Math.max(20f, Math.min(150f, estimatedRadius));
-            
-            LogHelper.d("AbyssalMirrorLyrics", "📐 根据屏幕尺寸估算圆角: 屏幕=" + screenWidth + "x" + screenHeight + ", 估算半径=" + estimatedRadius + "px");
+            int w = getWidth() > 0 ? getWidth() : metrics.widthPixels;
+            int h = getHeight() > 0 ? getHeight() : metrics.heightPixels;
+            float estimatedRadius;
+            if (isMainScreenLandscapeMode) {
+                estimatedRadius = ProjectionHelper.estimateMainScreenCornerRadiusPx(w, h);
+            } else {
+                int minDimension = Math.min(w, h);
+                estimatedRadius = minDimension < 1080 ? (minDimension * 0.025f) : (minDimension * 0.035f);
+                estimatedRadius = Math.max(20f, Math.min(150f, estimatedRadius));
+            }
+            LogHelper.d("AbyssalMirrorLyrics", "📐 根据屏幕尺寸估算圆角: 屏幕=" + w + "x" + h + ", 估算半径=" + estimatedRadius + "px");
             return estimatedRadius;
         } catch (Exception e) {
             LogHelper.w("AbyssalMirrorLyrics", "⚠️ 估算圆角失败: " + e.getMessage());
@@ -867,16 +880,21 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
                 float viewCenterX = viewWidth / 2f;
                 float viewCenterY = viewHeight / 2f;
                 float aspectRatio = viewHeight / viewWidth;
+
+                // 仅边框描边预留 2px；层内缩仍由 stroke 半宽决定
+                float screenEdgeInset = ProjectionHelper.PROJECTION_EDGE_INSET_PX;
                 
                 // 第 2～4 层统一 worldZ 递进：外浅内深
                 float worldZ = 0f - (TEXT_BASE + TEXT_OFF * (BORDER_LAYER_COUNT - 1 - layerIndex));
                 
                 // 与本层描边一致（第1层3dp～第4层2dp线性过渡），用于路径内缩
                 int strokePx = (int) (borderPaint.getStrokeWidth() + 0.5f);
-                float edgeInset = strokePx / 2f;
+                float strokeHalfInset = strokePx / 2f;
+                float edgeInset = strokeHalfInset + screenEdgeInset;
                 // 每层 rect 向里缩 layerInset，全尺寸叠放后由 rect 体现层层递减（不再用 margin 嵌套）
                 int layerInsetPx = dpToPx(layerIndex * AbyssalMirrorLyricsViewGroup.this.getInsetPerLayerDp());
-                float firstLayerRadius = Math.min(AbyssalMirrorLyricsViewGroup.this.systemCornerRadius, Math.max(0f, Math.min(viewWidth, viewHeight) / 2f - 1f));
+                float cornerBase = Math.max(0f, AbyssalMirrorLyricsViewGroup.this.systemCornerRadius - edgeInset);
+                float firstLayerRadius = Math.min(cornerBase, Math.max(0f, Math.min(viewWidth, viewHeight) / 2f - 1f));
                 float rectW = viewWidth - 2f * (edgeInset + layerInsetPx);
                 float rectH = viewHeight - 2f * (edgeInset + layerInsetPx);
                 float maxRadius = Math.max(0f, Math.min(rectW, rectH) / 2f - 1f);
@@ -1392,16 +1410,9 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
         movableRangeMultiplier = Math.max(0.5f, Math.min(5f, multiplier));
     }
 
-    /** 设置深渊镜颜色变化节奏（毫秒），与背屏音乐调试页联动。 */
+    /** 设置深渊镜颜色变化节奏 — 已改为换行触发，此方法保留兼容但不再生效。 */
     public void setColorChangeIntervalMs(long intervalMs) {
-        long clamped = Math.max(COLOR_CHANGE_INTERVAL_MIN_MS, Math.min(COLOR_CHANGE_INTERVAL_MAX_MS, intervalMs));
-        if (colorChangeIntervalMs == clamped) {
-            return;
-        }
-        colorChangeIntervalMs = clamped;
-        long now = System.currentTimeMillis();
-        // 修改节奏后尽快使用新周期，避免体感滞后。
-        lastColorChangeTime = now - clamped;
+        // no-op: 换行触发模式下无需时间间隔
     }
 
     public void setRandomColorSwitchEnabled(boolean enabled) {
@@ -1409,21 +1420,16 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
             return;
         }
         randomColorSwitchEnabled = enabled;
+        LyricsColorManager.INSTANCE.setRandomMode(enabled);
         if (!enabled) {
-            currentGradientStart = Color.WHITE;
-            currentGradientEnd = Color.WHITE;
-            targetGradientStart = Color.WHITE;
-            targetGradientEnd = Color.WHITE;
-            transitionStartStart = Color.WHITE;
-            transitionStartEnd = Color.WHITE;
-            lastColorChangeTime = 0L;
+            int fc = LyricsColorManager.INSTANCE.getColor();
+            currentGradientStart = fc;
+            currentGradientEnd = fc;
             if (abyssalLyricView != null) {
-                abyssalLyricView.setTextColor(Color.WHITE);
+                abyssalLyricView.setTextColor(fc);
             }
             invalidateAbyssalVisualSubtree();
             postInvalidateOnAnimation();
-        } else {
-            lastColorChangeTime = 0L;
         }
     }
 
@@ -1497,6 +1503,33 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
             }
             abyssalLyricView.setTextColor(currentTextColor);
         }
+    }
+
+    /**
+     * 视图挂载后重新评估主屏圆角（启动时 insets 可能尚未就绪）。
+     */
+    public void reevaluateCornerRadius() {
+        if (fixedCornerRadiusPx != null) {
+            return;
+        }
+        detectSystemCornerRadius();
+        if (borderLayers != null) {
+            for (FrameLayout layer : borderLayers) {
+                if (layer != null) {
+                    for (int i = 0; i < layer.getChildCount(); i++) {
+                        View child = layer.getChildAt(i);
+                        if (child != null) {
+                            child.invalidate();
+                        }
+                    }
+                }
+            }
+        }
+        if (abyssalLyricView != null) {
+            abyssalLyricView.invalidate();
+        }
+        invalidate();
+        LogHelper.d("AbyssalMirrorLyrics", "reevaluate corner radius: " + systemCornerRadius + "px");
     }
     
     // ========== 工具方法 ==========
@@ -1773,51 +1806,20 @@ public class AbyssalMirrorLyricsViewGroup extends FrameLayout {
     }
 
     /**
-     * 更新呼吸系数与渐变随机换色（在 doFrame 中调用）。
+     * 更新呼吸系数与渐变随机换色（每帧调用，由 LyricsColorManager 驱动）。
      *
-     * @return true 表示仍处于一轮颜色过渡期内，需要持续重绘（与背屏调试页「颜色变化节奏」一致，避免静止时节流导致过渡卡住）。
+     * @return true 表示仍处于一轮颜色过渡期内，需要持续重绘。
      */
     private boolean updateBreathingAndGradientColor() {
-        if (!randomColorSwitchEnabled) {
-            currentGradientStart = Color.WHITE;
-            currentGradientEnd = Color.WHITE;
-            breathFactor = 1f;
-            if (abyssalLyricView != null) {
-                abyssalLyricView.setTextColor(Color.WHITE);
-            }
-            return false;
-        }
+        int color = LyricsColorManager.INSTANCE.getColor();
+        currentGradientStart = color;
+        currentGradientEnd = generateRandomColorDistinct(color);
+        targetGradientStart = color;
+        targetGradientEnd = currentGradientEnd;
+        transitionStartStart = color;
+        transitionStartEnd = currentGradientEnd;
         long now = System.currentTimeMillis();
-        if (lastColorChangeTime == 0L) {
-            currentGradientStart = generateRandomColor();
-            currentGradientEnd = generateRandomColorDistinct(currentGradientStart);
-            transitionStartStart = currentGradientStart;
-            transitionStartEnd = currentGradientEnd;
-            targetGradientStart = currentGradientStart;
-            targetGradientEnd = currentGradientEnd;
-            lastColorChangeTime = now;
-        }
-        long interval = Math.max(1L, colorChangeIntervalMs);
-        int jumps = 0;
-        while (jumps < 48 && now - lastColorChangeTime >= interval) {
-            transitionStartStart = currentGradientStart;
-            transitionStartEnd = currentGradientEnd;
-            targetGradientStart = generateRandomColorDistinct(transitionStartStart);
-            targetGradientEnd = generateRandomColorDistinct(targetGradientStart);
-            lastColorChangeTime += interval;
-            jumps++;
-        }
-        if (BuildConfig.DEBUG && jumps > 0) {
-            LogHelper.d("AbyssalMirrorLyrics", "🎨 深渊镜颜色目标切换[at=" + now
-                    + ", intervalMs=" + interval
-                    + ", catchUpJumps=" + jumps
-                    + ", startTo=#" + Integer.toHexString(targetGradientStart)
-                    + ", endTo=#" + Integer.toHexString(targetGradientEnd) + "]");
-        }
-        float progress = Math.min(1f, (float) (now - lastColorChangeTime) / (float) interval);
-        currentGradientStart = interpolateVividColor(transitionStartStart, targetGradientStart, progress);
-        currentGradientEnd = interpolateVividColor(transitionStartEnd, targetGradientEnd, progress);
         breathFactor = 0.95f + 0.05f * (float) Math.sin(2 * Math.PI * now / BREATH_PERIOD_MS);
-        return progress < 0.998f;
+        return false;
     }
 }

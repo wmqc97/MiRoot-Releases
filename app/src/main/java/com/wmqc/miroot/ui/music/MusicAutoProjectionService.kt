@@ -28,21 +28,33 @@ import java.lang.reflect.Method
 class MusicAutoProjectionService : Service() {
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    /** 当前是否有活跃的媒体会话（由 onActiveSessionsChanged 回调维护）。 */
+    private var hasActiveSessions = false
+
     private val pollRunnable =
         object : Runnable {
             override fun run() {
                 applyPlaybackProbe()
-                mainHandler.postDelayed(this, pollIntervalMs())
+                // 有活跃会话时高频轮询（POLL_MS），无活跃会话时低频兜底（POLL_IDLE_MS）
+                // 主要依赖 onActiveSessionsChanged 回调驱动，轮询仅作兜底
+                val interval = if (hasActiveSessions) pollIntervalMs() else POLL_IDLE_MS
+                mainHandler.postDelayed(this, interval)
             }
         }
     private var sessionsListenerRegistered = false
     private var mediaSessionManager: MediaSessionManager? = null
 
     private val activeSessionsListener =
-        MediaSessionManager.OnActiveSessionsChangedListener {
+        MediaSessionManager.OnActiveSessionsChangedListener { controllers ->
             mainHandler.post {
+                hasActiveSessions = !controllers.isNullOrEmpty()
                 rebuildControllers()
                 applyPlaybackProbe()
+                // 会话从无到有时，立即提升轮询频率
+                if (hasActiveSessions) {
+                    cancelPoll()
+                    schedulePoll()
+                }
             }
         }
 
@@ -171,6 +183,7 @@ class MusicAutoProjectionService : Service() {
                 c.registerCallback(playbackCallback)
                 tracked.add(c)
             }
+            hasActiveSessions = tracked.isNotEmpty()
         } catch (e: SecurityException) {
             LogHelper.wThrottled(
                 TAG,
@@ -297,6 +310,9 @@ class MusicAutoProjectionService : Service() {
         private const val DELAY_STOP_MS = 3200L
 
         private const val POLL_MS = 3500L
+
+        /** 无活跃媒体会话时的低频兜底轮询（主要依赖 onActiveSessionsChanged 回调驱动）。 */
+        private const val POLL_IDLE_MS = 30_000L
 
         private const val POLL_MISSING_PERMISSION_MS = 30_000L
         private const val THROTTLE_MISSING_NLS_MS = 10 * 60 * 1000L

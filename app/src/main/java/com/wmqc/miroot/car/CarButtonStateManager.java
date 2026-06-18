@@ -1,8 +1,3 @@
-/*
- * Author: AntiOblivionis
- * Co-developed with AI assistants
- */
-
 package com.wmqc.miroot.car;
 
 import com.wmqc.miroot.lyrics.LogHelper;

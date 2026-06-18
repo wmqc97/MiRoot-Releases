@@ -1,4 +1,4 @@
-﻿package com.wmqc.miroot.ui.music
+package com.wmqc.miroot.ui.music
 import com.wmqc.miroot.display.MainDisplayUi
 
 import android.content.ComponentName
@@ -18,22 +18,26 @@ import com.wmqc.miroot.lyrics.RearScreenLyricsActivity
 import com.wmqc.miroot.service.MiRootNotificationListenerService
 import kotlin.jvm.JvmOverloads
 import kotlin.jvm.JvmStatic
+import java.util.concurrent.Executors
 
 object MusicProjectionController {
 
     @JvmStatic
     @JvmOverloads
     fun start(context: Context, directRearOnly: Boolean = false) {
-        PrivilegeBackend.refreshSync()
-        if (!PrivilegeBackend.isPrivileged()) {
-            MainDisplayUi.showToast(context, R.string.music_need_privilege, Toast.LENGTH_LONG)
-            return
+        // refreshSync() 会执行 su 进程检测，可能阻塞数秒；移到后台避免 ANR/闪退
+        Executors.newSingleThreadExecutor().execute {
+            PrivilegeBackend.refreshSync()
+            if (!PrivilegeBackend.isPrivileged()) {
+                MainDisplayUi.showToast(context, R.string.music_need_privilege, Toast.LENGTH_LONG)
+                return@execute
+            }
+            val i = Intent(context, MusicProjectionService::class.java)
+            i.action = LyricsIntents.ACTION_OPEN_MUSIC_PROJECTION
+            i.putExtra(LyricsIntents.EXTRA_MUSIC_PROJECTION_OP, LyricsIntents.VALUE_MUSIC_PROJECTION_OP_START)
+            i.putExtra(LyricsIntents.EXTRA_MUSIC_PROJECTION_DIRECT_REAR_ONLY, directRearOnly)
+            context.startService(i)
         }
-        val i = Intent(context, MusicProjectionService::class.java)
-        i.action = LyricsIntents.ACTION_OPEN_MUSIC_PROJECTION
-        i.putExtra(LyricsIntents.EXTRA_MUSIC_PROJECTION_OP, LyricsIntents.VALUE_MUSIC_PROJECTION_OP_START)
-        i.putExtra(LyricsIntents.EXTRA_MUSIC_PROJECTION_DIRECT_REAR_ONLY, directRearOnly)
-        context.startService(i)
     }
 
     fun stop(context: Context) {

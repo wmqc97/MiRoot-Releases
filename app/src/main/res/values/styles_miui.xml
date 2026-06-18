@@ -1,64 +1,72 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- 二级页 Toolbar：与主 Tab 页标题 [PageTitle] 同字号 -->
-    <style name="TextAppearance.MiRoot.Title" parent="TextAppearance.Material3.TitleLarge">
-        <item name="android:textSize">@dimen/mi_page_title_text_size</item>
-        <item name="android:textStyle">bold</item>
-        <item name="android:textColor">@color/mi_text_primary</item>
-        <item name="android:fontFamily">sans-serif-medium</item>
-    </style>
+    <!-- ========== 文字排版体系 ========== -->
 
-    <style name="TextAppearance.MiRoot.Body" parent="TextAppearance.Material3.BodyMedium">
-        <item name="android:textColor">@color/mi_text_secondary</item>
-    </style>
-
-    <style name="TextAppearance.MiRoot.BodyStrong" parent="TextAppearance.Material3.BodyMedium">
-        <item name="android:textStyle">bold</item>
-        <item name="android:textColor">@color/mi_text_primary</item>
-    </style>
-
-    <!-- 与音乐页主标题（SemiBold + @dimen/mi_page_title_text_size）一致 -->
+    <!-- 页面主标题：大号加粗，视觉锚点 -->
     <style name="TextAppearance.MiRoot.PageTitle" parent="TextAppearance.Material3.TitleLarge">
         <item name="android:textSize">@dimen/mi_page_title_text_size</item>
         <item name="android:textStyle">bold</item>
         <item name="android:textColor">@color/mi_text_primary</item>
         <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">-0.01</item>
     </style>
 
-    <!-- 卡片内首标题：与音乐页 Compose SectionTitleBar（19sp + sans-serif-medium）一致 -->
+    <!-- 二级页 Toolbar 标题 -->
+    <style name="TextAppearance.MiRoot.Title" parent="TextAppearance.Material3.TitleLarge">
+        <item name="android:textSize">@dimen/mi_page_title_text_size</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/mi_text_primary</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:letterSpacing">-0.01</item>
+    </style>
+
+    <!-- 卡片内区块标题 -->
     <style name="TextAppearance.MiRoot.CardSectionTitle" parent="TextAppearance.Material3.TitleMedium">
         <item name="android:textSize">@dimen/mi_card_section_title_text_size</item>
-        <item name="android:textStyle">bold</item>
+        <item name="android:textStyle">normal</item>
         <item name="android:textColor">@color/mi_text_primary</item>
         <item name="android:fontFamily">sans-serif-medium</item>
     </style>
 
-    <!-- 卡片内二级分组标题：对齐 Miuix body2 + 次要色（介于首标题与开关之间） -->
+    <!-- 卡片内二级分组标题 -->
     <style name="TextAppearance.MiRoot.CardSectionSubtitle" parent="TextAppearance.Material3.BodyMedium">
         <item name="android:textSize">14sp</item>
         <item name="android:textColor">@color/mi_text_secondary</item>
     </style>
 
-    <!-- 与音乐页 ToggleRow 文案（Miuix body1）一致：主色正文开关标题 -->
-    <style name="TextAppearance.MiRoot.SwitchLabel" parent="TextAppearance.Material3.BodyLarge">
-        <item name="android:textSize">16sp</item>
+    <!-- 正文说明 -->
+    <style name="TextAppearance.MiRoot.Body" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textColor">@color/mi_text_secondary</item>
+    </style>
+
+    <!-- 强调正文 -->
+    <style name="TextAppearance.MiRoot.BodyStrong" parent="TextAppearance.Material3.BodyMedium">
+        <item name="android:textStyle">bold</item>
         <item name="android:textColor">@color/mi_text_primary</item>
     </style>
 
-    <!-- 功能页「录屏·截图」等需压缩纵向空间时使用，不影响音乐页等大开关区 -->
+    <!-- 开关标签：标准 -->
+    <style name="TextAppearance.MiRoot.SwitchLabel" parent="TextAppearance.Material3.BodyLarge">
+        <item name="android:textSize">15sp</item>
+        <item name="android:textColor">@color/mi_text_primary</item>
+    </style>
+
+    <!-- 开关标签：紧凑 -->
     <style name="TextAppearance.MiRoot.SwitchLabelCompact" parent="TextAppearance.Material3.BodyMedium">
         <item name="android:textSize">14sp</item>
         <item name="android:textColor">@color/mi_text_primary</item>
     </style>
 
-    <!-- 与音乐页 SliderRow 左侧标题（footnote1 + 次要色）一致 -->
+    <!-- 滑块标签 -->
     <style name="TextAppearance.MiRoot.CardSliderLabel" parent="TextAppearance.Material3.BodySmall">
         <item name="android:textSize">12sp</item>
         <item name="android:textColor">@color/mi_text_secondary</item>
     </style>
 
-    <!-- 二级页顶栏：与页面底 [mi_page_bg]、状态栏区域同色，无阴影避免「白条」 -->
+    <!-- ========== 组件样式 ========== -->
+
+    <!-- 二级页 Toolbar -->
     <style name="Widget.MiRoot.Toolbar" parent="Widget.Material3.Toolbar">
         <item name="android:background">@color/mi_page_bg</item>
         <item name="backgroundTint">@color/mi_page_bg</item>
@@ -68,32 +76,35 @@
         <item name="navigationIconTint">?attr/colorOnSurface</item>
     </style>
 
-    <!-- 与音乐页 Miuix Card 一致：@color/mi_card_surface、圆角、无描边、无阴影 -->
+    <!-- 卡片基础形状 -->
     <style name="Widget.MiRoot.Card.Shape" parent="Widget.Material3.CardView.Elevated">
         <item name="cardCornerRadius">@dimen/mi_corner_radius</item>
         <item name="cardElevation">0dp</item>
         <item name="strokeWidth">0dp</item>
     </style>
 
+    <!-- 标准卡片 -->
     <style name="Widget.MiRoot.Card" parent="Widget.MiRoot.Card.Shape">
         <item name="cardBackgroundColor">@color/mi_card_surface</item>
     </style>
 
-    <!-- 状态页顶部权限卡片：形状与上同，填充色由 PermissionFragment 按 Root/Shizuku 状态设置 -->
+    <!-- 状态页权限卡片 -->
     <style name="Widget.MiRoot.Card.PermissionStatus" parent="Widget.MiRoot.Card.Shape" />
 
-    <!-- 全应用 XML 界面 MaterialButton 统一：圆角与主色主题一致，变体语义与 Material3 相同 -->
+    <!-- ========== 按钮样式 ========== -->
     <style name="Widget.MiRoot.Button" parent="Widget.Material3.Button">
         <item name="cornerRadius">@dimen/mi_corner_radius</item>
+        <item name="android:minHeight">44dp</item>
     </style>
     <style name="Widget.MiRoot.Button.Tonal" parent="Widget.Material3.Button.TonalButton">
         <item name="cornerRadius">@dimen/mi_corner_radius</item>
+        <item name="android:minHeight">44dp</item>
     </style>
     <style name="Widget.MiRoot.Button.Outlined" parent="Widget.Material3.Button.OutlinedButton">
         <item name="cornerRadius">@dimen/mi_corner_radius</item>
+        <item name="android:minHeight">44dp</item>
     </style>
     <style name="Widget.MiRoot.Button.Text" parent="Widget.Material3.Button.TextButton">
         <item name="cornerRadius">@dimen/mi_corner_radius</item>
     </style>
-
 </resources>

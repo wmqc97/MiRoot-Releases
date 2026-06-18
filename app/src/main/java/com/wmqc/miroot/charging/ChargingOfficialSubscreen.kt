@@ -7,9 +7,9 @@ import com.wmqc.miroot.lyrics.LogHelper
 import kotlin.jvm.JvmStatic
 
 /**
- * 对齐 3.4 [ChargingService]：启动充电动画前仅调用一次
- * {@link com.wmqc.miroot.lyrics.ITaskService#forceStopOfficialSubscreenForCharging}（等同 3.4 的
- * {@code disableSubScreenLauncher()}，{@code am force-stop com.xiaomi.subscreencenter}，不受功能页总开关约束）。
+ * 启动充电动画前调用 [ITaskService.disableSubScreenLauncher] 屏蔽官方手势服务，
+ * 防止充电动画期间背屏手势误触。充电动画结束后由 [restoreAfterChargingFlow]
+ * 或 [reviveOfficialPackageAfterChargingWithoutLauncher] 恢复。
  */
 object ChargingOfficialSubscreen {
     private const val TAG = "ChargingOfficialSubscreen"
@@ -17,7 +17,7 @@ object ChargingOfficialSubscreen {
     @Volatile
     private var disabledByCharging: Boolean = false
 
-    /** 本次充电动画流程是否已 force-stop 官方背屏中心（与设置页「禁用」开关无关）。 */
+    /** 本次充电动画流程是否已禁用官方手势服务。 */
     @Volatile
     private var forceStoppedOfficialForCharging: Boolean = false
 
@@ -31,11 +31,11 @@ object ChargingOfficialSubscreen {
             return
         }
         try {
-            val ok = runCatching { taskService.forceStopOfficialSubscreenForCharging() }.getOrDefault(false)
+            val ok = runCatching { taskService.disableSubScreenLauncher() }.getOrDefault(false)
             if (ok) {
                 disabledByCharging = true
                 forceStoppedOfficialForCharging = true
-                LogHelper.d(TAG, "applyDisableBeforeChargingFlow: 已禁用官方背屏（对齐 3.4 disableSubScreenLauncher）")
+                LogHelper.d(TAG, "applyDisableBeforeChargingFlow: 已禁用官方手势服务（disableSubScreenLauncher）")
             }
         } catch (e: RemoteException) {
             LogHelper.w(TAG, "applyDisableBeforeChargingFlow: ${e.message}")
@@ -70,7 +70,7 @@ object ChargingOfficialSubscreen {
 
     /**
      * 充电动画结束且不会调用 [restoreAfterChargingFlow]（例如恢复音乐/车控投屏）时：
-     * 官方进程曾被 force-stop，若不做任何恢复，副屏边缘返回往往要等系统自行拉起（约十秒级）。
+     * 官方进程曾被禁用，若不做任何恢复，副屏边缘返回往往要等系统自行拉起（约十秒级）。
      * 此处仅 `pm enable` 包与组件，**不** `am start` 官方 Launcher，避免打断即将由广播拉起的 MiRoot 背屏界面。
      */
     @JvmStatic

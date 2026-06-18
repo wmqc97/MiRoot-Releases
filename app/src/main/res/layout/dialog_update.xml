@@ -4,8 +4,8 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:fillViewport="true"
-    android:paddingStart="20dp"
-    android:paddingEnd="20dp"
+    android:paddingStart="@dimen/mi_card_inner_padding"
+    android:paddingEnd="@dimen/mi_card_inner_padding"
     android:paddingTop="4dp"
     android:paddingBottom="8dp">
 
@@ -84,17 +84,15 @@
         <View
             android:layout_width="match_parent"
             android:layout_height="1dp"
-            android:alpha="0.12"
-            android:background="@color/mi_text_primary" />
+            android:background="@color/mi_divider" />
 
         <!-- Release notes -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="@dimen/mi_card_spacing"
             android:text="@string/update_release_notes"
-            android:textAppearance="?attr/textAppearanceTitleSmall"
-            android:textColor="@color/mi_text_primary" />
+            android:textAppearance="@style/TextAppearance.MiRoot.CardSectionTitle" />
 
         <TextView
             android:id="@+id/dialog_update_release_notes"

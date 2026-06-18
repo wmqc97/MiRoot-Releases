@@ -81,6 +81,20 @@ class KuwoBroadcastLyricBridge {
     /** True while the receiver is registered. */
     fun isStarted(): Boolean = receiver.isRegistered()
 
+    /**
+     * Re-apply cached full lyrics to the view. Called on resume so that if
+     * updateMediaInfo() previously set a single-line placeholder, the real
+     * lyrics are restored without waiting for a new LYRIC_FULL broadcast.
+     */
+    fun restoreCachedLyrics() {
+        if (cachedLines.isEmpty()) return
+        val v = lyricsView ?: return
+        mainHandler.post {
+            applyFullLyric(cachedLines.toTypedArray(), cachedLineTimesMs,
+                cachedWordsJson, cachedLyricType)
+        }
+    }
+
     // ── Listener implementation ──────────────────────────────
 
     private val receiverListener = object : KuwoBroadcastLyricReceiver.Listener {
@@ -182,6 +196,7 @@ class KuwoBroadcastLyricBridge {
         val v = lyricsView ?: return
         if (totalWords > 0) {
             v.setEnableWordByWord(true)
+            v.setCharJumpEnabled(true)
         }
         v.setLyrics(enhancedLines)
         v.setTrackLoading(false)

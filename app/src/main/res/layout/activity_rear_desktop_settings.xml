@@ -36,7 +36,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="16dp">
+                    android:padding="@dimen/mi_card_inner_padding">
 
                     <TextView
                         android:layout_width="match_parent"
@@ -78,7 +78,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
                         android:text="@string/rear_desktop_settings_hint_apps_tab"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
                         android:textColor="@color/mi_text_secondary"
                         android:visibility="gone"
                         tools:visibility="visible" />
@@ -104,7 +104,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="6dp"
                         android:text="@string/rear_desktop_honeycomb_test_hint"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
                         android:textColor="@color/mi_text_secondary" />
 
                     <com.google.android.material.button.MaterialButton
@@ -122,7 +122,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
                         android:text="@string/rear_desktop_all_mode_hint"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
                         android:textColor="@color/mi_text_secondary"
                         android:visibility="gone" />
                 </LinearLayout>
@@ -138,7 +138,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="16dp">
+                    android:padding="@dimen/mi_card_inner_padding">
 
                     <TextView
                         android:layout_width="match_parent"
@@ -152,7 +152,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="@dimen/mi_card_section_title_to_hint"
                         android:text="@string/apps_official_gesture_master_hint"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
                         android:textColor="@color/mi_text_secondary" />
 
                     <TextView
@@ -189,7 +189,7 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="10dp"
                         android:text="@string/apps_official_gesture_selected_hint"
-                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
                         android:textColor="@color/mi_text_secondary"
                         android:visibility="gone" />
                 </LinearLayout>

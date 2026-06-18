@@ -80,7 +80,7 @@ public class RearSwitchKeeperService extends Service {
     private RearSwitchProximityController proximityController;
 
     // V14.5: 监听应用是否手动移回主屏
-    private static final long CHECK_TASK_INTERVAL_MS = 3000; // 每3秒检查一次
+    private static final long CHECK_TASK_INTERVAL_MS = 5000; // 每5秒检查一次（优化：从3s提高到5s降低CPU唤醒频率）
     private String monitoredTaskInfo = null; // 格式: "packageName:taskId"
     private boolean skipInitialLauncherKills = false;
     private static final String SUBSCREENCENTER_PKG = "com.xiaomi.subscreencenter";
@@ -103,6 +103,8 @@ public class RearSwitchKeeperService extends Service {
     // V2.4: 持续唤醒背屏（防止自动熄屏）；间隔与「背屏辅助」设置一致
     private int wakeupIntervalMs = RearAssistPrefs.DEFAULT_INTERVAL_MS;
     private boolean keepScreenOnEnabled = true; // 由 Intent / 设置项决定
+    /** WakeLock 超时兜底（30 分钟）：若 Keeper 异常未 release，系统可自动回收；wakeupRunnable 每轮续期。 */
+    private static final long WAKELOCK_TIMEOUT_MS = 30 * 60 * 1000L;
     private boolean displayStateRestored = false;
     private boolean unifiedExitTriggered = false;
 
@@ -218,8 +220,8 @@ public class RearSwitchKeeperService extends Service {
                         wakeLock = pm.newWakeLock(
                                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
                                 "MiRoot::RearSwitchKeeper");
-                        wakeLock.acquire();
-                        if (BuildConfig.DEBUG) LogHelper.d(TAG, "WakeLock acquired (keep on)");
+                        wakeLock.acquire(WAKELOCK_TIMEOUT_MS);
+                        if (BuildConfig.DEBUG) LogHelper.d(TAG, "WakeLock acquired (keep on, timeout=30min)");
                     }
                 } catch (Exception e) {
                     LogHelper.e(TAG, "WakeLock acquire failed", e);
@@ -309,8 +311,8 @@ public class RearSwitchKeeperService extends Service {
                         wakeLock = pm.newWakeLock(
                                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
                                 "MiRoot::RearSwitchKeeper");
-                        wakeLock.acquire();
-                        if (BuildConfig.DEBUG) LogHelper.d(TAG, "WakeLock acquired (SCREEN_BRIGHT_WAKE_LOCK)");
+                        wakeLock.acquire(WAKELOCK_TIMEOUT_MS);
+                        if (BuildConfig.DEBUG) LogHelper.d(TAG, "WakeLock acquired (SCREEN_BRIGHT_WAKE_LOCK, timeout=30min)");
                     }
                 } catch (Exception e) {
                     LogHelper.e(TAG, "✗ Failed to acquire WakeLock", e);
@@ -467,6 +469,14 @@ public class RearSwitchKeeperService extends Service {
             if (!keepScreenOnEnabled) {
                 // 开关已关闭，停止唤醒循环
                 return;
+            }
+
+            // 续期 WakeLock（acquire 有超时版本会延长超时，避免异常时系统无法休眠）
+            if (wakeLock != null && wakeLock.isHeld()) {
+                try {
+                    wakeLock.acquire(WAKELOCK_TIMEOUT_MS);
+                } catch (Exception ignored) {
+                }
             }
 
             // 发送WAKEUP唤醒信号（与「始终常亮」一致：不在循环内轮询背屏前台；结束迁屏由 stopService / checkTaskRunnable 负责）

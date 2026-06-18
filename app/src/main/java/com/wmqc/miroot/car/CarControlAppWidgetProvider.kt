@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
 /**
  * 车控桌面小组件：圆角、左信息右车模、紧凑按钮、二次确认遮罩。
  */
-class CarControlAppWidgetProvider : AppWidgetProvider() {
+open class CarControlAppWidgetProvider : AppWidgetProvider() {
 
     override fun onUpdate(
         context: Context,
@@ -60,12 +60,38 @@ class CarControlAppWidgetProvider : AppWidgetProvider() {
         private const val DEFAULT_HEIGHT_DP = 130
         private const val REQUEST_REFRESH_BASE = 8_000
 
+        /** 布局类型：普通 4x2、宽幅 6x2、全览 6x4 */
+        enum class LayoutVariant { STANDARD, WIDE_6X2, EXPANDED_6X4 }
+
+        fun selectLayoutVariant(widthDp: Int, heightDp: Int): LayoutVariant = when {
+            heightDp >= 240 -> LayoutVariant.EXPANDED_6X4
+            widthDp >= 320 -> LayoutVariant.WIDE_6X2
+            else -> LayoutVariant.STANDARD
+        }
+
+        fun layoutResForVariant(variant: LayoutVariant): Int = when (variant) {
+            LayoutVariant.STANDARD -> R.layout.widget_car_control
+            LayoutVariant.WIDE_6X2 -> R.layout.widget_car_control_6x2
+            LayoutVariant.EXPANDED_6X4 -> R.layout.widget_car_control_6x4
+        }
+
+        fun defaultSizeForVariant(variant: LayoutVariant): Pair<Int, Int> = when (variant) {
+            LayoutVariant.STANDARD -> DEFAULT_WIDTH_DP to DEFAULT_HEIGHT_DP
+            LayoutVariant.WIDE_6X2 -> 400 to 130
+            LayoutVariant.EXPANDED_6X4 -> 400 to 300
+        }
+
         fun refreshAll(context: Context) {
             val appCtx = context.applicationContext
             val manager = AppWidgetManager.getInstance(appCtx)
-            val ids = manager.getAppWidgetIds(
+            val components = listOf(
                 ComponentName(appCtx, CarControlAppWidgetProvider::class.java),
+                ComponentName(appCtx, CarControlWidget6x2Provider::class.java),
+                ComponentName(appCtx, CarControlWidget6x4Provider::class.java),
             )
+            val ids = components.flatMap {
+                manager.getAppWidgetIds(it).toList()
+            }.toIntArray()
             if (ids.isNotEmpty()) updateAll(appCtx, manager, ids)
         }
 
@@ -137,6 +163,7 @@ class CarControlAppWidgetProvider : AppWidgetProvider() {
                         DEFAULT_WIDTH_DP,
                         DEFAULT_HEIGHT_DP,
                     )
+                    val variant = selectLayoutVariant(widthDp, heightDp)
                     val cornerDp = CarControlWidgetPrefs.cornerRadiusDp(appCtx, widgetId).toFloat()
                     val metrics = CarControlWidgetSupport.layoutMetrics(
                         appCtx,
@@ -155,6 +182,7 @@ class CarControlAppWidgetProvider : AppWidgetProvider() {
                             carModel,
                             locationText,
                             metrics,
+                            variant,
                         )
                     } catch (e: Exception) {
                         LogHelper.w(TAG, "buildRemoteViews failed id=$widgetId: ${e.message}")
@@ -189,11 +217,6 @@ class CarControlAppWidgetProvider : AppWidgetProvider() {
             vehicleUi: CarVehicleDisplayUi?,
             locationText: String,
         ): RemoteViews {
-            val views = RemoteViews(context.packageName, R.layout.widget_car_control)
-            val theme = CarControlWidgetSupport.themeForWidget(context)
-            val dash = context.getString(R.string.car_control_vehicle_dash)
-            val alpha = CarControlWidgetPrefs.bgAlpha(context, appWidgetId)
-            val cornerDp = CarControlWidgetPrefs.cornerRadiusDp(context, appWidgetId).toFloat()
             val manager = AppWidgetManager.getInstance(context)
             val options = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
                 manager.getAppWidgetOptions(appWidgetId)
@@ -205,6 +228,13 @@ class CarControlAppWidgetProvider : AppWidgetProvider() {
                 DEFAULT_WIDTH_DP,
                 DEFAULT_HEIGHT_DP,
             )
+            val variant = selectLayoutVariant(widthDp, heightDp)
+            val layoutRes = layoutResForVariant(variant)
+            val views = RemoteViews(context.packageName, layoutRes)
+            val theme = CarControlWidgetSupport.themeForWidget(context)
+            val dash = context.getString(R.string.car_control_vehicle_dash)
+            val alpha = CarControlWidgetPrefs.bgAlpha(context, appWidgetId)
+            val cornerDp = CarControlWidgetPrefs.cornerRadiusDp(context, appWidgetId).toFloat()
             val metrics = CarControlWidgetSupport.layoutMetrics(context, widthDp, heightDp, cornerDp)
             CarControlWidgetSupport.applyWidgetBackground(
                 views,
@@ -242,8 +272,10 @@ class CarControlAppWidgetProvider : AppWidgetProvider() {
             carModel: android.graphics.Bitmap?,
             locationText: String,
             metrics: CarControlWidgetSupport.WidgetLayoutMetrics,
+            variant: LayoutVariant = LayoutVariant.STANDARD,
         ): Pair<RemoteViews, Int> {
-            val views = RemoteViews(context.packageName, R.layout.widget_car_control)
+            val layoutRes = layoutResForVariant(variant)
+            val views = RemoteViews(context.packageName, layoutRes)
             val theme = CarControlWidgetSupport.themeForWidget(context)
             val alpha = CarControlWidgetPrefs.bgAlpha(context, appWidgetId)
             val flags = CarControlWidgetPrefs.displayFlags(context, appWidgetId)
@@ -279,6 +311,8 @@ class CarControlAppWidgetProvider : AppWidgetProvider() {
             bindOptionalInfoPanel(context, views, vehicleUi, vehicleStatus, flags, theme, metrics)
             bindPlateAboveCar(context, views, vehicleUi, flags, theme, metrics)
             bindCarTemperature(context, views, vehicleUi, flags, theme, metrics)
+            bindExtraParams(context, views, vehicleStatus, flags, theme, metrics)
+            bind6x4Specific(context, views, vehicleUi, vehicleStatus, flags, theme, metrics, variant)
 
             views.setTextViewText(R.id.widget_vehicle_location, locationText)
             views.setTextColor(R.id.widget_vehicle_location, theme.textPrimary)
@@ -673,6 +707,101 @@ class CarControlAppWidgetProvider : AppWidgetProvider() {
             )
             views.setTextColor(R.id.widget_temp_value, theme.textSecondary)
             CarControlWidgetSupport.applyTextSizeSp(views, R.id.widget_temp_value, metrics.locationTextSp)
+        }
+
+        private fun bindExtraParams(
+            context: Context,
+            views: RemoteViews,
+            vehicleStatus: VehicleStatusService.VehicleStatusInfo?,
+            flags: Int,
+            theme: CarControlWidgetSupport.WidgetTheme,
+            metrics: CarControlWidgetSupport.WidgetLayoutMetrics,
+        ) {
+            val extraIds = intArrayOf(
+                R.id.widget_extra_avg_consumption,
+                R.id.widget_extra_coolant_temp,
+                R.id.widget_extra_service_distance,
+                R.id.widget_extra_epb,
+                R.id.widget_extra_engine_speed,
+            )
+            val extraLines = listOf(
+                CarControlWidgetPrefs.hasFlag(flags, CarControlWidgetPrefs.FLAG_AVG_CONSUMPTION) to
+                    CarControlWidgetDisplayLines.avgConsumptionLine(context, vehicleStatus),
+                CarControlWidgetPrefs.hasFlag(flags, CarControlWidgetPrefs.FLAG_COOLANT_TEMP) to
+                    CarControlWidgetDisplayLines.coolantTempLine(context, vehicleStatus),
+                CarControlWidgetPrefs.hasFlag(flags, CarControlWidgetPrefs.FLAG_SERVICE_DISTANCE) to
+                    CarControlWidgetDisplayLines.serviceDistanceLine(context, vehicleStatus),
+                CarControlWidgetPrefs.hasFlag(flags, CarControlWidgetPrefs.FLAG_EPB_STATUS) to
+                    CarControlWidgetDisplayLines.epbStatusLine(context, vehicleStatus),
+                CarControlWidgetPrefs.hasFlag(flags, CarControlWidgetPrefs.FLAG_ENGINE_SPEED) to
+                    CarControlWidgetDisplayLines.engineSpeedLine(context, vehicleStatus),
+            )
+            for (i in extraIds.indices) {
+                val (enabled, line) = extraLines[i]
+                if (enabled && line != null) {
+                    views.setViewVisibility(extraIds[i], View.VISIBLE)
+                    views.setTextViewText(extraIds[i], line)
+                    views.setTextColor(extraIds[i], theme.textSecondary)
+                    CarControlWidgetSupport.applyTextSizeSp(views, extraIds[i], metrics.infoTextSp)
+                } else {
+                    views.setViewVisibility(extraIds[i], View.GONE)
+                }
+            }
+        }
+
+        /** 6x4 布局独有绑定：大号续航、温度面板、车牌顶栏。 */
+        private fun bind6x4Specific(
+            context: Context,
+            views: RemoteViews,
+            vehicleUi: CarVehicleDisplayUi?,
+            vehicleStatus: VehicleStatusService.VehicleStatusInfo?,
+            flags: Int,
+            theme: CarControlWidgetSupport.WidgetTheme,
+            metrics: CarControlWidgetSupport.WidgetLayoutMetrics,
+            variant: LayoutVariant,
+        ) {
+            if (variant != LayoutVariant.EXPANDED_6X4) return
+            val dash = context.getString(R.string.car_control_vehicle_dash)
+
+            // 6x4 大号续航
+            val rangeText = vehicleUi?.rangeKmText ?: dash
+            val (rangeNum, _) = CarControlWidgetSupport.parseRangeWidgetParts(rangeText, dash)
+            val range6x4 = try {
+                views.setViewVisibility(R.id.widget_6x4_range, View.VISIBLE)
+                views.setTextViewText(R.id.widget_6x4_range, rangeNum)
+                views.setTextColor(R.id.widget_6x4_range, theme.textPrimary)
+                true
+            } catch (_: Exception) {
+                false
+            }
+
+            // 6x4 温度面板
+            val temp6x4 = try {
+                views.setViewVisibility(R.id.widget_6x4_temp, View.VISIBLE)
+                views.setTextViewText(
+                    R.id.widget_6x4_temp,
+                    CarControlWidgetDisplayLines.temperatureLine(context, vehicleUi, dash),
+                )
+                views.setTextColor(R.id.widget_6x4_temp, theme.textPrimary)
+                true
+            } catch (_: Exception) {
+                false
+            }
+
+            // 6x4 顶栏车牌
+            if (CarControlWidgetPrefs.hasFlag(flags, CarControlWidgetPrefs.FLAG_PLATE)) {
+                val plate = vehicleUi?.plateNo ?: dash
+                try {
+                    views.setViewVisibility(R.id.widget_plate_value, View.VISIBLE)
+                    views.setTextViewText(
+                        R.id.widget_plate_value,
+                        context.getString(R.string.car_control_widget_line_plate, plate),
+                    )
+                    views.setTextColor(R.id.widget_plate_value, theme.textPrimary)
+                } catch (_: Exception) { /* layout doesn't have this view */ }
+            }
+
+            LogHelper.d(TAG, "6x4 specific binding: range=$range6x4 temp=$temp6x4")
         }
 
         private fun pendingFlags(): Int =

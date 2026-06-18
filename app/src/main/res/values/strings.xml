@@ -1,68 +1,254 @@
-﻿<resources>
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
     <string name="app_name">MiRoot</string>
 
     <string name="welcome_dialog_confirm">知道了</string>
 
     <!-- 欢迎与使用说明正文：首次激活成功、versionCode 升级后、以及「状态」页版本行查看；发版时请同步 app/build.gradle.kts 的 versionName/versionCode。%1$s 为磁贴列表（多行） -->
     <string name="post_activation_welcome_title">欢迎使用 MiRoot</string>
-    <string name="post_activation_welcome_message">MiRoot 已准备就绪，建议按以下顺序快速上手。
+    <string name="post_activation_welcome_message">MiRoot 已准备就绪！以下是快速上手指南：
 
-【授权】进入「状态」页完成 Root 或 Shizuku 授权，投屏与系统功能依赖此权限。
+【第一步：授权】
+前往「状态」页，完成 Root 或 Shizuku 授权。所有投屏与系统级操作均依赖此权限。
 
-【可点击入口】各页分区标题可点击查看模块说明；「状态」页版本号可查看更新日志；「应用」页点击卡片配置投屏参数，长按直投背屏。
+【功能速览】
+•「功能」页：录屏截图、充电动画、常亮与遮盖检测、背屏桌面、手势配置
+•「音乐」页：一键开启背屏歌词投屏，自由调节字体、特效与显示模式
+•「主题」页：替换 AI 壁纸视频、管理主题目录与封面、一键注入手势
+•「应用」页：点击卡片配置投屏参数，长按直投背屏
 
-【功能概览】
-• 「功能」页：录屏/截图、充电动画、常亮与遮挡、背屏桌面与手势配置。
-• 「音乐」页：开始/结束歌词投屏，调节显示与效果。
-• 「主题」页：替换 AI 壁纸视频、管理主题目录与封面、注入手势。
-
-【建议添加快捷磁贴】
-在系统通知栏编辑中添加以下磁贴快速使用：
+【小技巧】
+• 各页分区标题可点击，查看详细功能说明
+•「状态」页版本号可随时查看更新日志
+• 建议在系统通知栏编辑中添加以下快捷磁贴，一键调用：
 %1$s
 
 【结束投屏】
-• MiRoot 背屏界面（歌词、车控等）：底部窄条左右滑动。
-• 第三方应用投屏：背屏系统边缘返回手势。</string>
+• MiRoot 背屏界面（歌词、车控等）：底部窄条左右滑动
+• 第三方应用投屏：使用背屏系统边缘返回手势</string>
     <string name="update_log_v15_title">MiRoot V1.5 正式版更新</string>
-    <string name="update_log_v15_message">【简短说明】\nMiRoot 已更新至 V1.5。\n本次重点新增歌词特效，并补充歌词来源切换、系统磁贴图标更新、Pro 机型半屏底图适配，同时修复多项已知问题。\n\n【详细更新日志】\n\n1）新增歌词特效（本次重点）\n• 新增呼吸效果，可控制呼吸频率、缩放浮动与位移强度。\n• 新增颜色变化节奏控制，歌词可随节奏动态变色。\n• 新增分词动态参数（倾斜角度、大小浮动、重建节流）。\n• 新增分词低功耗保护，兼顾特效表现与发热/耗电控制。\n\n2）歌词来源与播放联动优化\n• 新增歌词来源切换能力，支持按场景切换来源策略。\n• 优化不同来源间的衔接与回退，减少无歌词与闪烁场景。\n• 分词显示链路进一步优化，切歌衔接更平滑。\n\n3）系统磁贴与界面资源更新\n• 更新系统快捷设置磁贴图标，识别性与一致性更好。\n• 同步优化部分界面显示细节，视觉风格更统一。\n\n4）机型资源适配更新\n• 更新 Pro 机型半屏底图资源，显示比例与贴合度更准确。\n• 优化相关带壳显示细节，减少偏移与观感不一致。\n\n5）稳定性与兼容性修复\n• 修复其他已知 bug，提升日常使用稳定性。\n• 持续优化 Root / Shizuku 调用稳定性与异常兜底。\n• 细化异常日志与恢复策略，降低偶发中断风险。</string>
+    <string name="update_log_v15_message">【概要】\nV1.5 重点新增歌词特效系统与歌词来源切换，同步更新磁贴图标、Pro 机型底图适配，并修复多项已知问题。\n\n【歌词特效】（本次重点）\n• 新增呼吸效果：可调节呼吸频率、缩放浮动与位移强度\n• 新增节奏变色：歌词随音乐节奏动态切换颜色\n• 新增分词动态参数：倾斜角度、大小浮动与重建节流\n• 新增分词低功耗保护：特效表现与发热耗电兼顾\n\n【歌词来源与联动】\n• 新增来源切换能力，支持按场景选择来源策略\n• 优化多来源衔接与回退，减少无歌词和闪烁\n• 分词显示链路优化，切歌衔接更平滑\n\n【磁贴与界面】\n• 更新系统快捷磁贴图标，识别性与一致性提升\n• 优化部分界面细节，视觉风格更统一\n\n【机型适配】\n• 更新 Pro 机型半屏底图，显示比例与贴合度更准确\n• 优化带壳显示细节，减少偏移\n\n【稳定性】\n• 修复已知问题，提升日常使用稳定性\n• 优化 Root / Shizuku 调用链路与异常兜底</string>
     <string name="update_log_v16_title">MiRoot V1.6 正式版更新</string>
-    <string name="update_log_v16_message">【简短说明】\nMiRoot 已更新至 V1.6 正式版。\n本版包含背屏桌面、主题一键注入启动手势、背屏歌词问题修复，以及背屏手势返回结束投屏与第三方投屏退出体验优化等。\n\n【详细更新日志】\n\n1）背屏桌面\n• 背屏应用桌面与转盘/蜂窝等入口，便于在背屏快速启动应用并配合投屏参数使用。\n\n2）主题与手势\n• 支持对本地背屏主题包一键注入启动手势层，减少与系统手势、全屏内容争用时的操作冲突（详见「主题」相关说明）。\n• 新增：AI 目录长按执行「手势启动（增量补丁）」成功后，直接弹出后续动作弹窗，可一键跳转主题壁纸，或继续替换已应用背屏主题（与“替换视频成功后”流程一致）。\n\n3）背屏歌词\n• 修复背屏歌词展示与联动中的若干问题，提升稳定性与兼容性。\n\n4）投屏与退出（本次重点）\n• 新增：支持在背屏使用系统手势返回结束第三方应用投屏（与应用列表迁屏、通知等路径一致的收尾逻辑）。\n• 优化结束投屏后的恢复速度与一致性：更快恢复背屏默认 DPI 与旋转、停止投屏常亮相关行为，并在需要时同步恢复官方背屏手势服务。\n• 缩短投屏任务监控的首轮检测间隔，在背屏短暂回到官方中心或前台信息暂不可用等场景下加快收口判断，减少等待感；退出顺序统一，降低偶发遗漏恢复项的概率。\n\n5）应用与体验\n• 应用列表、投屏参数、官方背屏手势策略等持续整合优化。\n\n6）稳定性\n• 持续改进 Root / Shizuku 调用链路与异常兜底。</string>
+    <string name="update_log_v16_message">【概要】
+V1.6 新增背屏桌面与主题手势注入，重点优化投屏退出体验。
+
+【背屏桌面】
+• 新增背屏应用桌面，支持转盘与蜂窝入口，快速启动应用
+
+【主题与手势】
+• 一键注入启动手势层，减少与系统手势冲突
+• 手势注入成功后弹出后续动作弹窗，可跳转壁纸或替换主题
+
+【背屏歌词】
+• 修复歌词展示与联动中的若干问题
+
+【投屏与退出】（本次重点）
+• 新增手势返回结束第三方应用投屏，收尾逻辑统一
+• 优化投屏结束恢复速度：更快恢复 DPI、旋转和常亮状态
+• 缩短投屏任务首轮检测间隔，退出更顺畅
+
+【应用与体验】
+• 应用列表、投屏参数、官方手势策略持续整合
+
+【稳定性】
+• 改进 Root / Shizuku 调用链路与异常兜底</string>
     <string name="update_log_v17_title">MiRoot V1.7 正式版更新</string>
-    <string name="update_log_v17_message">【简短说明】\nMiRoot 已更新至 V1.7 正式版。\n本版重点优化背屏歌词配色与圆角策略，并完善音乐调试项与显示一致性。\n\n【详细更新日志】\n\n1）背屏歌词配色\n• 「背屏歌词调试参数」新增随机颜色切换开关：开启按节奏变色，关闭为固定高可读浅色方案。\n• 关闭随机颜色时，逐字进度以白色与「未唱歌词透明度」区分，边框/跑马灯不再跟随逐字主色突变。\n\n2）圆角与贴边\n• 背屏广播/锁屏等场景下跑马灯与深渊镜圆角使用统一固定值（与主屏系统检测圆角区分）。\n\n3）体验与稳定性\n• 相关逻辑与注释整理，持续改进兼容性。</string>
+    <string name="update_log_v17_message">【概要】
+V1.7 优化背屏歌词配色与圆角策略，完善音乐调试参数。
+
+【歌词配色】
+• 新增随机颜色切换开关：开启按节奏变色，关闭为固定高可读浅色
+• 关闭随机色时，逐字进度以白色与透明度区分，边框/跑马灯不再跟随主色突变
+
+【圆角与贴边】
+• 背屏广播/锁屏等场景下跑马灯与深渊镜圆角统一固定值
+
+【稳定性】
+• 逻辑与注释整理，持续改进兼容性</string>
     <string name="update_log_v18_title">MiRoot V1.8 正式版更新</string>
-    <string name="update_log_v18_message">【简短说明】\nMiRoot 已更新至 V1.8 正式版。\n本版完善欢迎与上手指引、背屏手势说明，并持续改进体验与稳定性。\n\n【详细更新日志】\n\n1）欢迎与说明\n• 欢迎弹窗与使用说明更新：补充背屏手势配置、主题注入手势、背屏桌面、应用页「背屏桌面设置」及第三方投屏用手势返回结束等说明。\n\n2）背屏手势\n• 「背屏手势配置」页引导文案精简，便于阅读。\n\n3）体验与稳定性\n• 持续改进 Root / Shizuku 与背屏相关逻辑，修复已知问题。</string>
+    <string name="update_log_v18_message">【概要】
+V1.8 完善欢迎指引与背屏手势说明，持续改进体验。
+
+【欢迎与说明】
+• 更新欢迎弹窗与使用说明：补充手势配置、主题注入、背屏桌面、应用投屏等说明
+
+【背屏手势】
+• 手势配置页引导文案精简，便于阅读
+
+【稳定性】
+• 改进 Root / Shizuku 与背屏相关逻辑</string>
     <string name="update_log_v183_title">MiRoot V1.8.3 更新</string>
-    <string name="update_log_v183_message">【简短说明】\nMiRoot 已更新至 V1.8.3：充电动画与歌词体验优化，并修复已知问题。\n\n【更新内容】\n• 充电动画迁屏与恢复更稳。\n• 歌词分词与显示优化；欢迎/关于说明已更新。\n• 背屏投屏与 Root / Shizuku 相关修复。</string>
+    <string name="update_log_v183_message">【概要】
+V1.8.3 优化充电动画与歌词体验，修复已知问题。
+
+【更新内容】
+• 充电动画迁屏与恢复更稳定
+• 歌词分词与显示优化
+• 背屏投屏与 Root / Shizuku 修复</string>
     <string name="update_log_v188_title">MiRoot V1.8.8 更新</string>
-    <string name="update_log_v188_message">【简短说明】\nMiRoot 已更新至 V1.8.8：修复智能切换前期逐字高亮与换行异常，并持续优化体验。\n\n【更新内容】\n• 歌词「智能切换」：修正歌曲前段融合逐字轴被误判为句内相对时间的问题，前几行逐字高亮与换行更稳定，减少跳到上一行再跳回。\n• 汽水单句升级完整歌词时，开头不再误锚到后部行。\n• 背屏歌词显示、切歌衔接与投屏体验持续优化。\n• 修复若干已知问题。</string>
+    <string name="update_log_v188_message">【概要】
+V1.8.8 修复智能切换前期逐字高亮与换行异常。
+
+【更新内容】
+• 智能切换：修正前段逐字轴被误判为句内相对时间的问题，前几行逐字高亮与换行更稳定
+• 汽水单句升级完整歌词时，开头不再误锚到后部行
+• 背屏歌词显示与切歌衔接优化
+• 修复已知问题</string>
     <string name="update_log_v189_title">MiRoot V1.8.9 更新</string>
-    <string name="update_log_v189_message">【简短说明】\nMiRoot 已更新至 V1.8.9：新增在线版本更新检查、逐字高亮进度准确性与切歌清旧歌词优化。\n\n【更新内容】\n• 新增「版本更新」：状态页支持检查 GitHub 新版本，一键下载与安装更新。\n• 歌词逐字高亮：修复逐字进度虚高问题（首字唱到一半显示 80%），预计算总权重后字时长加权更准确。\n• LRC 逐字等分拉伸：网络歌词内嵌逐字时间戳不均匀时自动等分到行时长，逐字高亮速度与演唱匹配。\n• 切歌清歌词：切换歌曲后立即清空旧歌词视图，减少残留与错句。\n• 背屏歌词投屏、显示体验持续优化。\n• 修复若干已知问题。</string>
+    <string name="update_log_v189_message">【概要】
+V1.8.9 新增在线版本更新检查，逐字高亮进度更准确。
+
+【更新内容】
+• 新增版本更新：状态页支持检查 GitHub 新版本，一键下载安装
+• 逐字高亮：修复进度虚高问题，预计算总权重后字时长加权更准确
+• LRC 逐字等分：时间戳不均匀时自动等分到行时长，与演唱匹配
+• 切歌清歌词：切换歌曲后立即清空旧视图，减少残留
+• 背屏歌词投屏与显示优化
+• 修复已知问题</string>
     <string name="update_log_v190_title">MiRoot V1.9.0 更新</string>
-    <string name="update_log_v190_message">【简短说明】\nMiRoot 已更新至 V1.9.0：升级弹窗焕新，自定义背景开关新增，背屏体验与稳定性持续改进。\n\n【更新内容】\n• 版本更新弹窗全新改版：更清晰的版本对比布局，更新日志独立展示，下载交互更直观。\n• 自定义背景功能：背屏支持自定义背景图片/视频，提供更多个性化选择。\n• 背屏歌词显示、投屏稳定性与切歌衔接持续优化。\n• Root / Shizuku 调用链路与异常兜底持续改进。\n• 修复若干已知问题。</string>
+    <string name="update_log_v190_message">【概要】
+V1.9.0 升级弹窗焕新，新增背屏自定义背景，体验与稳定性持续改进。
+
+【更新内容】
+• 更新弹窗全新改版：版本对比布局更清晰，日志独立展示
+• 新增背屏自定义背景图片/视频
+• 背屏歌词显示、投屏稳定性与切歌衔接优化
+• Root / Shizuku 调用链路与异常兜底改进
+• 修复已知问题</string>
     <string name="update_log_v220_title">MiRoot V2.2 更新</string>
-    <string name="update_log_v220_message">【简短说明】\nMiRoot 已更新至 V2.2：新增背屏派对小游戏与蓝牙心率广播，优化车控油耗与背屏歌词分词显示，并持续改进投屏体验。\n\n【新增】\n• 背屏平衡小游戏：倾斜手机让小球留在圆圈内，含简单/普通/困难与水平仪模式；功能页一键投屏至背屏。\n• 背屏真心话大冒险：转盘选人、轮询或随机指定玩家；真心话/大冒险可转盘或直出；支持 TXT 批量导入自定义题库与题库管理。\n• 背屏蓝牙心率：连接 BLE 心率带后在背屏实时显示 BPM，可配合手势/投屏链路启动。\n\n【优化】\n• 车控：星瑞油耗解析与历史展示优化；油价区域偏好与油箱分析改进。\n• 背屏投屏：官方手势策略、Compose 投屏初始化与多模块启动链路整合优化。\n• 配置备份：云备份同步真心话自定义题库与相关偏好。\n\n【修复】\n• 背屏歌词：修复分词显示模式下歌词反复闪烁、布局来回切换的问题。\n• 修复若干已知问题；持续改进 Root / Shizuku 与背屏稳定性。</string>
+    <string name="update_log_v220_message">【概要】
+V2.2 新增背屏派对小游戏与蓝牙心率广播，优化车控油耗与歌词分词。
+
+【新功能】
+• 背屏平衡小游戏：倾斜控制小球，支持简单/普通/困难与水平仪模式
+• 背屏真心话大冒险：转盘选人，支持 TXT 批量导入题库
+• 背屏蓝牙心率：连接 BLE 心率带实时显示 BPM
+
+【优化】
+• 车控：优化星瑞油耗解析与历史展示
+• 背屏投屏：优化官方手势策略与启动链路
+• 配置备份：云备份同步真心话题库与偏好设置
+
+【修复】
+• 修复分词显示歌词闪烁与布局切换问题
+• 改进 Root / Shizuku 稳定性</string>
     <string name="update_log_v210_title">MiRoot V2.1 正式版更新</string>
-    <string name="update_log_v210_message">【简短说明】\nMiRoot 已更新至 V2.1 正式版：新增 WebDAV 配置云备份、星瑞车控小组件与车辆历史、界面统一与多项体验优化。\n\n【新增】\n• WebDAV 云备份：状态页一键配置坚果云等 WebDAV；手动上传/下载 miroot_backup.zip；本机导出/导入 ZIP；备份包含导出时间与大小，恢复前二次确认防误覆盖。\n• 车控：桌面小组件远程控制；车辆数据历史（车况/操作/告警）本地库与图表；背屏车控地图与油价展示；车模与底部按钮可自定义。\n• 歌词：多平台 API 客户端重构；智能融合与分词显示持续优化。\n\n【优化】\n• 主界面与各二级页顶栏留白、标题字号统一；音乐页标题改为「音乐」。\n• 背屏录屏/截图导出与 Shizuku 权限说明文档完善。\n\n【修复】\n• 修复若干已知问题；持续改进 Root / Shizuku 与背屏稳定性。</string>
+    <string name="update_log_v210_message">【概要】
+V2.1 新增 WebDAV 云备份、车控小组件与车辆历史，界面统一与多项体验优化。
+
+【新增】
+• WebDAV 云备份：一键配置坚果云等，支持上传/下载/本机导入导出 ZIP
+• 车控：桌面小组件远程控制；车辆数据历史本地库与图表；背屏车控地图与油价
+• 歌词：多平台 API 客户端重构；智能融合与分词优化
+
+【优化】
+• 主界面与二级页顶栏留白、标题字号统一
+• 背屏录屏/截图导出与 Shizuku 权限说明完善
+
+【修复】
+• 修复已知问题；改进 Root / Shizuku 与背屏稳定性</string>
     <string name="update_log_v200_title">MiRoot V2.0 更新</string>
-    <string name="update_log_v200_message">【简短说明】\nMiRoot 已更新至 V2.0：背屏充电动画全面焕新，背屏手势可一键唤起充电动画，并修复 Shizuku 权限下带壳录屏等关键问题。\n\n【新增】\n• 背屏充电动画：陀螺仪水波纹涨水、色盘自定义水体颜色（默认深绿）、场景图片/视频背景、水中漂浮电量与底部信息项（功率/时间/温度等可配置）。\n• 充电动画预览：功能页长按充电动画区块标题可在背屏预览；预览时长与「动画常亮」设置联动。\n• 背屏手势：新增「唤起背屏充电动画」互斥动作；默认上滑音乐歌词、左滑充电动画、右滑背屏桌面。\n• 截图/录屏导出：Shizuku 场景下公共相册保存优先 MediaStore，避免 shell 直拷产生 0 字节或相册不可见。\n\n【修复与优化】\n• 修复 Shizuku 授权下带壳录屏失败、合成异常或保存为空文件等问题。\n• 充电动画：液面涟漪与气泡表现优化；漂浮物与信息项默认偏移与显示策略调整。\n• 背屏歌词、投屏与 Root / Shizuku 调用链路持续改进。\n• 修复若干已知问题。</string>
+    <string name="update_log_v200_message">【概要】
+V2.0 背屏充电动画全面焕新，手势可唤起充电动画，修复 Shizuku 下录屏关键问题。
+
+【新增】
+• 背屏充电动画：陀螺仪水波纹涨水、色盘自定义水体颜色、场景背景、水中漂浮电量与底部信息项
+• 充电动画预览：功能页长按标题在背屏预览，时长与常亮设置联动
+• 背屏手势：新增唤起充电动画动作；默认上滑音乐、左滑充电动画、右滑桌面
+• 截图/录屏导出：Shizuku 下优先 MediaStore，避免 0 字节
+
+【修复与优化】
+• 修复 Shizuku 下带壳录屏失败、合成异常或空文件问题
+• 充电动画液面涟漪与气泡优化
+• 背屏歌词、投屏与 Root / Shizuku 改进
+• 修复已知问题</string>
     <string name="update_log_v195_title">MiRoot V1.9.5 更新</string>
-    <string name="update_log_v195_message">【简短说明】\nMiRoot 已更新至 V1.9.5：充电动画常亮优化、背屏歌词修复与内存优化。\n\n【更新内容】\n• 充电动画：常亮开关开启时，背屏关闭后自动停止唤醒循环，避免背屏一直被点亮。\n• 充电动画：底部信息卡默认显示项调整为功率、预估充满时间、温度。\n• 背屏歌词：修复分词模式下逐字切换屏闪问题，过渡更平滑。\n• 修复车控页与歌词投屏页在 Release 构建中的崩溃问题。\n• 背屏内存优化：投屏歌词 Bitmap 及时回收并限制分辨率，减少内存占用。\n• 修复若干已知问题。</string>
+    <string name="update_log_v195_message">【概要】
+V1.9.5 充电动画常亮优化，歌词修复与内存优化。
+
+【更新内容】
+• 充电动画常亮：背屏关闭后自动停止唤醒循环，避免持续点亮
+• 充电动画信息卡默认显示功率、预估充满时间、温度
+• 歌词修复：分词模式下逐字切换屏闪，过渡更平滑
+• 修复车控页与歌词投屏页 Release 构建崩溃
+• 内存优化：投屏歌词 Bitmap 及时回收并限制分辨率
+• 修复已知问题</string>
     <string name="update_log_v194_title">MiRoot V1.9.4 更新</string>
-    <string name="update_log_v194_message">【简短说明】\nMiRoot 已更新至 V1.9.4：充电动画信息卡自定义、车控页重构与手势统一管理。\n\n【更新内容】\n• 充电动画底部信息卡支持自定义（最多4项，可排序），设置入口移至功能页。\n• 车控页全面重构：双列布局、详情卡片、字段折叠与状态管理优化。\n• 手势退出提取为统一工具类 BottomSwipeExitHelper，消除车控/歌词/桌面多处重复代码。\n• 背屏歌词/投屏体验持续优化。\n• 修复若干已知问题。</string>
+    <string name="update_log_v194_message">【概要】
+V1.9.4 充电动画信息卡自定义，车控页全面重构。
+
+【更新内容】
+• 充电动画底部信息卡支持自定义（最多4项，可排序）
+• 车控页重构：双列布局、详情卡片、字段折叠与状态管理优化
+• 手势退出统一为 BottomSwipeExitHelper，消除多处重复代码
+• 背屏歌词/投屏体验优化
+• 修复已知问题</string>
     <string name="update_log_v193_title">MiRoot V1.9.3 更新</string>
-    <string name="update_log_v193_message">【简短说明】\nMiRoot 已更新至 V1.9.3：移除 Xposed/LSPosed 模块，精简代码与依赖。\n\n【更新内容】\n• 移除 Xposed/LSPosed 模块：不再作为 Xposed 模块运行，歌词等功能已全面走网络 API、SuperLyric IPC 与 Root/Shizuku 通道。\n• 移除 libxposed compileOnly 依赖与 ProGuard 规则。\n• 移除"更多"页 Xposed 环境检测与状态显示。\n• 精简相关代码与文档，安装后无需在 LSPosed 中启用模块。\n• 修复若干已知问题。</string>
+    <string name="update_log_v193_message">【概要】
+V1.9.3 移除 Xposed/LSPosed 模块，全面精简架构。
+
+【更新内容】
+• 移除 Xposed/LSPosed 模块：歌词等功能已全面走网络 API、SuperLyric IPC 与 Root/Shizuku 通道
+• 移除 libxposed 依赖与 ProGuard 规则
+• 移除 Xposed 环境检测与状态显示
+• 精简代码与文档，安装后无需在 LSPosed 中启用模块
+• 修复已知问题</string>
     <string name="update_log_v192_title">MiRoot V1.9.2 更新</string>
-    <string name="update_log_v192_message">【简短说明】\nMiRoot 已更新至 V1.9.2：酷我车机版新增逐字高亮效果，背屏歌词体验持续优化。\n\n【更新内容】\n• 酷我车机版（cn.kuwo.kwmusiccar）新增广播歌词桥接，支持直接逐字高亮，无需 SuperLyric 模块即可实现逐字歌词效果。\n• 酷我歌词解析优化：增强 LRC 解析器兼容性，修复逐字时间戳匹配问题。\n• 背屏歌词显示与投屏稳定性持续改进。\n• 修复若干已知问题。</string>
+    <string name="update_log_v192_message">【概要】
+V1.9.2 酷我车机版新增逐字高亮，歌词体验持续优化。
+
+【更新内容】
+• 酷我车机版新增广播歌词桥接，支持直接逐字高亮，无需 SuperLyric
+• 酷我歌词解析优化：增强 LRC 兼容性，修复逐字时间戳匹配
+• 背屏歌词显示与投屏稳定性改进
+• 修复已知问题</string>
     <string name="update_log_v191_title">MiRoot V1.9.1 更新</string>
-    <string name="update_log_v191_message">【简短说明】\nMiRoot 已更新至 V1.9.1：歌词智能切换全源严格匹配，线程模型重构，体验与稳定性持续提升。\n\n【更新内容】\n• 歌词「智能切换」严格匹配：所有音乐 App（除酷我车机）开启智能切换后，qsgc/酷狗/lrclib/lyrics.ovh 全源歌名+歌手严格校验（LRC 元数据标签 + API 结构化字段），匹配失败直接回落 SuperLyric 模块兜底，不再走模糊搜索。\n• 全局线程池重构（AppExecutors）：统一后台线程调度与 OkHttp 客户端，减少线程总数与虚拟内存占用，修复高核数设备原生 OOM 问题。\n• SuperLyric 预初始化与自适应轮询：更早注册 Binder 缩短首次逐字回调延迟；轮询间隔自适应翻倍（30ms 起步），响应速度与 CPU 开销更均衡。\n• 歌词 API 网络层改用 OkHttp：继承全局连接池减少 TCP 握手开销，弃用 HttpURLConnection。\n• 行间距自适应：背屏歌词行间距改为按字高比例动态计算，小字不挤大字不散。\n• 修复背屏 onResume 重复初始化 MediaSession 导致歌词请求序号失效、显示不对的问题。\n• 背屏歌词显示、投屏稳定性与切歌衔接持续优化。\n• 版本更新检查简化：适配公开仓库，移除令牌依赖，减少手动检测冷却间隔。\n• 修复若干已知问题。</string>
+    <string name="update_log_v191_message">【概要】
+V1.9.1 歌词智能切换全源严格匹配，全局线程模型重构，体验与稳定性大幅提升。
+
+【更新内容】
+• 智能切换严格匹配：全源歌名+歌手校验，匹配失败回落 SuperLyric，不再模糊搜索
+• 线程池重构（AppExecutors）：统一调度与 OkHttp 客户端，修复高核数设备 OOM
+• SuperLyric 预初始化与自适应轮询：更早注册 Binder 缩短首次回调延迟
+• 歌词 API 改用 OkHttp：继承全局连接池，减少 TCP 握手开销
+• 行间距自适应：按字高比例动态计算
+• 修复 onResume 重复初始化 MediaSession 导致歌词序号失效
+• 版本更新检查简化：适配公开仓库，移除令牌依赖
+• 修复已知问题</string>
     <string name="update_log_v187_title">MiRoot V1.8.7 更新</string>
-    <string name="update_log_v187_message">【简短说明】\nMiRoot 已更新至 V1.8.7：歌词智能切换逐字融合更稳，并修复已知问题。\n\n【更新内容】\n• 歌词「智能切换」：优化 SuperLyric 逐字与网络歌词的行级融合判定，当前播放行优先使用模块逐字轴；换行与行边界附近减少逐字高亮与 LRC 行时间戳模拟之间来回跳。\n• 背屏歌词显示、切歌衔接与投屏体验持续优化。\n• 修复若干已知问题。</string>
+    <string name="update_log_v187_message">【概要】
+V1.8.7 歌词智能切换逐字融合更稳定。
+
+【更新内容】
+• 智能切换：优化 SuperLyric 逐字与网络歌词的行级融合，当前行优先使用模块逐字轴，减少边界跳动
+• 背屏歌词显示与切歌衔接优化
+• 修复已知问题</string>
     <string name="update_log_v186_title">MiRoot V1.8.6 更新</string>
-    <string name="update_log_v186_message">MiRoot 已更新至 V1.8.6。\n\n【更新内容】\n• 背屏投屏、车控与歌词体验持续优化。\n• 修复若干已知问题。</string>
+    <string name="update_log_v186_message">【概要】
+V1.8.6 持续优化背屏投屏、车控与歌词体验。
+
+【更新内容】
+• 背屏投屏、车控与歌词体验优化
+• 修复已知问题</string>
     <string name="update_log_v185_title">MiRoot V1.8.5 更新</string>
-    <string name="update_log_v185_message">MiRoot 已更新至 V1.8.5。\n\n【更新内容】\n• 分词：接入 Jieba 本地分词，内置歌词场景词库并支持导入自定义词条，分词显示更贴近歌词语义；异常时自动回落内置规则分词。\n• 智能切换：网络 API 多行结构与 SuperLyric 逐字时间轴行级比对融合持续优化，减少错句与秒跳。\n• 酷我车载（cn.kuwo.kwmusiccar）仍优先 AUDIO_LYRIC 专用解析。\n• 背屏歌词显示、切歌衔接与分词特效链路优化；修复若干歌词相关已知问题。</string>
+    <string name="update_log_v185_message">【概要】
+V1.8.5 接入 Jieba 本地分词，智能切换融合持续优化。
+
+【更新内容】
+• 分词：接入 Jieba 本地分词，内置歌词场景词库并支持自定义导入，异常时自动回落规则分词
+• 智能切换：网络 API 与 SuperLyric 逐字时间轴行级比对融合优化，减少错句与秒跳
+• 酷我车载优先 AUDIO_LYRIC 专用解析
+• 背屏歌词显示与切歌衔接优化</string>
     <string name="update_log_v184_title">MiRoot V1.8.4 更新</string>
-    <string name="update_log_v184_message">MiRoot 已更新至 V1.8.4。\n\n【更新内容】\n• 充电动画迁屏与恢复更稳。\n• 歌词分词与显示优化；欢迎/关于说明已更新。\n• 歌词「智能切换」：网络 API 提供多行结构，SuperLyric 补充逐字时间轴，行级比对通过后才融合，减少错句与秒跳；酷我车载（cn.kuwo.kwmusiccar）仍优先 AUDIO_LYRIC 专用解析。\n• 精简：移除背屏 MV 播放器、酷我 SuperLyric 歌词转载、汽水进程内 Hook（汽水/网易等仍走网络歌词 API）。\n• 背屏投屏与 Root / Shizuku 相关修复与体验整理。</string>
+    <string name="update_log_v184_message">【概要】
+V1.8.4 优化智能切换歌词融合，精简冗余模块。
+
+【更新内容】
+• 充电动画迁屏与恢复更稳定
+• 歌词分词与显示优化
+• 智能切换：网络 API 多行结构与 SuperLyric 逐字融合，行级比对通过后才合并，减少错句
+• 精简：移除背屏 MV 播放器、酷我 SuperLyric 歌词转载、汽水进程内 Hook
+• 背屏投屏与 Root / Shizuku 修复</string>
 
     <string name="nav_status">状态</string>
     <string name="nav_features">功能</string>
@@ -302,6 +488,9 @@
     <string name="music_texture_scale">底图缩放</string>
     <string name="music_texture_alpha">底图透明度</string>
     <string name="music_word_by_word">逐字显示</string>
+    <string name="music_char_jump">逐字上移</string>
+    <string name="music_char_jump_hint">唱过的字上浮聚集，仅在有精确逐字信息时生效</string>
+    <string name="music_char_jump_height">上移高度</string>
     <string name="music_shuffle_split_mode">分词显示模式</string>
     <string name="music_marquee">跑马灯</string>
     <string name="music_marquee_width">跑马灯线宽</string>
@@ -310,7 +499,10 @@
     <string name="music_border_display_hint">歌词区域边缘描边</string>
     <string name="music_power_saving">省电模式</string>
     <string name="music_power_saving_hint">降低动效与重绘，仅保留逐行歌词</string>
+    <string name="music_show_translation">显示翻译</string>
+    <string name="music_show_transliteration">显示音译</string>
     <string name="music_gesture">可滑动歌词</string>
+    <string name="music_gesture_hint">右滑上一首，左滑下一首（歌词/深渊镜界面均可使用）</string>
     <string name="music_abyssal">深渊镜模式</string>
     <string name="music_abyssal_gyro">陀螺仪倍数</string>
     <string name="music_abyssal_range">可移动范围</string>
@@ -345,6 +537,8 @@
     <string name="music_rear_debug_color_change_interval">随机配色过渡时长</string>
     <!-- 参数为整秒，与滑块 1s 步进一致；数值表示单色渐变到下一目标色的耗时 -->
     <string name="music_color_change_interval_value_fmt">渐变 %1$d 秒</string>
+    <string name="music_fixed_color">固定颜色</string>
+    <string name="music_fixed_color_hint">关闭随机配色后使用选中的颜色</string>
     <string name="music_rear_debug_marquee_speed">跑马灯速度（每圈时长）</string>
     <string name="music_shuffle_split_multicolor">分词多色</string>
     <string name="music_rear_debug_shuffle_effect">分词显示（调试）</string>
@@ -817,7 +1011,18 @@
     <!-- 仅作布局预览占位，运行时在代码中拼接 -->
     <string name="settings_about_body_placeholder" translatable="false">…</string>
     <string name="settings_about_section_intro">应用简介</string>
-    <string name="settings_about_app_desc">MiRoot 是一款面向具备背屏（副屏）小米手机的辅助工具，提供主题与 AI 壁纸替换、背屏桌面、歌词投屏、车控投屏、录屏与带壳截图、充电动画及背屏辅助等功能。\n\n主题支持注入手势，可配置背屏三方向手势打开桌面、歌词、车控或应用。\n\n多数深度能力需要 Root 或 Shizuku 授权。功能与机型及 HyperOS 版本相关，请以实机为准。</string>
+    <string name="settings_about_app_desc">MiRoot 是一款面向配备背屏（副屏）的小米手机的增强工具，深度挖掘背屏潜能，提供丰富的投屏、定制与娱乐体验。
+
+核心能力：
+• 背屏投屏：歌词投屏（逐字高亮、深渊镜、分词特效）、车控投屏、任意应用投屏
+• 主题与 AI 壁纸：一键替换背屏视频主题、管理目录与封面、注入手势层
+• 系统工具：录屏与带壳截图、充电动画（水波纹涨水效果）、背屏桌面
+• 手势配置：自定义背屏底部三方向手势动作，快速唤起常用功能
+• 派对小游戏：平衡球、真心话大冒险、蓝牙心率广播
+• 车控联动：远程控制吉利车辆，桌面小组件实时查看车况
+• 配置备份：WebDAV 云端同步与本地导入导出
+
+高级功能需 Root 或 Shizuku 授权。功能表现因机型与 HyperOS 版本而异，请以实际体验为准。</string>
     <string name="settings_about_section_software">软件声明</string>
     <string name="settings_about_software">本软件按「现状」提供，开发者不对其正确性、稳定性、持续可用性或适用于某一特定目的作任何明示或默示的保证。\n\n您自愿在本人设备上使用本软件，并理解其中可能涉及修改系统设置、主题资源或与其他应用协同等行为；由此产生的设备异常、数据风险，以及任何直接或间接损失，均由您自行评估并承担。\n\nMiRoot 与小米公司及 Xiaomi HyperOS 无隶属、合作或授权关系；产品名称与商标归各自权利人所有。背屏与系统相关行为以官方系统实现为准，并可能随系统更新而调整。若您不接受上述说明，请勿安装或使用本软件。</string>
     <string name="settings_overlay_x">叠放 X</string>
@@ -1052,7 +1257,7 @@
     <string name="car_control_widget_range_label">续航里程</string>
     <string name="car_control_widget_range_unit">km</string>
     <string name="car_control_widget_update_fmt">更新于 %1$s</string>
-    <string name="car_control_widget_status_parked">① 已驻车</string>
+    <string name="car_control_widget_status_parked">已驻车</string>
     <string name="car_control_widget_status_running">运行中</string>
     <string name="car_control_widget_settings">车控设置</string>
     <string name="car_control_widget_car_model">车模</string>
@@ -1092,6 +1297,26 @@
     <string name="car_control_widget_confirm_fmt">确认执行「%1$s」吗？</string>
     <string name="car_control_widget_confirm_cancel">取消</string>
     <string name="car_control_widget_confirm_ok">确认</string>
+
+    <!-- 6x2 / 6x4 新增参数显示 -->
+    <string name="car_control_widget_show_avg_consumption">平均油耗</string>
+    <string name="car_control_widget_show_coolant_temp">冷却液温度</string>
+    <string name="car_control_widget_show_service_distance">保养剩余</string>
+    <string name="car_control_widget_show_epb">电子手刹</string>
+    <string name="car_control_widget_show_engine_speed">发动机转速</string>
+    <string name="car_control_widget_line_avg_consumption">油耗 %1$s L/100km</string>
+    <string name="car_control_widget_line_coolant_temp">冷却液 %1$s℃</string>
+    <string name="car_control_widget_line_service_distance">保养剩余 %1$s km</string>
+    <string name="car_control_widget_line_epb_on">手刹 已拉起</string>
+    <string name="car_control_widget_line_epb_off">手刹 未拉起</string>
+    <string name="car_control_widget_line_engine_speed">转速 %1$s rpm</string>
+
+    <!-- 6x2 布局 -->
+    <string name="car_control_widget_name_6x2">车控（宽幅）</string>
+    <string name="car_control_widget_desc_6x2">宽幅车控小组件：更多信息一览</string>
+    <!-- 6x4 布局 -->
+    <string name="car_control_widget_name_6x4">车控（全览）</string>
+    <string name="car_control_widget_desc_6x4">全览车控小组件：多参数面板 + 车模</string>
 
     <string name="car_control_vehicle_section_title">车辆数据</string>
     <string name="car_control_vehicle_refresh">刷新</string>
@@ -1135,7 +1360,7 @@
     <string name="car_control_vehicle_history_monthly_fuel_fmt">%1$s 加油 %2$d 次 ≈¥%3$.0f</string>
     <string name="car_control_vehicle_history_monthly_fuel_section">每月加油统计</string>
     <string name="car_control_vehicle_history_fuel_analytics_refreshing">油耗统计更新中…</string>
-    <string name="car_control_vehicle_history_record_address">刷新位置</string>
+    <string name="car_control_vehicle_history_record_address">车辆位置</string>
     <string name="car_control_vehicle_history_fuel_province_auto_fmt">油价省份：%1$s（车辆位置自动）</string>
     <string name="car_control_vehicle_history_fuel_province_manual_fmt">油价省份：%1$s（手动，点按切换）</string>
     <string name="car_control_vehicle_history_fuel_province_restore_auto">长按恢复按车辆位置自动选省</string>
@@ -1208,4 +1433,32 @@
     <string name="apps_rear_desktop_blacklist_added">已加入桌面黑名单</string>
     <string name="apps_rear_desktop_blacklist_already">已在桌面黑名单中</string>
     <string name="save_strategy_test_title">录制存储方案测试</string>
+
+    <!-- MCP 服务 -->
+    <string name="features_section_mcp">MCP 服务</string>
+    <string name="features_mcp_hint">MCP（Model Context Protocol）让 AI 助手能直接控制车辆。启动下方 HTTP 服务后，将配置 JSON 粘贴到 Claude Desktop / Codex / Cursor 等支持 MCP 的客户端中，即可通过 AI 语音/文字控制车控与背屏投射。</string>
+    <string name="features_mcp_copy_config">复制 MCP 配置</string>
+    <string name="features_mcp_copied">MCP 配置已复制到剪贴板</string>
+    <string name="features_mcp_help_title">MCP 服务</string>
+    <string name="help_features_mcp">MCP（Model Context Protocol）通过 HTTP/SSE 直接连接 MiRoot 内置服务端
+
+配置步骤：
+1. 打开下方 HTTP 服务开关
+2. 点击「复制 MCP 配置」将 JSON 粘贴到 Claude Desktop / Codex / Cursor 等支持 MCP 的客户端中
+3. AI 助手通过 MCP 协议直接与 MiRoot 通信，支持以下工具：
+   - vehicle_control：解锁/上锁/寻车/开后备箱/启停引擎/开关窗/通风/空调/座椅加热/导航到车
+   - projection_control：启动/停止背屏投屏控制
+   - vehicle_status：查询车辆状态（引擎/里程/油量）
+
+注意：MiRoot 作为 MCP Server 运行，使用 HTTP/SSE 传输协议，无需 ADB 连接</string>
+    <string name="features_mcp_server_switch">启动 HTTP 服务</string>
+    <string name="features_mcp_server_status_running">运行中: http://%1$s:%2$d</string>
+    <string name="features_mcp_server_status_stopped">未启动</string>
+    <string name="features_mcp_server_started">HTTP 服务已启动</string>
+    <string name="features_mcp_server_stopped">HTTP 服务已停止</string>
+    <string name="features_mcp_server_port_label">端口</string>
+    <string name="features_mcp_server_api_key_label">API Key</string>
+    <string name="features_mcp_server_start_failed">启动 HTTP 服务失败</string>
+
 </resources>
+

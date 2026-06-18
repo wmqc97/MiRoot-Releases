@@ -482,29 +482,20 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
         int d = getDisplayIdSafe();
         boolean chargingRelated = isChargingOverlayActive();
-        if (isMainScreenLandscapeMode) {
-            if (d == 0) {
-                return false;
-            }
-            LogHelper.w(TAG, reason + "：磁贴模式仅允许主屏(display 0)，当前 displayId=" + d + "，销毁");
-            finishIllegalProjectionSurface();
-            return true;
-        }
-        if (d == 1) {
+        if (d == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
             return false;
         }
         if (chargingRelated && hasLyricsView()) {
-            // 充电覆盖切换期 displayId 可能瞬时抖到 0/异常值，避免误触发“非法屏幕自毁”。
             LogHelper.d(TAG, reason + "：充电覆盖相关窗口期(displayId=" + d + ")，跳过非法屏幕销毁");
             return false;
         }
         if (hasLyricsView()) {
-            LogHelper.w(TAG, reason + "：非磁贴时歌词界面只能在背屏，当前 displayId=" + d + "，销毁");
+            LogHelper.w(TAG, reason + "：背屏歌词只能在背屏展示，当前 displayId=" + d + "，销毁");
             finishIllegalProjectionSurface();
             return true;
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && d != 0 && d != 1) {
-            LogHelper.w(TAG, reason + "：非磁贴时不允许的非常规显示屏(displayId=" + d + ")，销毁");
+            LogHelper.w(TAG, reason + "：非常规显示屏(displayId=" + d + ")，销毁");
             finishIllegalProjectionSurface();
             return true;
         }
@@ -513,6 +504,54 @@ public class RearScreenLyricsActivity extends ComponentActivity {
 
     private void finishIllegalProjectionSurface() {
         finishProjectionFromUser("illegal-surface");
+    }
+
+    /**
+     * 主屏仅透明占位；背屏才允许创建/展示歌词 UI。主屏若已有 UI（迁屏失败或结束回落）立即销毁。
+     *
+     * @return true 表示已处理并应中止后续 UI 逻辑
+     */
+    private boolean enforceProjectionDisplayPolicy(String reason) {
+        if (isFinishing() || projectionExitFlowStarted || finishRequestedByMiRoot) {
+            return true;
+        }
+        int displayId = getDisplayIdSafe();
+        int mainMode = RearMirootProjectionLifecycle.resolveMainDisplayProjectionMode(
+                displayId, false, hasLyricsView());
+        if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
+            RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode);
+            LogHelper.w(TAG, reason + "：主屏禁止展示背屏歌词 UI，结束投屏");
+            finishProjectionFromUser(reason + "-main-display-with-ui");
+            return true;
+        }
+        if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_TRANSPARENT_PLACEHOLDER) {
+            RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode);
+            if (!hasLyricsView()) {
+                schedulePollRearLyricsUiInitAfterMove();
+            }
+            return true;
+        }
+        if (RearMirootProjectionLifecycle.shouldFinishOnMainDisplayDuringProjection(
+                displayId, initialDisplayId, false, hasLyricsView())) {
+            RearMirootProjectionLifecycle.hideWindowBeforeProjectionFinish(this);
+            LogHelper.w(TAG, reason + "：背屏 UI 落回主屏，结束投屏");
+            finishProjectionFromUser(reason + "-rear-ui-on-main");
+            return true;
+        }
+        return false;
+    }
+
+    /** 旧版磁贴曾用本 Activity 主屏横屏；现统一跳转 {@link MainScreenMusicActivity}。 */
+    private void redirectLegacyMainScreenLaunchAndFinish() {
+        LogHelper.w(TAG, "旧版主屏横屏入口已废弃，跳转 MainScreenMusicActivity");
+        try {
+            Intent i = new Intent(this, MainScreenMusicActivity.class);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(i);
+        } catch (Exception e) {
+            LogHelper.e(TAG, "跳转 MainScreenMusicActivity 失败", e);
+        }
+        finishProjectionTask();
     }
 
     /** 主屏占位迁背屏后轮询 displayId，落背屏即建 UI（与车控一致）。 */
@@ -573,6 +612,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         cancelMainScreenPlaceholderTimeout();
         cancelRearLyricsUiInitPoll();
         LogHelper.d(TAG, "🎯 背屏初始化歌词 UI (" + reason + ")");
+        RearMirootProjectionLifecycle.restoreProjectionWindowVisible(this);
         currentInstance = this;
         if (initialDisplayId == -1) {
             initialDisplayId = RearMirootProjectionLifecycle.REAR_DISPLAY_ID;
@@ -627,8 +667,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             ProjectionOnlyNotificationHelper.cancelMusic(this);
         } catch (Exception ignored) {
         }
-        RearMirootProjectionLifecycle.hideWindowBeforeProjectionFinish(this);
-        // 主屏 HOME 仅在 finish() 中发送一次（避免与 finish / onDestroy restore 连发）
+        if (getDisplayIdSafe() == 0) {
+            RearMirootProjectionLifecycle.hideWindowBeforeProjectionFinish(this);
+        }
         finish();
     }
 
@@ -2356,6 +2397,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private static final String KEY_BREATHING_DISPLACEMENT_STRENGTH = "breathingDisplacementStrength";
     private static final String KEY_COLOR_CHANGE_INTERVAL_MS = "colorChangeIntervalMs";
     private static final String KEY_RANDOM_COLOR_SWITCH_ENABLED = "randomColorSwitchEnabled";
+    private static final String KEY_FIXED_COLOR = "fixedColor";
     private static final String KEY_PROJECTION_SYNC_OFFSET_MS = "projectionSyncOffsetMs";
     private static final String KEY_LYRICS_SOURCE_MODE = "lyricsSourceMode";
     private static final String VALUE_LYRICS_SOURCE_NETWORK_ONLY = "NETWORK_ONLY";
@@ -2381,7 +2423,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private static final float DEFAULT_BREATHING_DISPLACEMENT_STRENGTH = 1f;
     private static final int DEFAULT_COLOR_CHANGE_INTERVAL_MS = 5000;
     private static final int MIN_COLOR_CHANGE_INTERVAL_MS = 1000;
-    private static final int MAX_COLOR_CHANGE_INTERVAL_MS = 10000;
+    private static final int MAX_COLOR_CHANGE_INTERVAL_MS = 30000;
     private static final int DEFAULT_MARQUEE_LIGHT_DURATION_MS = 5000;
     /**
      * 背屏左侧条带（摄像头/装饰区）：歌名、控制条与歌词绘制均从此宽度之后开始；
@@ -2418,6 +2460,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     
     private int colorChangeIntervalMs = DEFAULT_COLOR_CHANGE_INTERVAL_MS;
     private boolean randomColorSwitchEnabled = true;
+    private int fixedColor = 0xFFFFFFFF;
     /** 与 [com.wmqc.miroot.ui.music.LyricsSettingsRepository] 键名一致；正数表示歌词相对媒体进度提前显示（毫秒）。 */
     private int projectionSyncOffsetMs = DEFAULT_PROJECTION_SYNC_OFFSET_MS;
     private boolean abyssalMirrorEnabled = false;  // 默认关闭深渊镜效果
@@ -2435,6 +2478,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         super.onCreate(savedInstanceState);
         // 禁用转场动画（去掉背屏切换界面的动画）
         overridePendingTransition(0, 0);
+        // 与车控一致：首帧即透明，避免主屏占位迁屏期间闪出默认窗口/小窗
+        try {
+            getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+        } catch (Exception ignored) {
+        }
         
         // 检查是否是点击通知结束投屏
         if (getIntent() != null && "ACTION_STOP_PROJECTION".equals(getIntent().getAction())) {
@@ -2487,7 +2535,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         registerLyricsProjectionBackPressedCallback();
         RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
         RootTaskServiceConnector.prewarm(this);
-        SuperLyricApi.init();
+        try {
+            SuperLyricApi.init();
+        } catch (Throwable t) {
+            LogHelper.w(TAG, "SuperLyricApi.init() failed: " + t.getMessage());
+        }
 
         // <!-- 检查是否通过广播启动（通过Intent的extra参数判断） -->
         Intent intent = getIntent();
@@ -2497,10 +2549,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             if (isBroadcast) {
                 LogHelper.d(TAG, "📻 检测到通过广播启动的音乐投屏，不受自动投屏开关影响");
             }
-            // 检查是否在主屏横屏模式（通过磁贴快捷键启动）
-            isMainScreenLandscapeMode = intent.getBooleanExtra("isMainScreenLandscape", false);
-            if (isMainScreenLandscapeMode) {
-                LogHelper.d(TAG, "🖥️ 检测到主屏横屏模式启动（磁贴快捷键）");
+            // 旧版磁贴曾带 isMainScreenLandscape；主屏歌词现由 MainScreenMusicActivity 独立承载
+            if (intent.getBooleanExtra("isMainScreenLandscape", false)) {
+                redirectLegacyMainScreenLaunchAndFinish();
+                return;
             }
         } else {
             // 如果没有Intent，默认不是广播启动
@@ -2522,57 +2574,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
         LogHelper.d(TAG, "📍 onCreate时displayId=" + displayId);
 
-        // 磁贴快捷：仅允许在主屏(display 0)展示歌词；若系统错误把 Activity 落在背屏等其它屏则立即销毁
-        if (isMainScreenLandscapeMode) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && displayId != 0) {
-                LogHelper.w(TAG, "磁贴主屏模式启动时不在主屏(displayId=" + displayId + ")，销毁");
-                finishIllegalProjectionSurface();
-                return;
-            }
-            LogHelper.d(TAG, "🖥️ 在主屏横屏模式启动，创建歌词显示界面");
-
-            setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-
-            setupWindow();
-
-            WindowManager.LayoutParams paramsMain = getWindow().getAttributes();
-            paramsMain.width = WindowManager.LayoutParams.MATCH_PARENT;
-            paramsMain.height = WindowManager.LayoutParams.MATCH_PARENT;
-            getWindow().setAttributes(paramsMain);
-
-            loadSettings();
-
-            currentTextSize = currentTextSize * 2f;
-            marqueeLightSize = marqueeLightSize * 2.3f;
-            LogHelper.d(TAG, "🖥️ 主屏横屏模式：字体大小调整为 " + currentTextSize + "px (原值x2), " +
-                    "底图字体大小倍数保持设置值 " + backgroundTextureSize + " (跟随字体大小), " +
-                    "跑马灯线条宽度调整为 " + marqueeLightSize + "px (原值x2.3)");
-
-            createUI();
-
-            getWindow().getDecorView().post(() -> {
-                hideSystemUIForMainScreen();
-                LogHelper.d(TAG, "🖥️ 主屏横屏模式：已隐藏系统UI（全屏）");
-            });
-
-            initLyricsAnimator();
-            setupMediaController();
-            updateMediaInfo();
-            updatePlaybackState();
-            registerActiveSessionsChangedListener();
-
-            bindTaskService();
-            registerScreenReceiver();
-            registerKeepScreenOnPreferenceListener();
-            registerSystemUIVisibilityListener();
-
-            LogHelper.d(TAG, "✅ 主屏横屏模式初始化完成");
-            initialDisplayId = 0;
-            return;
-        }
-
-        // 背屏：正常歌词投屏（唯一允许的非磁贴展示面）
-        if (displayId == 1) {
+        // 背屏：正常歌词投屏（唯一允许展示 UI 的显示屏）
+        if (displayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
             initialDisplayId = displayId;
             LogHelper.d(TAG, "🎯 在背屏执行，开始设置歌词显示");
             RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
@@ -2584,11 +2587,19 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             params.height = WindowManager.LayoutParams.MATCH_PARENT;
             getWindow().setAttributes(params);
 
-            loadSettings();
+            try {
+                loadSettings();
+            } catch (Throwable t) {
+                LogHelper.e(TAG, "loadSettings failed, using defaults", t);
+            }
             createUI();
             initLyricsAnimator();
             setupMediaController();
-            updateMediaInfo();
+            try {
+                updateMediaInfo();
+            } catch (Throwable t) {
+                LogHelper.w(TAG, "updateMediaInfo failed", t);
+            }
             updatePlaybackState();
             registerActiveSessionsChangedListener();
 
@@ -2601,11 +2612,12 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && displayId != 0 && displayId != 1) {
-            LogHelper.w(TAG, "非磁贴入口落在非常规显示屏(displayId=" + displayId + ")，销毁");
+            LogHelper.w(TAG, "非背屏入口落在非常规显示屏(displayId=" + displayId + ")，销毁");
             finishIllegalProjectionSurface();
             return;
         }
 
+        // 主屏 display 0：仅透明占位，不创建 UI，等待迁往背屏（与车控一致）
         LogHelper.d(TAG, "💤 在主屏占位等待迁往背屏（最长 " + MAIN_SCREEN_PLACEHOLDER_TIMEOUT_MS + "ms）");
         RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(
                 this, RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_TRANSPARENT_PLACEHOLDER);
@@ -2700,6 +2712,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
      * 设置窗口属性（统一管理窗口flags）
      */
     private void setupWindow() {
+        RearMirootProjectionLifecycle.restoreProjectionWindowVisible(this);
         RearMirootProjectionLifecycle.applyRearOpaqueWindowBase(this, 0xFF000000);
 
         // 音乐投屏时保持常亮（与功能页「投屏常亮」一致）
@@ -2912,6 +2925,8 @@ public class RearScreenLyricsActivity extends ComponentActivity {
     private void createUI() {
         try {
             LogHelper.d(TAG, "🎨 开始创建UI布局");
+            // 预填充共享同步颜色，确保首帧歌词和跑马灯颜色一致
+            LyricsProjectionColorSync.prefetch(colorChangeIntervalMs);
             // 深渊镜：尽早 setDecorFitsSystemWindows(false)，确保首帧布局即全屏铺满（避免 content 被 insets 内缩）
             if (abyssalMirrorEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 getWindow().setDecorFitsSystemWindows(false);
@@ -3007,10 +3022,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 if (Math.abs(velocityX) < titleSwipeMinVelocityPx || Math.abs(velocityX) <= Math.abs(velocityY)) {
                     return false;
                 }
+                // 左滑(→)下一首，右滑(←)上一首，与深渊镜手势方向一致
                 if (dx < 0) {
-                    executeMediaSkip(false, "歌名区左滑上一首");
+                    executeMediaSkip(true, "歌名区左滑下一首");
                 } else {
-                    executeMediaSkip(true, "歌名区右滑下一首");
+                    executeMediaSkip(false, "歌名区右滑上一首");
                 }
                 return true;
             }
@@ -3070,7 +3086,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 abyssalMirrorLyricsViewGroup.setMainScreenLandscapeMode(isMainScreenLandscapeMode);
                 // 使用调整后的字体大小（主屏横屏模式已x2）
                 abyssalMirrorLyricsViewGroup.setTextSize(currentTextSize);
-                abyssalMirrorLyricsViewGroup.setTextColor(randomColorSwitchEnabled ? randomHighSaturationColor() : 0xFFFFFFFF);
+                abyssalMirrorLyricsViewGroup.setTextColor(randomColorSwitchEnabled ? randomHighSaturationColor() : fixedColor);
                 abyssalMirrorLyricsViewGroup.setFitsSystemWindows(false); // 不避系统栏，真正全屏
                 abyssalMirrorLyricsViewGroup.setGyroSensitivityMultiplier(abyssalGyroSensitivity);
                 abyssalMirrorLyricsViewGroup.setMovableRangeMultiplier(abyssalMovableRange);
@@ -3238,6 +3254,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             
             rootLayout.addView(lyricsView);
 
+                // 歌词、边框、跑马灯共用同一配色源，主背屏同时显示时保持一致
+                LyricsProjectionColorSync.bindLyricsView(lyricsView, randomColorSwitchEnabled, colorChangeIntervalMs);
+
             LogHelper.d(TAG, "✅ 已创建普通歌词视图");
 
             // 酷我车载广播桥：监听 LYRIC_FULL / LYRIC_PROGRESS（参考酷我移植参考文档.md §9）
@@ -3388,28 +3407,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             marqueeLightView.setClickable(false);
             marqueeLightView.setFocusable(false);
             
-            // 建立颜色联动：跑马灯和霓虹灯边框颜色跟随歌词颜色
+            // 建立颜色联动：跑马灯和霓虹灯边框与歌词高亮同色
             if (marqueeLightView != null) {
-                marqueeLightView.setColorSyncCallback(() -> {
-                    // 返回歌词的当前颜色（用于跑马灯和霓虹灯边框颜色联动）
-                    if (abyssalMirrorEnabled && abyssalMirrorLyricsViewGroup != null) {
-                        // 新的ViewGroup版本：返回歌词颜色
-                        return abyssalMirrorLyricsViewGroup.getTextColor();
-                    } else if (abyssalMirrorEnabled && abyssalMirrorLyricsView != null) {
-                        // 旧版3D旋转版本（兼容）
-                        return abyssalMirrorLyricsView.getTextColor();
-                    } else if (lyricsView != null) {
-                        // 关闭随机变色时：逐字橘色仅用于歌词，边框/跑马灯保持浅色联动（经 MarqueeLightView 柔化为偏白灰）
-                        if (!randomColorSwitchEnabled) {
-                            return 0xFFFFFFFF;
-                        }
-                        return lyricsView.getCurrentTextColor();
-                    }
-                    // 如果视图为null，返回默认颜色（白色）
-                    return 0xFFFFFFFF;
-                });
-                marqueeLightView.setColorSyncEnabled(true);  // 启用颜色联动
-                LogHelper.d(TAG, "✅ 跑马灯和霓虹灯边框颜色已设置为跟随歌词颜色");
+                LyricsProjectionColorSync.bindMarqueeLight(marqueeLightView, randomColorSwitchEnabled, colorChangeIntervalMs);
+                LogHelper.d(TAG, "✅ 跑马灯和霓虹灯边框颜色已设置为双屏联动共享颜色");
             }
             
             LogHelper.d(TAG, "✅ 跑马灯视图已添加，跑马灯: " + (marqueeLightEnabled ? "启用" : "禁用") + 
@@ -4175,6 +4176,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 updateHookSourceStatusText(LyricsRuntimeSource.KUWO_AUDIO_LYRIC, "广播·逐字");
                 if (lyricsView != null) {
                     lyricsView.setEnableWordByWord(true);
+            lyricsView.setCharJumpEnabled(true);
                 }
                 int wordCount = 0;
                 for (EnhancedLRCParser.EnhancedLyricLine l : lines) {
@@ -6595,7 +6597,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         boolean effectiveWordByWord = effectiveWordByWordForSuperLyric(null);
         if (superLyricFallbackModeActive) {
             lyricsView.setShowTranslation(false);
+            LyricsProjectionColorSync.bindLyricsView(lyricsView, randomColorSwitchEnabled, colorChangeIntervalMs);
             lyricsView.setEnableWordByWord(effectiveWordByWord);
+            lyricsView.setCharJumpEnabled(effectiveWordByWord);
             lyricsView.setEnableShuffleSplitEffect(shuffleSplitEffectEnabled);
             lyricsView.setShuffleSplitMulticolorEnabled(shuffleSplitEffectEnabled && shuffleSplitMulticolorEnabled);
             lyricsView.setShuffleSplitMode(shuffleSplitEffectEnabled ? "WORD" : shuffleSplitMode);
@@ -6610,6 +6614,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         } else {
             lyricsView.setShowTranslation(true);
             lyricsView.setEnableWordByWord(effectiveWordByWord);
+            lyricsView.setCharJumpEnabled(effectiveWordByWord);
             lyricsView.setEnableShuffleSplitEffect(shuffleSplitEffectEnabled);
             lyricsView.setShuffleSplitMulticolorEnabled(shuffleSplitEffectEnabled && shuffleSplitMulticolorEnabled);
             lyricsView.setShuffleSplitMode(shuffleSplitEffectEnabled ? "WORD" : shuffleSplitMode);
@@ -6617,6 +6622,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             lyricsView.setEnableGesture(gestureControlEnabled);
             lyricsView.setTimeAdjustOffset(projectionSyncOffsetMs);
             lyricsView.setShuffleSplitTiltRatio(prefs.getFloat("shuffleSplitTiltRatio", 5f));
+            LyricsProjectionColorSync.bindLyricsView(lyricsView, randomColorSwitchEnabled, colorChangeIntervalMs);
             float scaleVariance = prefs.contains(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE)
                 ? prefs.getFloat(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE, 0.22f)
                 : adaptiveShuffleSplitScaleVariance(currentTextSize);
@@ -6812,13 +6818,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         if (a == null) {
             return false;
         }
-        if (a.isFinishing()) {
-            return false;
-        }
-        if (a.isMainScreenLandscapeLyricsActive()) {
-            return false;
-        }
-        return true;
+        return !a.isFinishing();
     }
     
     private void loadLyricsFontFieldsFromPrefs(SharedPreferences prefs) {
@@ -6893,6 +6893,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 )
         );
         randomColorSwitchEnabled = prefs.getBoolean(KEY_RANDOM_COLOR_SWITCH_ENABLED, true);
+        fixedColor = prefs.getInt(KEY_FIXED_COLOR, 0xFFFFFFFF);
+        // 同步到全局颜色管理器
+        LyricsColorManager.INSTANCE.setRandomMode(randomColorSwitchEnabled);
+        LyricsColorManager.INSTANCE.setColorChangeIntervalMs(colorChangeIntervalMs);
+        LyricsColorManager.INSTANCE.setFixedColor(fixedColor);
         abyssalGyroSensitivity = prefs.getFloat(KEY_ABYSSAL_GYRO_SENSITIVITY, DEFAULT_ABYSSAL_GYRO_SENSITIVITY);
         abyssalMovableRange = prefs.getFloat(KEY_ABYSSAL_MOVABLE_RANGE, DEFAULT_ABYSSAL_MOVABLE_RANGE);
         loadLyricsFontFieldsFromPrefs(prefs);
@@ -6956,6 +6961,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 Math.max(MIN_COLOR_CHANGE_INTERVAL_MS, Math.min(MAX_COLOR_CHANGE_INTERVAL_MS, colorChangeIntervalMs))
         );
         editor.putBoolean(KEY_RANDOM_COLOR_SWITCH_ENABLED, randomColorSwitchEnabled);
+        editor.putInt(KEY_FIXED_COLOR, fixedColor);
         editor.apply();
         LogHelper.d(TAG, "💾 保存设置: 字体大小=" + currentTextSize + ", 底图大小=" + backgroundTextureSize + 
                   ", 未唱歌词透明度=" + normalLyricsAlpha + "%, 底图透明度=" + backgroundTextureAlpha + "%" +
@@ -6979,9 +6985,12 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 )
         );
         if (fromPrefs == colorChangeIntervalMs) {
+            // 即使 interval 未变，也要同步 randomMode / fixedColor（设置页可能仅改了颜色开关）
+            syncRandomModeAndFixedColorFromPrefs(prefs);
             return;
         }
         colorChangeIntervalMs = fromPrefs;
+        syncRandomModeAndFixedColorFromPrefs(prefs);
         if (abyssalMirrorLyricsViewGroup != null) {
             abyssalMirrorLyricsViewGroup.setColorChangeIntervalMs(colorChangeIntervalMs);
         }
@@ -6992,6 +7001,27 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             marqueeLightView.setColorChangeIntervalMs(colorChangeIntervalMs);
         }
         LogHelper.d(TAG, "🎨 颜色变化节奏已从偏好同步: " + colorChangeIntervalMs + "ms");
+    }
+
+    private void syncRandomModeAndFixedColorFromPrefs(SharedPreferences prefs) {
+        boolean newRandom = prefs.getBoolean(KEY_RANDOM_COLOR_SWITCH_ENABLED, true);
+        int newFixed = prefs.getInt(KEY_FIXED_COLOR, 0xFFFFFFFF);
+        boolean changed = (newRandom != randomColorSwitchEnabled) || (newFixed != fixedColor);
+        randomColorSwitchEnabled = newRandom;
+        fixedColor = newFixed;
+        LyricsColorManager.INSTANCE.setRandomMode(randomColorSwitchEnabled);
+        LyricsColorManager.INSTANCE.setFixedColor(fixedColor);
+        if (changed) {
+            if (abyssalMirrorLyricsViewGroup != null) {
+                abyssalMirrorLyricsViewGroup.setRandomColorSwitchEnabled(randomColorSwitchEnabled);
+                if (!randomColorSwitchEnabled) {
+                    abyssalMirrorLyricsViewGroup.setTextColor(fixedColor);
+                }
+            }
+            if (lyricsView != null) {
+                lyricsView.setRandomColorSwitchEnabled(randomColorSwitchEnabled);
+            }
+        }
     }
 
     /**
@@ -7061,6 +7091,11 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 )
         );
         randomColorSwitchEnabled = prefs.getBoolean(KEY_RANDOM_COLOR_SWITCH_ENABLED, true);
+        fixedColor = prefs.getInt(KEY_FIXED_COLOR, 0xFFFFFFFF);
+        // 同步到全局颜色管理器
+        LyricsColorManager.INSTANCE.setRandomMode(randomColorSwitchEnabled);
+        LyricsColorManager.INSTANCE.setColorChangeIntervalMs(colorChangeIntervalMs);
+        LyricsColorManager.INSTANCE.setFixedColor(fixedColor);
         powerSavingModeEnabled = prefs.getBoolean(KEY_POWER_SAVING_MODE, false);
         borderPerformanceGuardEnabled = prefs.getBoolean(KEY_BORDER_PERFORMANCE_GUARD, false);
         borderLightweightModeEnabled = prefs.getBoolean(KEY_BORDER_LIGHTWEIGHT_MODE, false);
@@ -7074,10 +7109,10 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         if (isMainScreenLandscapeMode) {
             currentTextSize = originalTextSize * 2f;
             backgroundTextureSize = originalBackgroundTextureSize;  // 保持设置值不变，跟随字体大小
-            marqueeLightSize = originalMarqueeLightSize * 2.3f;  // 跑马灯线条宽度 x2.3
+            marqueeLightSize = originalMarqueeLightSize;  // 背屏跟随设置，无倍率
             LogHelper.d(TAG, "🖥️ 主屏横屏模式：字体大小调整为 " + currentTextSize + "px (原值x2), " +
                       "底图字体大小倍数保持设置值 " + backgroundTextureSize + " (跟随字体大小), " +
-                      "跑马灯线条宽度调整为 " + marqueeLightSize + "px (原值x2.3)");
+                      "跑马灯线条宽度保持设置值 " + marqueeLightSize + "px");
         } else {
             currentTextSize = originalTextSize;
             backgroundTextureSize = originalBackgroundTextureSize;
@@ -7120,7 +7155,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             float gyroSensitivity = prefs.getFloat(KEY_ABYSSAL_GYRO_SENSITIVITY, DEFAULT_ABYSSAL_GYRO_SENSITIVITY);
             float movableRange = prefs.getFloat(KEY_ABYSSAL_MOVABLE_RANGE, DEFAULT_ABYSSAL_MOVABLE_RANGE);
             abyssalMirrorLyricsViewGroup.setTextSize(currentTextSize);
-            abyssalMirrorLyricsViewGroup.setTextColor(randomColorSwitchEnabled ? randomHighSaturationColor() : 0xFFFFFFFF);
+            abyssalMirrorLyricsViewGroup.setTextColor(randomColorSwitchEnabled ? randomHighSaturationColor() : fixedColor);
             abyssalMirrorLyricsViewGroup.setEnableGesture(gestureControlEnabled);
             abyssalMirrorLyricsViewGroup.setGyroSensitivityMultiplier(gyroSensitivity);
             abyssalMirrorLyricsViewGroup.setMovableRangeMultiplier(movableRange);
@@ -7142,6 +7177,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             lyricsView.setShuffleSplitMode(effectiveShuffleSplitEnabled ? "WORD" : shuffleSplitMode);
             lyricsView.setShuffleOnlyCurrentLine(effectiveShuffleSplitEnabled || shuffleSplitOnlyCurrentLine);
             lyricsView.setShuffleSplitTiltRatio(prefs.getFloat("shuffleSplitTiltRatio", 5f));
+            LyricsProjectionColorSync.bindLyricsView(lyricsView, randomColorSwitchEnabled, colorChangeIntervalMs);
             float scaleVariance = prefs.contains(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE)
                     ? prefs.getFloat(KEY_SHUFFLE_SPLIT_SCALE_VARIANCE, 0.22f)
                     : adaptiveShuffleSplitScaleVariance(currentTextSize);
@@ -7200,6 +7236,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             marqueeLightView.setPerformanceGuardEnabled(borderPerformanceGuardEnabled);
             marqueeLightView.setLightweightModeEnabled(powerSavingModeEnabled || borderLightweightModeEnabled);
             marqueeLightView.setColorChangeIntervalMs(colorChangeIntervalMs);
+            LyricsProjectionColorSync.bindMarqueeLight(marqueeLightView, randomColorSwitchEnabled, colorChangeIntervalMs);
             LogHelper.d(TAG, "✅ 跑马灯设置已更新: " + (marqueeLightEnabled ? "显示" : "隐藏") + 
                       ", 线条宽度=" + marqueeLightSize + "px, 动画时长=" + marqueeLightDurationMs + "ms" +
                       ", 霓虹效果=" + neonDisplayEnabled + ", 边框显示=" + neonBorderEnabled +
@@ -7616,22 +7653,18 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                     }
                 }
 
-                if (displayId == 1 || (isMainScreenLandscapeMode && displayId == 0)) {
+                if (displayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
                     cancelMainScreenPlaceholderTimeout();
+                }
+                if (enforceProjectionDisplayPolicy("onWindowFocusChanged")) {
+                    return;
                 }
                 if (finishIfIllegalProjectionSurface("onWindowFocusChanged")) {
                     return;
                 }
                 
-                // 主屏横屏模式：确保保持横屏方向
-                if (isMainScreenLandscapeMode && displayId == 0) {
-                    setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-                    LogHelper.d(TAG, "🖥️ 主屏横屏模式：窗口获得焦点，确保保持横屏方向");
-                    return; // 主屏横屏模式不需要后续的背屏逻辑
-                }
-                
                 // 在背屏时，立即重新应用常亮flags（防止双击息屏后屏幕熄灭）
-                if (displayId == 1) {
+                if (displayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
                     RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
                     // 检查背屏常亮开关（与功能页一致）
                     boolean keepScreenOnEnabledFocus = isProjectionKeepScreenOnEnabled();
@@ -7713,11 +7746,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         LogHelper.d(TAG, "📍 onConfigurationChanged时displayId=" + displayId + ", initialDisplayId=" + initialDisplayId);
 
         int mainMode = RearMirootProjectionLifecycle.resolveMainDisplayProjectionMode(
-                displayId, isMainScreenLandscapeMode, hasLyricsView());
+                displayId, false, hasLyricsView());
         if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
-            RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode);
-            LogHelper.w(TAG, "🛑 onConfigurationChanged 落主屏且已有 UI，结束投屏");
-            finishProjectionFromUser("display-changed-to-main");
+            enforceProjectionDisplayPolicy("onConfigurationChanged");
             return;
         }
         if (RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode)) {
@@ -7731,123 +7762,20 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return;
         }
         
-        // 如果是主屏横屏模式，确保保持横屏方向并全屏
-        if (isMainScreenLandscapeMode && displayId == 0) {
-            LogHelper.d(TAG, "🖥️ 主屏横屏模式：确保保持横屏方向并全屏");
-            setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-            // 隐藏系统UI（全屏显示）
-            hideSystemUIForMainScreen();
-        }
-        
-        // 如果移动到背屏且UI未创建，创建UI
-        if (displayId == 1 && lyricsView == null) {
-            LogHelper.d(TAG, "🎯 在onConfigurationChanged中检测到移动到背屏且UI未创建，开始创建UI");
-            // 使用Handler延迟创建，确保配置变更完成
+        // 背屏且 UI 未创建：调度初始化
+        if (displayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID && lyricsView == null) {
+            LogHelper.d(TAG, "🎯 onConfigurationChanged：背屏且 UI 未创建，调度初始化");
             if (deferredCreateUiRunnable != null) {
                 uiHandler.removeCallbacks(deferredCreateUiRunnable);
             }
             deferredCreateUiRunnable = () -> {
-                // 再次检查displayId和lyricsView
-                int currentDisplayId = 0;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    try {
-                        currentDisplayId = getDisplay().getDisplayId();
-                    } catch (Exception e) {
-                        LogHelper.e(TAG, "再次获取displayId失败", e);
-                    }
-                }
-                if (currentDisplayId == 1 && lyricsView == null) {
-                    LogHelper.d(TAG, "✅ 确认在背屏且UI未创建，开始创建UI");
-                    initialDisplayId = currentDisplayId;
-                    // 保持常亮 + 锁屏显示（与功能页「投屏常亮」一致）
-                    boolean keepScreenOnEnabledConfig = isProjectionKeepScreenOnEnabled();
-
-                    if (keepScreenOnEnabledConfig) {
-                        // 与未投放应用时的实现方式一致
-                        getWindow().addFlags(
-                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
-                            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
-                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-                        );
-                        LogHelper.d(TAG, "✅ 背屏常亮已开启（onConfigurationChanged），保持屏幕常亮");
-                    } else {
-                        getWindow().addFlags(
-                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
-                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                        );
-                        // 清除常亮标志（如果之前设置了）
-                        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                        LogHelper.d(TAG, "⏸️ 背屏常亮已关闭（onConfigurationChanged），不保持屏幕常亮");
-                    }
-                    
-                    // 适配新API：锁屏时显示（与未投放应用时的实现方式一致）
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                        setShowWhenLocked(true);
-                        setTurnScreenOn(true);
-                    }
-                    
-                    // 一次性设置所有窗口属性，避免多次调用setAttributes导致闪烁
-                    WindowManager.LayoutParams params = getWindow().getAttributes();
-                    params.width = WindowManager.LayoutParams.MATCH_PARENT;
-                    params.height = WindowManager.LayoutParams.MATCH_PARENT;
-                    
-                    // 让内容始终延伸到摄像头区域（Display Cutout）
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                        params.layoutInDisplayCutoutMode = 
-                            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
-                    }
-                    
-                    // 一次性设置所有属性
-                    getWindow().setAttributes(params);
-                    
-                    // 注意：系统UI可见性设置在setContentView之后，在createUI中的hideSystemUI()方法中处理
-                    // 这样可以避免在窗口还未创建时就设置可见性，减少闪烁
-                    
-                    // 加载设置
-                    loadSettings();
-                    
-                    // 创建UI布局
-                    createUI();
-                    
-                    // 初始化歌词动画器
-                    initLyricsAnimator();
-                    
-                    // 获取MediaController
-                    setupMediaController();
-                    
-                    // 更新UI
-                    updateMediaInfo();
-                    
-                    // 立即同步一次播放状态
-                    updatePlaybackState();
-                    
-                    // 绑定TaskService（用于屏蔽/恢复官方手势服务）
-                    // 注意：如果Activity在主屏启动后移动到背屏，onCreate中不会执行bindTaskService，需要在这里绑定
-                    bindTaskService();
-                    
-                    // 确认在背屏且UI已创建后，才显示通知（界面显示成功后）
-                    int configDisplayId = 0;
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        try {
-                            configDisplayId = getDisplay().getDisplayId();
-                        } catch (Exception e) {
-                            LogHelper.e(TAG, "获取displayId失败", e);
-                        }
-                    }
-                    // 严格检查：必须在背屏(displayId==1)且UI已创建(lyricsView!=null)且Activity未销毁
-                    if (configDisplayId == 1 && hasLyricsView() && !isFinishing()) {
-                        LogHelper.d(TAG, "✅ 投屏成功（onConfigurationChanged），界面显示成功");
-                        // 启动音乐投屏背屏常亮服务（确认在背屏且UI已创建）
-                        startMusicProjectionWakeService();
-                        notifyMainActivityProjectionStarted();
-                    } else {
-                        LogHelper.w(TAG, "⚠️ 投屏未完全成功（onConfigurationChanged） (displayId=" + configDisplayId + ", lyricsView=" + (lyricsView != null) + ", isFinishing=" + isFinishing() + ")");
-                        // 创建失败，关闭常亮服务
-                        stopMusicProjectionWakeService();
-                    }
+                deferredCreateUiRunnable = null;
+                if (!isFinishing() && !isDestroyed()
+                        && getDisplayIdSafe() == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
+                    initLyricsUiOnRearIfNeeded("onConfigurationChanged");
                 }
             };
-            uiHandler.postDelayed(deferredCreateUiRunnable, 100); // 延迟100ms，确保配置变更完成
+            uiHandler.postDelayed(deferredCreateUiRunnable, 100);
         }
     }
     
@@ -7888,6 +7816,9 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         isInForeground = true;
         uiAnimationsCancelled = false;
         handleProjectionForegroundAfterStopGrace();
+        if (enforceProjectionDisplayPolicy("onStart")) {
+            return;
+        }
         RearDisplayInputHelper.ensureApplicationWindowReceivesInput(this);
         if (getDisplayIdSafe() == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
             RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
@@ -7921,15 +7852,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
         }
         LogHelper.d(TAG, "📍 onResume时displayId=" + displayId);
 
-        int mainDisplayMode = RearMirootProjectionLifecycle.resolveMainDisplayProjectionMode(
-                displayId, isMainScreenLandscapeMode, hasLyricsView());
-        if (RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainDisplayMode)) {
-            if (mainDisplayMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
-                LogHelper.w(TAG, "⚠️ 主屏禁止展示投屏 UI，结束音乐投屏");
-                finishProjectionFromUser("main-display-no-ui-allowed");
-            } else if (lyricsView == null && !isMainScreenLandscapeMode) {
-                schedulePollRearLyricsUiInitAfterMove();
-            }
+        if (enforceProjectionDisplayPolicy("onResume")) {
             return;
         }
 
@@ -7938,7 +7861,7 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             RearMirootProjectionLifecycle.primeRearSystemBackGestures(this);
         }
 
-        if (displayId == 1 || (isMainScreenLandscapeMode && displayId == 0)) {
+        if (displayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
             cancelMainScreenPlaceholderTimeout();
         }
 
@@ -7946,115 +7869,13 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             return;
         }
 
-        // 如果是主屏横屏模式，允许在主屏运行，不销毁
-        if (isMainScreenLandscapeMode && displayId == 0) {
-            LogHelper.d(TAG, "🖥️ 主屏横屏模式：允许在主屏运行，确保保持横屏方向并全屏");
-            setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-            hideSystemUIForMainScreen();
-            return;
-        }
-
-        // 如果在背屏，检查是否需要创建UI（可能是在主屏启动后移动到背屏）
+        // 背屏且 UI 未创建：统一走 initLyricsUiOnRearIfNeeded（占位迁屏 / onCreate 直启兜底）
         if (lyricsView == null && displayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
             if (initLyricsUiOnRearIfNeeded("onResume")) {
                 resumeSuperLyricLyricsPipeline();
                 return;
             }
-            LogHelper.d(TAG, "🎯 在背屏但UI未创建(lyricsView=null)，开始创建UI");
-            if (initialDisplayId == -1) {
-                initialDisplayId = getDisplayIdSafe();
-            }
-            // 保持常亮 + 锁屏显示（与功能页「投屏常亮」一致）
-            boolean keepScreenOnEnabledResume = isProjectionKeepScreenOnEnabled();
-
-            if (keepScreenOnEnabledResume) {
-                // 与未投放应用时的实现方式一致
-                getWindow().addFlags(
-                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
-                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON |
-                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
-                );
-                LogHelper.d(TAG, "✅ 背屏常亮已开启（onResume创建UI），保持屏幕常亮");
-            } else {
-                getWindow().addFlags(
-                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
-                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                );
-                // 清除常亮标志（如果之前设置了）
-                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-                LogHelper.d(TAG, "⏸️ 背屏常亮已关闭（onResume创建UI），不保持屏幕常亮");
-            }
-            
-            // 适配新API：锁屏时显示（与未投放应用时的实现方式一致）
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                setShowWhenLocked(true);
-                setTurnScreenOn(true);
-            }
-            
-            // 优化渲染性能（参考充电动画，解决DequeueBuffer超时）
-            getWindow().setFlags(
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
-            );
-            
-            // 让内容始终延伸到摄像头区域（Display Cutout，参考充电动画）
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                WindowManager.LayoutParams params = getWindow().getAttributes();
-                params.layoutInDisplayCutoutMode = 
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
-                getWindow().setAttributes(params);
-                LogHelper.d(TAG, "✅ 已设置窗口延伸至刘海区域（onResume）");
-            }
-            
-            // 一次性设置窗口尺寸（确保全屏）
-            WindowManager.LayoutParams params = getWindow().getAttributes();
-            params.width = WindowManager.LayoutParams.MATCH_PARENT;
-            params.height = WindowManager.LayoutParams.MATCH_PARENT;
-            getWindow().setAttributes(params);
-            
-            // 注意：系统UI可见性设置在setContentView之后，在createUI中的hideSystemUI()方法中处理
-            // 这样可以避免在窗口还未创建时就设置可见性，减少闪烁
-            
-            // 加载设置
-            loadSettings();
-            
-            // 创建UI布局
-            createUI();
-            
-            // 初始化歌词动画器
-            initLyricsAnimator();
-            
-            // 获取MediaController
-            setupMediaController();
-            
-            // 更新UI
-            updateMediaInfo();
-            
-            // 立即同步一次播放状态
-            updatePlaybackState();
-            registerActiveSessionsChangedListener();
-
-            // 确认在背屏且UI已创建后，才显示通知（界面显示成功后）
-            int currentDisplayId = 0;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                try {
-                    currentDisplayId = getDisplay().getDisplayId();
-                } catch (Exception e) {
-                    LogHelper.e(TAG, "获取displayId失败", e);
-                }
-            }
-            // 严格检查：必须在背屏(displayId==1)且UI已创建(lyricsView!=null)且Activity未销毁
-            if (currentDisplayId == 1 && hasLyricsView() && !isFinishing()) {
-                LogHelper.d(TAG, "✅ 投屏成功，界面显示成功");
-                // 启动音乐投屏背屏常亮服务（确认在背屏且UI已创建）
-                startMusicProjectionWakeService();
-                notifyMainActivityProjectionStarted();
-            } else {
-                LogHelper.w(TAG, "⚠️ 投屏未完全成功 (displayId=" + currentDisplayId + ", hasLyricsView=" + hasLyricsView() + ", isFinishing=" + isFinishing() + ")");
-                // 创建失败，关闭常亮服务
-                stopMusicProjectionWakeService();
-            }
-        } else {
+        } else if (hasLyricsView()) {
             // UI已创建，只需更新状态
             // 再次确保Window flags（与功能页「投屏常亮」一致）
             boolean keepScreenOnEnabledResume2 = isProjectionKeepScreenOnEnabled();
@@ -8163,12 +7984,14 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             // 如果Activity正在finishing，确保清理资源
             if (isFinishing()) {
                 LogHelper.d(TAG, "⚠️ onPause时Activity正在finishing，确保资源清理");
-                // 不在这里执行完整清理，让onDestroy处理，但可以提前停止一些资源
                 try {
                     stopMusicProjectionWakeService();
                 } catch (Exception e) {
                     LogHelper.w(TAG, "onPause中停止服务失败", e);
                 }
+            } else if (displayId == 0 && hasLyricsView()) {
+                LogHelper.w(TAG, "onPause：背屏歌词 UI 落在主屏，结束投屏");
+                finishProjectionFromUser("rear-ui-on-main-onPause");
             } else if (displayId == 1) {
                 // 在背屏且没有finishing时，继续维持常亮flags（防止系统清除）
                 // 与未投屏时常亮实现方式一致：在onPause时重新应用flags，确保屏幕不会熄灭
@@ -8267,9 +8090,17 @@ public class RearScreenLyricsActivity extends ComponentActivity {
             LogHelper.w(TAG, "onStop中检查状态失败", e);
         }
 
-        if (!isFinishing() && !isChangingConfigurations() && !isMainScreenLandscapeMode
-                && hasLyricsView() && displayId == 1) {
+        if (!isFinishing() && !isChangingConfigurations()
+                && hasLyricsView() && displayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID) {
             scheduleRearStopExitGraceIfNeeded("onStop");
+        } else if (!isFinishing() && !isChangingConfigurations()
+                && !hasLyricsView() && displayId == 0 && initialDisplayId == -1) {
+            LogHelper.w(TAG, "onStop：主屏占位阶段切到后台，销毁 Activity");
+            finishProjectionFromUser("placeholder-onstop");
+        } else if (!isFinishing() && !isChangingConfigurations()
+                && hasLyricsView() && displayId == 0) {
+            LogHelper.w(TAG, "onStop：背屏歌词 UI 落在主屏，销毁 Activity");
+            finishProjectionFromUser("rear-ui-on-main-onStop");
         }
     }
 
@@ -8332,11 +8163,16 @@ public class RearScreenLyricsActivity extends ComponentActivity {
 
     @Override
     public void finish() {
-        if (finishRequestedByMiRoot || projectionExitFlowStarted) {
+        if (hasLyricsView()) {
             RearMirootProjectionLifecycle.hideWindowBeforeProjectionFinish(this);
+        }
+        final boolean removeTask = hasLyricsView()
+                || initialDisplayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID
+                || finishRequestedByMiRoot
+                || projectionExitFlowStarted;
+        if (removeTask) {
             RearMirootProjectionLifecycle.prepareRearDisplayBeforeFinish(getDisplayIdSafe(), taskService);
-            if (initialDisplayId == RearMirootProjectionLifecycle.REAR_DISPLAY_ID
-                    && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 if (Build.VERSION.SDK_INT >= 34) {
                     try {
                         overrideActivityTransition(Activity.OVERRIDE_TRANSITION_CLOSE, 0, 0);
@@ -8410,15 +8246,6 @@ public class RearScreenLyricsActivity extends ComponentActivity {
 
             LyricsTaskTracking.clearLastTask();
             
-            // 首先清除静态实例，避免被其他逻辑重新使用
-            if (currentInstance == this) {
-                currentInstance = null;
-                LogHelper.d(TAG, "✅ 已清除静态实例");
-            } else if (currentInstance != null) {
-                // 如果静态实例不是当前实例，也清除（可能是旧的实例）
-                LogHelper.w(TAG, "⚠️ 检测到静态实例不是当前实例，强制清除");
-                currentInstance = null;
-            }
             
             // 停止音乐投屏背屏常亮服务（内部会停止唤醒循环）
             try {
@@ -8568,6 +8395,15 @@ public class RearScreenLyricsActivity extends ComponentActivity {
                 LogHelper.w(TAG, "通知MainActivity失败", e);
             }
             
+            // 首先清除静态实例，避免被其他逻辑重新使用
+            if (currentInstance == this) {
+                currentInstance = null;
+                LogHelper.d(TAG, "✅ 已清除静态实例");
+            } else if (currentInstance != null) {
+                // 如果静态实例不是当前实例，也清除（可能是旧的实例）
+                LogHelper.w(TAG, "⚠️ 检测到静态实例不是当前实例，强制清除");
+                currentInstance = null;
+            }
             LogHelper.d(TAG, "✅ 音乐投屏资源清理完成");
         } catch (Exception e) {
             LogHelper.e(TAG, "❌ 执行清理并退出时发生异常", e);

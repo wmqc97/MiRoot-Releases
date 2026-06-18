@@ -98,6 +98,11 @@ class CarControlWidgetConfigureActivity : AppCompatActivity() {
         val cbBattery = findViewById<MaterialCheckBox>(R.id.widget_config_show_battery)
 
         val cbTire = findViewById<MaterialCheckBox>(R.id.widget_config_show_tire)
+        val cbAvgConsumption = findViewById<MaterialCheckBox>(R.id.widget_config_show_avg_consumption)
+        val cbCoolantTemp = findViewById<MaterialCheckBox>(R.id.widget_config_show_coolant_temp)
+        val cbServiceDistance = findViewById<MaterialCheckBox>(R.id.widget_config_show_service_distance)
+        val cbEpb = findViewById<MaterialCheckBox>(R.id.widget_config_show_epb)
+        val cbEngineSpeed = findViewById<MaterialCheckBox>(R.id.widget_config_show_engine_speed)
 
 
 
@@ -147,6 +152,11 @@ class CarControlWidgetConfigureActivity : AppCompatActivity() {
         cbBattery.isChecked = CarControlWidgetPrefs.hasFlag(savedFlags, CarControlWidgetPrefs.FLAG_BATTERY)
 
         cbTire.isChecked = CarControlWidgetPrefs.hasFlag(savedFlags, CarControlWidgetPrefs.FLAG_TIRE_PRESSURE)
+        cbAvgConsumption.isChecked = CarControlWidgetPrefs.hasFlag(savedFlags, CarControlWidgetPrefs.FLAG_AVG_CONSUMPTION)
+        cbCoolantTemp.isChecked = CarControlWidgetPrefs.hasFlag(savedFlags, CarControlWidgetPrefs.FLAG_COOLANT_TEMP)
+        cbServiceDistance.isChecked = CarControlWidgetPrefs.hasFlag(savedFlags, CarControlWidgetPrefs.FLAG_SERVICE_DISTANCE)
+        cbEpb.isChecked = CarControlWidgetPrefs.hasFlag(savedFlags, CarControlWidgetPrefs.FLAG_EPB_STATUS)
+        cbEngineSpeed.isChecked = CarControlWidgetPrefs.hasFlag(savedFlags, CarControlWidgetPrefs.FLAG_ENGINE_SPEED)
 
 
 
@@ -159,6 +169,11 @@ class CarControlWidgetConfigureActivity : AppCompatActivity() {
                 cbOdometer.isChecked,
                 cbBattery.isChecked,
                 cbTire.isChecked,
+                cbAvgConsumption.isChecked,
+                cbCoolantTemp.isChecked,
+                cbServiceDistance.isChecked,
+                cbEpb.isChecked,
+                cbEngineSpeed.isChecked,
             )
 
             val alpha = alphaSlider.value.toInt()
@@ -200,6 +215,11 @@ class CarControlWidgetConfigureActivity : AppCompatActivity() {
         odometer: Boolean,
         battery: Boolean,
         tire: Boolean,
+        avgConsumption: Boolean = false,
+        coolantTemp: Boolean = false,
+        serviceDistance: Boolean = false,
+        epb: Boolean = false,
+        engineSpeed: Boolean = false,
     ): Int {
         var flags = CarControlWidgetPrefs.MANDATORY_DISPLAY_FLAGS
         if (plate) flags = flags or CarControlWidgetPrefs.FLAG_PLATE
@@ -208,6 +228,11 @@ class CarControlWidgetConfigureActivity : AppCompatActivity() {
         if (odometer) flags = flags or CarControlWidgetPrefs.FLAG_ODOMETER
         if (battery) flags = flags or CarControlWidgetPrefs.FLAG_BATTERY
         if (tire) flags = flags or CarControlWidgetPrefs.FLAG_TIRE_PRESSURE
+        if (avgConsumption) flags = flags or CarControlWidgetPrefs.FLAG_AVG_CONSUMPTION
+        if (coolantTemp) flags = flags or CarControlWidgetPrefs.FLAG_COOLANT_TEMP
+        if (serviceDistance) flags = flags or CarControlWidgetPrefs.FLAG_SERVICE_DISTANCE
+        if (epb) flags = flags or CarControlWidgetPrefs.FLAG_EPB_STATUS
+        if (engineSpeed) flags = flags or CarControlWidgetPrefs.FLAG_ENGINE_SPEED
         return flags
     }
 

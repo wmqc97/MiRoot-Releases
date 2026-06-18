@@ -14,17 +14,19 @@
         android:id="@+id/edit_apps_search"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:background="@android:color/transparent"
         android:hint="@string/apps_search_hint"
         android:importantForAutofill="no"
         android:inputType="text|textNoSuggestions"
         android:maxLines="1"
+        android:paddingVertical="10dp"
         tools:ignore="SpeakableTextPresent" />
 
     <TextView
         android:id="@+id/text_apps_subtitle"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="4dp"
         android:text="@string/apps_subtitle"
         android:textAppearance="?attr/textAppearanceBodySmall"
         android:textColor="@color/mi_text_secondary" />

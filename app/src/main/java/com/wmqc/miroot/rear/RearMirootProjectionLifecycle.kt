@@ -214,6 +214,40 @@ object RearMirootProjectionLifecycle {
     }
 
     /**
+     * 主屏占位：透明、不可见、不可触摸，避免迁屏期间主屏出现小窗或歌词 UI。
+     */
+    @JvmStatic
+    fun applyMainDisplayInvisiblePlaceholder(activity: Activity) {
+        applyMainDisplayTransparentPlaceholder(activity)
+        val w = activity.window ?: return
+        try {
+            w.decorView.visibility = View.INVISIBLE
+            w.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            val lp = w.attributes
+            lp.alpha = 0f
+            w.attributes = lp
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "applyMainDisplayInvisiblePlaceholder: ${e.message}")
+        }
+    }
+
+    /** 背屏落屏创建 UI 前恢复窗口可见（占位阶段可能已设为不可见）。 */
+    @JvmStatic
+    fun restoreProjectionWindowVisible(activity: Activity) {
+        val w = activity.window ?: return
+        try {
+            w.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            w.decorView.visibility = View.VISIBLE
+            val lp = w.attributes
+            lp.alpha = 1f
+            w.attributes = lp
+            activity.findViewById<View>(android.R.id.content)?.visibility = View.VISIBLE
+        } catch (e: Exception) {
+            LogHelper.w(TAG, "restoreProjectionWindowVisible: ${e.message}")
+        }
+    }
+
+    /**
      * 主屏占位：透明窗口、不绘制投屏底色；若已有 UI 则一并隐藏（配合 MUST_END 结束投屏）。
      */
     @JvmStatic
@@ -241,7 +275,7 @@ object RearMirootProjectionLifecycle {
         when (mode) {
             MAIN_DISPLAY_MODE_NOT_APPLICABLE -> return false
             MAIN_DISPLAY_MODE_TRANSPARENT_PLACEHOLDER -> {
-                applyMainDisplayTransparentPlaceholder(activity)
+                applyMainDisplayInvisiblePlaceholder(activity)
                 return true
             }
             MAIN_DISPLAY_MODE_MUST_END_PROJECTION -> {

@@ -1,4 +1,4 @@
-﻿import java.util.Properties
+import java.util.Properties
 import java.security.KeyStore
 import java.security.MessageDigest
 
@@ -130,8 +130,8 @@ android {
         // Android 16 = API 36；minSdk 勿与 target 相同，否则仅 16+ 设备可安装
         minSdk = 28
         targetSdk = 36
-        versionCode = 38
-        versionName = "2.4"
+        versionCode = 41
+        versionName = "2.7"
 
         manifestPlaceholders["superlyricApiVersionName"] = "3.4"
         manifestPlaceholders["superlyricApiVersionCode"] = "34"
@@ -179,6 +179,9 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
+    }
+    tasks.withType<JavaCompile>().configureEach {
+        options.encoding = Charsets.UTF_8.name()
     }
     buildFeatures {
         viewBinding = true
@@ -355,3 +358,4 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }
+

@@ -317,27 +317,15 @@ class RearAppLaunchService : IntentService("RearAppLaunchService") {
     }
 
     /**
-     * [ITaskService.getForegroundComponentOnDisplay] 形如 `pkg/Activity:taskId`，对冷启动慢、
-     * [getForegroundAppOnDisplay] 尚未稳定为包名前缀时更可靠。
+     * 等待目标应用在背屏出现 taskId。
+     *
+     * 优化：每次迭代只执行一次 `am stack list`（[StackListSnapshot]），
+     * 在内存中同时完成前景应用检查、前景组件解析和 taskId 搜索，
+     * 将每轮 3 次 AIDL shell 调用降为 1 次。
      */
-    private fun taskIdFromForegroundComponent(ts: ITaskService, packageName: String): Int {
-        val raw =
-            runCatching { ts.getForegroundComponentOnDisplay(REAR_DISPLAY_ID) }.getOrNull()
-                ?: return -1
-        val colon = raw.lastIndexOf(':')
-        if (colon <= 0 || colon >= raw.length - 1) return -1
-        val comp = raw.substring(0, colon).trim()
-        val tid = raw.substring(colon + 1).trim().toIntOrNull() ?: return -1
-        val slash = comp.indexOf('/')
-        if (slash <= 0) return -1
-        val pkg = comp.substring(0, slash).trim()
-        return if (pkg == packageName && tid > 0) tid else -1
-    }
-
     private fun waitForTaskId(ts: ITaskService, packageName: String): Int {
         // 尾段加长：部分应用（如冷启动音乐客户端）背屏栈顶出现晚于 ~3.2s。
         val waits = longArrayOf(120L, 220L, 360L, 520L, 800L, 1200L, 1800L, 2400L)
-        val expectedPrefix = "$packageName:"
         for (w in waits) {
             try {
                 Thread.sleep(w)
@@ -345,28 +333,32 @@ class RearAppLaunchService : IntentService("RearAppLaunchService") {
                 Thread.currentThread().interrupt()
                 return -1
             }
-            // getTaskIdByPackage 取 am stack list 中「首个」匹配行，可能是主屏同名包任务，会导致 Keeper 误判已离背屏并立刻收口。
-            val foreground =
-                runCatching { ts.getForegroundAppOnDisplay(REAR_DISPLAY_ID) }.getOrNull()
-            if (foreground != null && foreground.startsWith(expectedPrefix)) {
-                val colon = foreground.indexOf(':')
-                if (colon > 0 && colon < foreground.length - 1) {
-                    val tid = foreground.substring(colon + 1).trim().toIntOrNull() ?: -1
-                    if (tid > 0) {
+            val snap = StackListSnapshot.fetch(ts)
+
+            // 1) 前景应用匹配（格式 pkg:taskId）
+            val foreground = snap.foregroundAppOnDisplay(REAR_DISPLAY_ID)
+            if (foreground != null && foreground.startsWith("$packageName:")) {
+                val tid = foreground.substringAfterLast(':').toIntOrNull() ?: -1
+                if (tid > 0) return tid
+            }
+
+            // 2) 前景组件匹配（格式 pkg/Activity:taskId，冷启动时更可靠）
+            val fgComp = snap.foregroundComponentOnDisplay(REAR_DISPLAY_ID)
+            if (fgComp != null) {
+                val colon = fgComp.lastIndexOf(':')
+                if (colon > 0) {
+                    val comp = fgComp.substring(0, colon)
+                    val tid = fgComp.substring(colon + 1).toIntOrNull() ?: -1
+                    val slash = comp.indexOf('/')
+                    if (slash > 0 && comp.substring(0, slash) == packageName && tid > 0) {
                         return tid
                     }
                 }
             }
-            val fromComp = taskIdFromForegroundComponent(ts, packageName)
-            if (fromComp > 0) {
-                return fromComp
-            }
-            val tid = runCatching { ts.getTaskIdByPackage(packageName) }.getOrDefault(-1)
-            if (tid > 0 &&
-                runCatching { ts.isTaskOnDisplay(tid, REAR_DISPLAY_ID) }.getOrDefault(false)
-            ) {
-                return tid
-            }
+
+            // 3) 在背屏栈中搜索（兜底）
+            val tid = snap.findTaskIdOnDisplay(packageName, REAR_DISPLAY_ID)
+            if (tid > 0) return tid
         }
         return -1
     }

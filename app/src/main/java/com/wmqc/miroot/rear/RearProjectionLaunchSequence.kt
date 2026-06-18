@@ -4,7 +4,6 @@ import android.content.Context
 import com.wmqc.miroot.charging.ChargingOfficialSubscreen
 import com.wmqc.miroot.lyrics.ITaskService
 import com.wmqc.miroot.lyrics.LogHelper
-import java.util.regex.Pattern
 
 /** 迁背屏成功后如何禁用官方背屏服务 */
 enum class OfficialDisableAfterLaunch {
@@ -54,12 +53,13 @@ object RearProjectionLaunchSequence {
     const val REAR_DISPLAY_ID: Int = 1
 
     private const val TAG = "RearProjLaunchSeq"
-    /** 主屏占位：首帧立即 grep，之后短间隔轮询（3.4 为 60×30ms，偏慢） */
+    /** 主屏占位：单次 `am stack list` 快照解析，自适应间隔轮询 */
     private const val POLL_ATTEMPTS = 45
-    private const val POLL_INTERVAL_FAST_MS = 12L
-    private const val POLL_RETRY_AT_1 = 10
-    private const val POLL_RETRY_AT_2 = 22
-    private const val POLL_RETRY_AT_3 = 34
+    private const val POLL_INTERVAL_FAST_MS = 16L
+    private const val POLL_PHASE1_END = 12
+    private const val POLL_PHASE2_END = 28
+    private const val POLL_INTERVAL_MED_MS = 60L
+    private const val POLL_INTERVAL_SLOW_MS = 120L
     private const val DIRECT_LAUNCH_RETRY_GAP_MS = 200L
     /** 直启失败判定：尽快回退占位，避免空等 ~1.2s */
     private const val DIRECT_VERIFY_ATTEMPTS = 14
@@ -76,8 +76,6 @@ object RearProjectionLaunchSequence {
     /** 3.4 音乐/车控：100ms；占位链路用 40ms + 快速确认以尽快出画 */
     private const val PLACEHOLDER_MOVE_SETTLE_PROJECTION_MS = 40L
     const val MOVE_SETTLE_MS: Long = PLACEHOLDER_MOVE_SETTLE_CHARGING_MS
-
-    private val TASK_ID_PATTERN = Pattern.compile("taskId=(\\d+)")
 
     /**
      * 优先背屏直启（须验证 Activity 已在背屏），失败再主屏占位 + 3.4 迁屏。
@@ -282,6 +280,9 @@ object RearProjectionLaunchSequence {
 
     /**
      * 背屏直启：执行 [directRearCmd] 并轮询验证目标 Activity 已在背屏（避免 shell 返回成功但未落屏）。
+     *
+     * 优化：每次验证周期只执行一次 `am stack list`（[StackListSnapshot]），
+     * 前景组件和 taskId 检查均在内存完成，避免多次 spawn shell 进程。
      */
     private fun tryDirectRearLaunchVerified(
         taskService: ITaskService,
@@ -315,51 +316,21 @@ object RearProjectionLaunchSequence {
             if (attempt > 0 && !sleepQuiet(DIRECT_VERIFY_INTERVAL_MS)) {
                 return false
             }
-            if (isTargetActivityOnRearDisplay(taskService, spec, rearDisplayId)) {
-                LogHelper.d(TAG, "背屏直启验证通过 (attempt=${attempt + 1})")
+            // 一次 am stack list → 同时检查前景组件和 taskId
+            val snap = StackListSnapshot.fetch(taskService)
+            val fg = snap.foregroundComponentOnDisplay(rearDisplayId)
+            if (fg != null && fg.contains(spec.grepActivityName)) {
+                LogHelper.d(TAG, "背屏直启验证通过 via fg (attempt=${attempt + 1})")
+                return true
+            }
+            val tid = snap.findTaskIdGlobal(spec.grepActivityName)
+            if (tid > 0 && snap.isTaskOnDisplay(tid, rearDisplayId)) {
+                LogHelper.d(TAG, "背屏直启验证通过 via taskId (attempt=${attempt + 1})")
                 return true
             }
         }
         LogHelper.w(TAG, "背屏直启验证超时: ${spec.grepActivityName}")
         return false
-    }
-
-    private fun isTargetActivityOnRearDisplay(
-        taskService: ITaskService,
-        spec: RearActivityLaunchSpec,
-        rearDisplayId: Int,
-    ): Boolean {
-        try {
-            val fg = taskService.getForegroundComponentOnDisplay(rearDisplayId)
-            if (fg != null && fg.contains(spec.grepActivityName)) {
-                return true
-            }
-        } catch (e: Exception) {
-            LogHelper.w(TAG, "getForegroundComponentOnDisplay: ${e.message}")
-        }
-        val taskId = findTaskIdInStack(taskService, spec.grepActivityName) ?: return false
-        return try {
-            taskService.isTaskOnDisplay(taskId, rearDisplayId)
-        } catch (e: Exception) {
-            LogHelper.w(TAG, "isTaskOnDisplay: ${e.message}")
-            false
-        }
-    }
-
-    private fun findTaskIdInStack(taskService: ITaskService, grepActivityName: String): Int? {
-        val grepCmd = "am stack list | grep $grepActivityName"
-        return try {
-            val result = taskService.executeShellCommandWithResult(grepCmd) ?: return null
-            val matcher = TASK_ID_PATTERN.matcher(result)
-            if (matcher.find()) {
-                matcher.group(1)?.toIntOrNull()
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            LogHelper.w(TAG, "findTaskIdInStack: ${e.message}")
-            null
-        }
     }
 
     /**
@@ -449,6 +420,9 @@ object RearProjectionLaunchSequence {
         }
     }
 
+    /**
+     * 迁屏确认：使用 [StackListSnapshot] 避免每次确认都 spawn `am stack list` 进程。
+     */
     private fun confirmTaskOnRearDisplay(
         taskService: ITaskService,
         taskId: Int,
@@ -457,7 +431,8 @@ object RearProjectionLaunchSequence {
     ): Boolean {
         for (attempt in 0 until CONFIRM_REAR_MOVE_ATTEMPTS) {
             try {
-                if (taskService.isTaskOnDisplay(taskId, rearDisplayId)) {
+                val snap = StackListSnapshot.fetch(taskService)
+                if (snap.isTaskOnDisplay(taskId, rearDisplayId)) {
                     LogHelper.d(TAG, "迁背屏已确认 taskId=$taskId (attempt=${attempt + 1})")
                     return true
                 }
@@ -552,33 +527,43 @@ object RearProjectionLaunchSequence {
         }
     }
 
+    /**
+     * 轮询获取 taskId：每次迭代只执行一次 `am stack list`（[StackListSnapshot]），
+     * 在内存中搜索目标 Activity，避免 spawn `am stack list | grep` 子进程。
+     *
+     * 自适应间隔：快速(16ms) → 中速(60ms) → 慢速(120ms)，
+     * 阶段切换时重发一次主屏占位命令以应对冷启动延迟。
+     */
     @JvmStatic
     fun pollTaskIdWithGrep(
         taskService: ITaskService,
         grepActivityName: String,
         retryCmd: String,
     ): String? {
-        val grepCmd = "am stack list | grep $grepActivityName"
         for (attempt in 0 until POLL_ATTEMPTS) {
-            if (attempt > 0 && !sleepQuiet(POLL_INTERVAL_FAST_MS)) {
-                return null
-            }
-            val result = taskService.executeShellCommandWithResult(grepCmd)
-            if (!result.isNullOrBlank()) {
-                val matcher = TASK_ID_PATTERN.matcher(result)
-                if (matcher.find()) {
-                    val id = matcher.group(1)
-                    LogHelper.d(TAG, "taskId=$id (attempt=${attempt + 1})")
-                    return id
+            if (attempt > 0) {
+                val interval = when {
+                    attempt < POLL_PHASE1_END -> POLL_INTERVAL_FAST_MS
+                    attempt < POLL_PHASE2_END -> POLL_INTERVAL_MED_MS
+                    else -> POLL_INTERVAL_SLOW_MS
                 }
+                if (!sleepQuiet(interval)) return null
             }
-            if (attempt == POLL_RETRY_AT_1 || attempt == POLL_RETRY_AT_2 || attempt == POLL_RETRY_AT_3) {
+            // 阶段切换时重发一次主屏占位，应对冷启动延迟
+            if (attempt == POLL_PHASE1_END || attempt == POLL_PHASE2_END) {
                 LogHelper.d(TAG, "重发主屏占位 (attempt=${attempt + 1})")
                 try {
                     taskService.executeShellCommand(retryCmd)
                 } catch (e: Exception) {
                     LogHelper.w(TAG, "重发主屏占位失败: ${e.message}")
                 }
+            }
+            // 单次 am stack list → 内存搜索
+            val snap = StackListSnapshot.fetch(taskService)
+            val tid = snap.findTaskIdGlobal(grepActivityName)
+            if (tid > 0) {
+                LogHelper.d(TAG, "taskId=$tid (attempt=${attempt + 1})")
+                return tid.toString()
             }
         }
         return null

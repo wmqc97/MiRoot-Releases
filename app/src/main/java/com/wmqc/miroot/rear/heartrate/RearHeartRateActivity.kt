@@ -246,6 +246,27 @@ class RearHeartRateActivity : ComponentActivity() {
         super.onPause()
     }
 
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val displayId = RearMirootProjectionLifecycle.getDisplayIdSafe(this)
+            val mainMode = RearMirootProjectionLifecycle.resolveMainDisplayProjectionMode(
+                displayId, false, contentInflated,
+            )
+            if (RearMirootProjectionLifecycle.applyMainDisplayPlaceholderPolicy(this, mainMode)) {
+                if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_MUST_END_PROJECTION) {
+                    finish()
+                } else if (mainMode == RearMirootProjectionLifecycle.MAIN_DISPLAY_MODE_TRANSPARENT_PLACEHOLDER
+                    && contentInflated
+                ) {
+                    LogHelper.w(TAG, "onConfigurationChanged: 占位态仍在主屏且 UI 已 inflate，强制结束")
+                    finishAndRemoveTask()
+                }
+                return
+            }
+        }
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) {

@@ -138,14 +138,8 @@ object VehiclePositionHelper {
         val regeo = AmapApiService.regeo(lng, lat)
         if (regeo != null) {
             FuelPriceRegionPrefs.cacheAutoProvinceAt(appCtx, lng, lat, regeo.province, regeo.city)
-            val addr = when {
-                regeo.street.isNotEmpty() -> regeo.street
-                regeo.district.isNotEmpty() && regeo.township.isNotEmpty() -> "${regeo.district}${regeo.township}"
-                regeo.city.isNotEmpty() && regeo.district.isNotEmpty() -> "${regeo.city}${regeo.district}"
-                regeo.province.isNotEmpty() && regeo.city.isNotEmpty() -> "${regeo.province}${regeo.city}"
-                else -> regeo.formattedAddress
-            }.trim()
-            if (addr.isNotBlank()) {
+            val addr = AmapApiService.fullDisplayAddress(regeo)?.trim()
+            if (!addr.isNullOrBlank()) {
                 saveAddressCache(appCtx, addr)
                 return addr
             }

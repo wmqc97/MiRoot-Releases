@@ -10,5 +10,14 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <!-- 允许本地回环和局域网明文 HTTP（MiClaw MCP 连接）-->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">192.168.0.0/16</domain>
+        <domain includeSubdomains="false">10.0.0.0/8</domain>
+    </domain-config>
 </network-security-config>
 

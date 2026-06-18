@@ -1,10 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!--
-      视觉参考：https://github.com/compose-miuix-ui/miuix（主色 0xFF3482FF）。
-      主页为 Material3 DayNight；「音乐」页 Compose 内使用 MiuixTheme + 跟随系统深色。
-    -->
     <style name="Theme.MiRoot" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/miuix_primary</item>
         <item name="colorOnPrimary">@color/miuix_on_primary</item>
@@ -31,15 +27,28 @@
 
     <style name="Widget.MiRoot.BottomNavigation" parent="Widget.Material3.BottomNavigationView">
         <item name="backgroundTint">@color/miuix_surface</item>
+        <item name="elevation">0dp</item>
+        <item name="itemIconSize">24dp</item>
+        <item name="itemTextAppearanceActive">@style/TextAppearance.MiRoot.BottomNav.Active</item>
+        <item name="itemTextAppearanceInactive">@style/TextAppearance.MiRoot.BottomNav.Inactive</item>
     </style>
 
-    <!-- 带壳贴图：首帧按大屏宽布局；高度由 FeaturesFragment 中 setLayout(98%×95%) 设置（windowMinHeight* 在部分 SDK 上不可链接） -->
+    <style name="TextAppearance.MiRoot.BottomNav.Active" parent="TextAppearance.Material3.LabelMedium">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="TextAppearance.MiRoot.BottomNav.Inactive" parent="TextAppearance.Material3.LabelMedium">
+        <item name="android:textSize">12sp</item>
+    </style>
+
+    <!-- 带壳贴图弹窗 -->
     <style name="ThemeOverlay.MiRoot.StickerDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
         <item name="android:windowMinWidthMajor">98%</item>
         <item name="android:windowMinWidthMinor">98%</item>
     </style>
 
-    <!-- AI 目录列表略缩图：仅上圆角与卡片一致，下缘与标题条衔接 -->
+    <!-- AI 目录列表略缩图 -->
     <style name="ShapeAppearanceOverlay.MiRoot.ThemeDirectoryThumb" parent="">
         <item name="cornerFamily">rounded</item>
         <item name="cornerSizeTopLeft">12dp</item>
@@ -48,7 +57,7 @@
         <item name="cornerSizeBottomRight">0dp</item>
     </style>
 
-    <!-- 应用图标圆角：替代 item_installed_app 中内层 MaterialCardView -->
+    <!-- 应用图标圆角 -->
     <style name="ShapeAppearanceOverlay.MiRoot.AppIcon" parent="">
         <item name="cornerFamily">rounded</item>
         <item name="cornerSize">12dp</item>

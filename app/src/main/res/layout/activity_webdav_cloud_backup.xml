@@ -82,7 +82,7 @@
 
                     android:orientation="vertical"
 
-                    android:padding="16dp">
+                    android:padding="@dimen/mi_card_inner_padding">
 
 
 
@@ -194,7 +194,7 @@
 
                         android:id="@+id/button_save_webdav"
 
-                        style="?attr/materialButtonOutlinedStyle"
+                        style="@style/Widget.MiRoot.Button.Outlined"
 
                         android:layout_width="match_parent"
 
@@ -230,7 +230,7 @@
 
                     android:orientation="vertical"
 
-                    android:padding="16dp">
+                    android:padding="@dimen/mi_card_inner_padding">
 
 
 
@@ -258,7 +258,7 @@
 
                         android:layout_marginTop="4dp"
 
-                        android:textAppearance="?attr/textAppearanceBodySmall"
+                        android:textAppearance="@style/TextAppearance.MiRoot.Body"
 
                         android:textColor="@color/mi_text_secondary"
 
@@ -269,6 +269,8 @@
                     <com.google.android.material.button.MaterialButton
 
                         android:id="@+id/button_upload_webdav"
+
+                        style="@style/Widget.MiRoot.Button"
 
                         android:layout_width="match_parent"
 
@@ -284,7 +286,7 @@
 
                         android:id="@+id/button_download_webdav"
 
-                        style="?attr/materialButtonOutlinedStyle"
+                        style="@style/Widget.MiRoot.Button.Outlined"
 
                         android:layout_width="match_parent"
 
@@ -300,7 +302,7 @@
 
                         android:id="@+id/button_export_local"
 
-                        style="?attr/materialButtonOutlinedStyle"
+                        style="@style/Widget.MiRoot.Button.Outlined"
 
                         android:layout_width="match_parent"
 
@@ -316,7 +318,7 @@
 
                         android:id="@+id/button_import_local"
 
-                        style="?attr/materialButtonOutlinedStyle"
+                        style="@style/Widget.MiRoot.Button.Outlined"
 
                         android:layout_width="match_parent"
 

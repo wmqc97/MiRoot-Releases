@@ -1,4 +1,4 @@
-﻿package com.wmqc.miroot.ui.music
+package com.wmqc.miroot.ui.music
 
 import android.content.Context
 import com.wmqc.miroot.lyrics.LogHelper

@@ -1,4 +1,4 @@
-﻿package com.wmqc.miroot.ui.apps
+package com.wmqc.miroot.ui.apps
 
 import android.view.LayoutInflater
 import android.view.View

@@ -14,8 +14,14 @@ object CarControlWidgetUpdater {
     fun refreshAll(context: Context) {
         val appCtx = context.applicationContext
         val manager = AppWidgetManager.getInstance(appCtx)
-        val component = ComponentName(appCtx, CarControlAppWidgetProvider::class.java)
-        val ids = manager.getAppWidgetIds(component)
+        val components = listOf(
+            ComponentName(appCtx, CarControlAppWidgetProvider::class.java),
+            ComponentName(appCtx, CarControlWidget6x2Provider::class.java),
+            ComponentName(appCtx, CarControlWidget6x4Provider::class.java),
+        )
+        val ids = components.flatMap {
+            manager.getAppWidgetIds(it).toList()
+        }.toIntArray()
         if (ids.isEmpty()) return
         CarControlAppWidgetProvider.updateAll(appCtx, manager, ids)
     }

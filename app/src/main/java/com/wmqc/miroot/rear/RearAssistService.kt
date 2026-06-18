@@ -46,7 +46,11 @@ class RearAssistService : Service() {
     private val running = AtomicBoolean(false)
     private var screenOffReceiver: BroadcastReceiver? = null
 
-    /** 仅「始终常亮」：按间隔向背屏发送唤醒（与投屏常亮无关）。 */
+    /** 无投屏注册时的降频间隔：背屏无内容，无需高频唤醒。 */
+    private val idleIntervalMs get() = intervalMs.coerceAtLeast(IDLE_WAKE_INTERVAL_MS)
+
+    /** 仅「始终常亮」：按间隔向背屏发送唤醒（与投屏常亮无关）。
+     *  无投屏注册时自动降频到 [IDLE_WAKE_INTERVAL_MS]，有投屏时使用用户设置的间隔。 */
     private val wakeupRunnable = object : Runnable {
         override fun run() {
             if (!running.get()) return
@@ -58,13 +62,15 @@ class RearAssistService : Service() {
             if (!alwaysWakeupEnabled) {
                 return
             }
+            val hasProjection = RearScreenWakeManager.getInstance().hasRegisteredActivities()
+            val effectiveInterval = if (hasProjection) intervalMs else idleIntervalMs
             shellExecutor.execute {
                 try {
                     PrivilegedShell.execCmd("input -d 1 keyevent KEYCODE_WAKEUP")
                 } catch (e: Exception) {
                     LogHelper.w(TAG, "wakeup shell failed", e)
                 }
-                mainHandler.postDelayed(self, intervalMs.toLong())
+                mainHandler.postDelayed(self, effectiveInterval.toLong())
             }
         }
     }
@@ -264,6 +270,8 @@ class RearAssistService : Service() {
         const val ACTION_UI_REAR_PREFS_CHANGED = "com.wmqc.miroot.rear.UI_REAR_PREFS_CHANGED"
         private const val WAKE_RETRY_DELAY_MS = 250L
         private const val WAKE_RETRY_COUNT = 4
+        /** 无投屏注册时的最低唤醒间隔（10s）：背屏无内容，无需高频唤醒。 */
+        private const val IDLE_WAKE_INTERVAL_MS = 10_000
 
         private val assistPauseForChargingCount = AtomicInteger(0)
 

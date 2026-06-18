@@ -22,7 +22,7 @@
         android:paddingStart="@dimen/mi_page_scroll_padding"
         android:paddingTop="@dimen/mi_page_content_padding_top"
         android:paddingEnd="@dimen/mi_page_scroll_padding"
-        android:paddingBottom="@dimen/mi_page_scroll_padding">
+        android:paddingBottom="24dp">
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -37,7 +37,7 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:padding="16dp"
+                    android:padding="@dimen/mi_card_inner_padding"
                     android:text="@string/shizuku_manage_desc"
                     android:textAppearance="@style/TextAppearance.MiRoot.Body"
                     android:textSize="15sp" />

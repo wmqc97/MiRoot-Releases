@@ -49,8 +49,11 @@ public class ChargingService extends Service {
 
     private static volatile ChargingService instance;
 
-    /** 背屏前台检测间隔：约 5 次 × 800ms ≈ 4s（原 50 次 ≈ 40s，结束投屏后停常亮过慢）。 */
-    private static final int WAKEUP_REAR_FG_CHECK_INTERVAL = 5;
+    /** 背屏前台检测间隔：约 3 次 × 2000ms ≈ 6s（充电场景用户通常不实时操作背屏）。 */
+    private static final int WAKEUP_REAR_FG_CHECK_INTERVAL = 3;
+
+    /** 电量更新间隔：约 3 次 × 2000ms ≈ 6s（充电时电量变化缓慢，无需高频刷新）。 */
+    private static final int BATTERY_UPDATE_INTERVAL = 3;
 
     private ITaskService taskService;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -63,6 +66,7 @@ public class ChargingService extends Service {
     private Runnable wakeupRunnable;
     private boolean isWakeupRunning;
     private int chargingCheckCounter;
+    private int batteryUpdateCounter;
 
     public static ITaskService getTaskService() {
         return instance != null ? instance.taskService : null;
@@ -564,7 +568,7 @@ public class ChargingService extends Service {
         }
     }
 
-    /** 对齐 3.4 常亮：800ms 周期唤醒 + 电量更新（仅常亮开关开启时）。 */
+    /** 对齐 3.4 常亮：2000ms 周期唤醒 + 电量更新降频（仅常亮开关开启时）。 */
     private void startWakeupAndUpdateLoop() {
         if (isWakeupRunning) {
             return;
@@ -601,22 +605,28 @@ public class ChargingService extends Service {
                 } catch (Throwable t) {
                     LogHelper.w(TAG, "wakeup failed: " + t.getMessage());
                 }
-                try {
-                    RearScreenChargingActivity.updateBatteryLevelStatic(
-                        getBatteryLevel(getApplicationContext()));
-                } catch (Exception e) {
-                    LogHelper.w(TAG, "update battery failed: " + e.getMessage());
+                // 电量更新降频：每 BATTERY_UPDATE_INTERVAL 次唤醒周期才刷新一次（约6s）
+                batteryUpdateCounter++;
+                if (batteryUpdateCounter >= BATTERY_UPDATE_INTERVAL) {
+                    batteryUpdateCounter = 0;
+                    try {
+                        RearScreenChargingActivity.updateBatteryLevelStatic(
+                            getBatteryLevel(getApplicationContext()));
+                    } catch (Exception e) {
+                        LogHelper.w(TAG, "update battery failed: " + e.getMessage());
+                    }
                 }
-                wakeupHandler.postDelayed(this, 800L);
+                wakeupHandler.postDelayed(this, 2000L);
             }
         };
         wakeupHandler.post(wakeupRunnable);
-        LogHelper.d(TAG, "常亮唤醒与电量更新循环已启动");
+        LogHelper.d(TAG, "常亮唤醒与电量更新循环已启动（间隔2000ms）");
     }
 
     private void stopWakeupLoop() {
         isWakeupRunning = false;
         chargingCheckCounter = 0;
+        batteryUpdateCounter = 0;
         if (wakeupHandler != null && wakeupRunnable != null) {
             wakeupHandler.removeCallbacks(wakeupRunnable);
         }

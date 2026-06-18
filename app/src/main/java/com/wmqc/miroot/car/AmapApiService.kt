@@ -73,12 +73,14 @@ object AmapApiService {
         val district: String,
         val township: String,
         val street: String,
+        val streetNumber: String,
         val nearbyPoi: String?,
     )
 
     /** 返回简洁的可展示地址短文本（优先街道+门牌，其次区+街道，最后城市+区）。 */
     fun shortDisplayAddress(regeo: RegeoResult): String? {
         return when {
+            regeo.street.isNotEmpty() && regeo.streetNumber.isNotEmpty() -> "${regeo.street}${regeo.streetNumber}"
             regeo.street.isNotEmpty() -> regeo.street
             regeo.district.isNotEmpty() && regeo.township.isNotEmpty() -> "${regeo.district}${regeo.township}"
             regeo.city.isNotEmpty() && regeo.district.isNotEmpty() -> "${regeo.city}${regeo.district}"
@@ -110,6 +112,7 @@ object AmapApiService {
                 city = addr.optString("city", "").ifEmpty { addr.optString("province", "") },
                 district = addr.optString("district", ""),
                 township = addr.optString("township", ""),
+                streetNumber = addr.optJSONObject("streetNumber")?.optString("streetNumber", "") ?: "",
                 street = addr.optJSONObject("streetNumber")?.optString("street", "") ?: "",
                 nearbyPoi = poi?.takeIf { it.isNotEmpty() },
             )
@@ -123,6 +126,31 @@ object AmapApiService {
     fun regeoShortAddress(lng: Double, lat: Double): String? {
         val r = regeo(lng, lat) ?: return null
         return shortDisplayAddress(r)
+    }
+
+    /**
+     * 详细地址拼接：省市 + 区镇 + 街道门牌 + POI
+     */
+    fun fullDisplayAddress(regeo: RegeoResult): String? {
+        val sb = StringBuilder()
+        val p = regeo.province.trim()
+        val c = regeo.city.trim()
+        val d = regeo.district.trim()
+        val t = regeo.township.trim()
+        val s = regeo.street.trim()
+        val sn = regeo.streetNumber.trim()
+        val poi = regeo.nearbyPoi?.trim().orEmpty()
+        if (p.isNotEmpty() && p != c) sb.append(p)
+        if (c.isNotEmpty()) sb.append(c)
+        if (d.isNotEmpty()) sb.append(d)
+        if (t.isNotEmpty() && t != d) sb.append(t)
+        if (s.isNotEmpty()) {
+            sb.append(s)
+            if (sn.isNotEmpty()) sb.append(sn)
+        }
+        val base = sb.toString().trim()
+        if (base.isEmpty()) return regeo.formattedAddress.takeIf { it.isNotBlank() }
+        return if (poi.isNotEmpty()) "$base · $poi" else base
     }
 
     // ── 驾车路径规划 ──────────────────────────────────────────────────────────
@@ -277,3 +305,4 @@ object AmapApiService {
         }
     }
 }
+

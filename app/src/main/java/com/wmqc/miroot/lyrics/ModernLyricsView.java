@@ -1,17 +1,3 @@
-/*
- * Author: AntiOblivionis
- * QQ: 319641317
- * Github: https://github.com/GoldenglowSusie/
- * Bilibili: 罗德岛T0驭械术师澄闪
- * 
- * Chief Tester: 汐木泽
- * 
- * Co-developed with AI assistants:
- * - Cursor
- * - Claude-4.5-Sonnet
- * - GPT-5
- * - Gemini-2.5-Pro
- */
 
 package com.wmqc.miroot.lyrics;
 
@@ -97,15 +83,10 @@ public class ModernLyricsView extends View {
     private int lyricsHorizontalInsetPx = 0;
     private static final float WRAPPED_SUBLINE_GAP = 10f; // 同一句歌词换行后的行间距
     private static final float LETTER_SPACING = 2f;            // 字间距（背屏优化：放大1-2px）
-    // 随机颜色相关
-    private int currentTextColor = 0xFFFF3D00;  // 当前文字颜色（高饱和色池）
-    private int targetTextColor = 0xFFFF3D00;  // 目标文字颜色
-    private int colorTransitionStart = 0xFFFF3D00;  // 颜色过渡起始颜色
-    private float colorTransitionProgress = 0f;  // 颜色过渡进度（0-1）
-    private long lastColorChangeTime = 0;        // 上次颜色变化时间
-    private static final long COLOR_CHANGE_INTERVAL_DEFAULT_MS = 5000L;  // 颜色变化间隔（默认 5s）
+    // 颜色统一由 LyricsColorManager 管理，currentTextColor 为每帧缓存
+    private int currentTextColor = 0xFFFF3D00;
     private boolean randomColorSwitchEnabled = true;
-    /** 非逐字同句播放时节流 invalidate；与换色逻辑无关，勿复用于 updateRandomColor（逐字约 20ms 一帧，整段节流会导致换色周期偏离设置）。 */
+    /** 非逐字同句播放时节流 invalidate。 */
     private static final long COLOR_UPDATE_THROTTLE_MS = 33;  // 约30fps
     // 逐字模式前向羽化：只作用于播放点前方未唱文本，避免硬切
     private static final float WORD_BY_WORD_FEATHER_PX = 40f;
@@ -197,8 +178,6 @@ public class ModernLyricsView extends View {
     private static final LinearInterpolator BREATHING_PHASE_INTERPOLATOR =
             new LinearInterpolator();
     private static final float BREATHING_PEAK_HOLD_FRACTION = 0.04f; // 峰值处短暂停留占比（每周期）
-    private static final long COLOR_CHANGE_INTERVAL_MIN_MS = 1000L;
-    private static final long COLOR_CHANGE_INTERVAL_MAX_MS = 10000L;
     private static final long SHUFFLE_LAYOUT_REBUILD_INTERVAL_MAX_MS = 300L;
     private static final float DISPLACEMENT_OFFSET = 2.2f;     // 微位移偏移
     private static final long WORD_FADE_DURATION = 100;        // 逐字淡入动画时长(0.1s)
@@ -247,6 +226,12 @@ public class ModernLyricsView extends View {
     private int mKuwoWordHintCharEnd = -1;     // wordCharEnd from broadcast
     private long mKuwoWordHintTimestamp = 0L;  // uptimeMs when hint was set
     private float scrollY = 0f;
+    /** Monotonic tracking for charIndexFloat in char-jump mode (prevents flash when Kuwo hint expires). */
+    private String mLastCharJumpLineKey = "";
+    private float mLastCharJumpFloat = 0f;
+    /** Smooth per-frame char jump accumulator (pixels). Drives uniform-height jump instead of time-based. */
+    private float mCharJumpSmoothAccumPx = 0f;
+    private long mCharJumpLastFrameUptimeMs = 0L;
     private float targetScrollY = 0f;
     /** 时间调整偏移量（毫秒）：正数表示相对媒体进度提前显示（与歌词滞后于声音时调大）。 */
     private long timeAdjustOffset = 0;
@@ -278,10 +263,8 @@ public class ModernLyricsView extends View {
     private float breathingScaleMin = SCALE_MIN;
     private float breathingScaleMax = SCALE_MAX;
     private float breathingDisplacementStrength = 1.0f;
-    
-    private long colorChangeIntervalMs = COLOR_CHANGE_INTERVAL_DEFAULT_MS;
-    
-    
+
+
     // 手势
     private GestureDetector gestureDetector;
     private boolean isDragging = false;
@@ -299,7 +282,12 @@ public class ModernLyricsView extends View {
     
     // 配置选项
     private boolean showTranslation = true;     // 是否显示翻译
+    private boolean showTransliteration = true;    // 是否显示音译
     private boolean enableWordByWord = true;    // 是否启用逐字高亮
+    /** 逐字上移聚集：仅在有准确逐字时间信息时生效。 */
+    private boolean charJumpEnabled = false;
+    /** 逐字上移高度（像素）。 */
+    private float charJumpHeightPx = 20f;
     private boolean showProgress = false;       // V3.17: 禁用进度条显示
     private boolean enableGesture = true;       // 是否启用手势交互
     private boolean showBackgroundTexture = true; // V3.17: 是否显示背景纹理
@@ -427,7 +415,7 @@ public class ModernLyricsView extends View {
         // 初始化画笔 - V3.17: 背屏优化
         currentPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         currentPaint.setTextSize(CURRENT_TEXT_SIZE);
-        currentPaint.setColor(currentTextColor);  // 使用随机颜色
+        currentPaint.setColor(LyricsColorManager.INSTANCE.getColor());  // 使用随机颜色
         currentPaint.setTextAlign(Paint.Align.CENTER);
         currentPaint.setFakeBoldText(false);  // 使用正常粗细，不使用粗体
         currentPaint.setTypeface(lyricTypeface);
@@ -717,13 +705,12 @@ public class ModernLyricsView extends View {
             drawBackgroundGradient(canvas);
         }
         
-        // 更新颜色：
-        // - 随机颜色开启：保持原先随机色池效果（逐字也跟随随机色池）
-        // - 随机颜色关闭：主色固定不透明白；逐字时未唱段用 getNormalLyricsColor()（透明度）区分
+        // 颜色统一由 LyricsColorManager 管理
         if (!powerSavingModeEnabled && randomColorSwitchEnabled) {
-            updateRandomColor();
+            currentTextColor = LyricsColorManager.INSTANCE.getColor(currentPaint);
         } else if (!randomColorSwitchEnabled) {
-            applyReadableStaticColor();
+            currentTextColor = LyricsColorManager.INSTANCE.getColor();
+            currentPaint.setColor(currentTextColor);
         }
         syncRenderedPosition(false);
         
@@ -802,12 +789,39 @@ public class ModernLyricsView extends View {
             
             if (showTranslation && i == currentLineIndex
                     && line.translation != null && !line.translation.isEmpty()) {
-                TextPaint mainPaint = currentPaint;
-                String mainText = line.text != null ? line.text : "";
-                float mainHalfH = getWrappedBlockHalfHeight(mainPaint, mainText);
-                float transHalfH = getTranslationBlockHeight(line.translation) / 2f;
-                float transCenterY = lineAnchorY + mainHalfH + getMainTranslationGapPx() + transHalfH;
-                drawTranslation(canvas, line.translation, centerX, transCenterY, alpha);
+                if (enableShuffleSplitEffect) {
+                    float viewH = getHeight();
+                    float transHalfH = getTranslationBlockHeight(line.translation) / 2f;
+                    float transCenterY = viewH - transHalfH - 24f;
+                    drawTranslation(canvas, line.translation, centerX, transCenterY, alpha);
+                } else {
+                    TextPaint mainPaint = currentPaint;
+                    String mainText = line.text != null ? line.text : "";
+                    float mainHalfH = getWrappedBlockHalfHeight(mainPaint, mainText);
+                    float transHalfH = getTranslationBlockHeight(line.translation) / 2f;
+                    float transCenterY = lineAnchorY + mainHalfH + getMainTranslationGapPx() + transHalfH;
+                    drawTranslation(canvas, line.translation, centerX, transCenterY, alpha);
+                }
+            }
+            if (showTransliteration && i == currentLineIndex
+                    && line.transliteration != null && !line.transliteration.isEmpty()) {
+                if (enableShuffleSplitEffect) {
+                    float viewH = getHeight();
+                    float transH = getTranslationBlockHeight(line.translation != null ? line.translation : "");
+                    float transliHalfH = getTranslationBlockHeight(line.transliteration) / 2f;
+                    float transliCenterY = viewH - transliHalfH - 24f;
+                    if (showTranslation && line.translation != null && !line.translation.isEmpty()) {
+                        transliCenterY -= transH + getMainTranslationGapPx();
+                    }
+                    drawTranslation(canvas, line.transliteration, centerX, transliCenterY, alpha);
+                } else {
+                    float transBottom = lineAnchorY + getWrappedBlockHalfHeight(currentPaint, 
+                        line.text != null ? line.text : "") + getMainTranslationGapPx() 
+                        + getTranslationBlockHeight(line.translation != null ? line.translation : "");
+                    float transliHalfH = getTranslationBlockHeight(line.transliteration) / 2f;
+                    float transliCenterY = transBottom + getMainTranslationGapPx() + transliHalfH;
+                    drawTranslation(canvas, line.transliteration, centerX, transliCenterY, alpha);
+                }
             }
         }
     }
@@ -892,7 +906,11 @@ public class ModernLyricsView extends View {
         } else if (enableWordByWord) {
             // 逐字高亮模式：开启逐字显示时，无论是否有逐字时间戳，都使用逐字显示模式
             // 如果有逐字时间戳，使用精确的逐字时间戳；如果没有，使用行进度模拟逐字效果
-            drawWordByWord(canvas, line, centerX, scalePivotY);
+            if (charJumpEnabled) {
+                drawWordByWordWithCharJump(canvas, line, centerX, scalePivotY);
+            } else {
+                drawWordByWord(canvas, line, centerX, scalePivotY);
+            }
         } else {
             // 整行高亮模式：关闭逐字显示后，当前行完全高亮（progress=1）
             float progress = 1.0f; // 关闭逐字显示时，当前行完全高亮
@@ -1345,14 +1363,10 @@ public class ModernLyricsView extends View {
             }
         }
         long seed = 0x9E3779B97F4A7C15L ^ ((long) idx * 0x85EBCA77C2B2AE63L) ^ ((long) lineHash * 0xC2B2AE3D27D4EB4FL);
-        int c = generateVividColorBySeed(seed);
-        currentTextColor = c;
-        targetTextColor = c;
-        colorTransitionStart = c;
-        colorTransitionProgress = 1f;
-        lastColorChangeTime = System.currentTimeMillis();
+        int c = LyricsColorManager.INSTANCE.getColor();
         if (currentPaint != null) {
-            currentPaint.setColor(currentTextColor);
+            currentPaint.setColor(c);
+            currentTextColor = c;
         }
         powerSavingColorBoundLineIndex = idx;
     }
@@ -1519,7 +1533,10 @@ public class ModernLyricsView extends View {
                 float offsetY = stableFloat(seed + 11L, SHUFFLE_MAX_OFFSET_Y * (twoLineLayout ? 0.08f : 0.03f));
                 float rotation = chooseRotation(seed + 23L);
                 float scale = chooseScale(seed + 37L, tokenText);
-                rebuiltTokens.add(new ShuffleToken(tokenText, width, x + offsetX, finalY + offsetY, rotation, scale, baseShuffleTextSize));
+                // 将最终绘制位置约束在安全显示区域内，避免分词飘出屏幕
+                float clampedX = Math.max(left + width * 0.5f, Math.min(right - width * 0.5f, x + offsetX));
+                float clampedY = Math.max(top + height * 0.5f, Math.min(bottom - height * 0.5f, finalY + offsetY));
+                rebuiltTokens.add(new ShuffleToken(tokenText, width, clampedX, clampedY, rotation, scale, baseShuffleTextSize));
 
                 cursorX += width + spacing;
             }
@@ -1837,8 +1854,10 @@ public class ModernLyricsView extends View {
         shufflePaint.setAlpha(255);
 
         long nowMs = System.currentTimeMillis();
+        // 分词模式：切句不淡入，直接完全显示，避免屏闪
         float entranceFade = 1f;
-        if (lastLineChangedAtMs > 0L) {
+        // 非分词模式才做淡入
+        if (!enableShuffleSplitEffect && lastLineChangedAtMs > 0L) {
             entranceFade = (nowMs - lastLineChangedAtMs) / (float) SHUFFLE_ENTRY_FADE_MS;
             entranceFade = Math.max(0f, Math.min(1f, entranceFade));
         }
@@ -1848,14 +1867,7 @@ public class ModernLyricsView extends View {
         int tokenAlpha = (int) (visibleProgress * entranceFade * 255f);
         tokenAlpha = Math.max(0, Math.min(255, tokenAlpha));
         shufflePaint.setAlpha(tokenAlpha);
-        long colorEpoch;
-        if (powerSavingModeEnabled) {
-            // 省电模式：按「当前行」换色，不按时间节拍抖动
-            int idx = currentLineIndex;
-            colorEpoch = Math.max(0L, (long) idx);
-        } else {
-            colorEpoch = colorChangeIntervalMs > 0L ? (nowMs / colorChangeIntervalMs) : 0L;
-        }
+        long colorEpoch = Math.max(0L, (long) currentLineIndex);
         int layoutSalt = stableShuffleSignature.hashCode();
         for (int i = 0; i < stableShuffleTokens.size(); i++) {
             ShuffleToken token = stableShuffleTokens.get(i);
@@ -2188,6 +2200,27 @@ public class ModernLyricsView extends View {
      * 逐字高亮绘制（使用渐变效果，基于小张桌面的实现）
      * V3.17: 背屏优化 - 添加渐变色和描边效果，确保文本不超出显示范围
      */
+
+    /**
+     * 检测是否拥有准确的逐字时间信息，决定是否启用逐字上移聚集效果。
+     * 酷我广播逐字提示（Kuwo word hint）或行内逐字时间戳（wordTimestamps）均视为准确信息。
+     */
+    private boolean hasAccurateWordTimestampsForCharJump(EnhancedLRCParser.EnhancedLyricLine line) {
+        if (line == null) return false;
+        // Kuwo broadcast hint: only accurate when wordTimestamps exist on the line
+        if (mKuwoWordHintValid) {
+            final long kuwoHintStaleMs = 800L;
+            if (android.os.SystemClock.uptimeMillis() - mKuwoWordHintTimestamp < kuwoHintStaleMs) {
+                int idx = lyricLines.indexOf(line);
+                if (idx >= 0 && idx == mKuwoWordHintLineIndex) {
+                    return hasActiveWordTimestamps(line);
+                }
+            }
+        }
+        // 行内逐字时间戳
+        return hasActiveWordTimestamps(line);
+    }
+
     private void drawWordByWord(Canvas canvas, EnhancedLRCParser.EnhancedLyricLine line, float centerX, float blockCenterY) {
         String text = line.text != null ? line.text : "";
         List<String> wrappedLines = wrapTextLines(currentPaint, text);
@@ -2253,6 +2286,92 @@ public class ModernLyricsView extends View {
             }
         }
     }
+    /**
+     * 逐字上移聚集绘制：仅在有准确逐字时间信息时调用。
+     * 唱过的字上浮到顶部已唱区，当前字正在上移途中，未唱的字留在底部。
+     * 使用缓动函数平滑当前字的上移过渡。
+     */
+    private void drawWordByWordWithCharJump(Canvas canvas, EnhancedLRCParser.EnhancedLyricLine line, float centerX, float blockCenterY) {
+        String text = line.text != null ? line.text : "";
+        float progress = resolveLineProgress(line);
+        int totalChars = Math.max(1, text.length());
+
+        float charIndexFloat = progress * totalChars;
+        // monotonic: charIndexFloat only increases per line to prevent regression flash
+        String lineKey = wordProgressLineKey(line);
+        if (lineKey.equals(mLastCharJumpLineKey)) {
+            if (charIndexFloat < mLastCharJumpFloat) {
+                charIndexFloat = mLastCharJumpFloat;
+            }
+        } else {
+            mLastCharJumpLineKey = lineKey;
+        }
+        mLastCharJumpFloat = Math.max(0f, Math.min(totalChars, charIndexFloat));
+        int charIndex = Math.min(totalChars - 1, (int) charIndexFloat);
+        float charSubProgress = charIndexFloat - charIndex;
+
+        List<String> wrappedLines = wrapTextLines(currentPaint, text);
+        int lineCount = wrappedLines.size();
+        int charOffset = 0;
+
+        // 复用单个 TextPaint，避免每字 new 对象触发 GC 抖动
+        TextPaint chPaint = new TextPaint(currentPaint);
+        chPaint.setShader(null);
+
+        for (int wl = 0; wl < lineCount; wl++) {
+            String wrapped = wrappedLines.get(wl);
+            float lineCenterY = getWrappedLineCenterY(currentPaint, blockCenterY, wl, lineCount);
+            float baseline = verticalCenterToBaseline(currentPaint, lineCenterY);
+            float lineWidth = currentPaint.measureText(wrapped);
+            float adjustedCenterX = clampCenterXForTextWidth(centerX, lineWidth);
+            float startX = adjustedCenterX - lineWidth / 2f;
+
+            float charX = startX;
+            for (int ci = 0; ci < wrapped.length(); ci++) {
+                String ch = String.valueOf(wrapped.charAt(ci));
+                float charW = currentPaint.measureText(ch);
+                float cx = charX + charW / 2f;
+                int globalIdx = charOffset + ci;
+
+                float yOffset;
+                int color;
+
+                if (globalIdx < charIndex) {
+                    // 已唱过的字：完全上移，使用当前高亮色
+                    yOffset = -charJumpHeightPx;
+                    color = currentTextColor;
+                } else if (globalIdx == charIndex) {
+                    // 当前正在唱的字：缓动平滑上移
+                    float easedProgress = easeInOutCubic(charSubProgress);
+                    yOffset = -charJumpHeightPx * easedProgress;
+                    color = blendColor(getNormalLyricsColor(), currentTextColor, easedProgress);
+                } else {
+                    // 未唱的字：不动
+                    yOffset = 0f;
+                    color = getNormalLyricsColor();
+                }
+
+                chPaint.setColor(color);
+                canvas.drawText(ch, cx, baseline + yOffset, chPaint);
+                charX += charW;
+            }
+            charOffset += wrapped.length();
+        }
+    }
+
+    /**
+     * 缓动函数：三次贝塞尔曲线（平滑加速减速）
+     */
+    private float easeInOutCubic(float t) {
+        float clamped = Math.max(0f, Math.min(1f, t));
+        if (clamped < 0.5f) {
+            return 4f * clamped * clamped * clamped;
+        } else {
+            float f = 2f * clamped - 2f;
+            return 0.5f * f * f * f + 1f;
+        }
+    }
+
     
     /**
      * 带进度的行绘制（渐变效果，基于小张桌面的实现）
@@ -2968,96 +3087,27 @@ public class ModernLyricsView extends View {
         return hueDelta * 0.72f + satDelta * 0.14f + valueDelta * 0.14f;
     }
 
-    // 颜色联动相关（保持旧版兼容：可切换为外部颜色源）
+    // 颜色联动相关（兼容旧接口，实际由 LyricsColorManager 驱动）
     private boolean colorSyncEnabled = true;
     private ColorSyncCallback colorSyncCallback;
     
-    /** 颜色同步回调接口（用于从外部获取颜色） */
+    /** 颜色同步回调接口（兼容） */
     public interface ColorSyncCallback {
-        int getSyncColor();  // 获取同步颜色
+        int getSyncColor();
+        void advanceColor();
     }
     
-    /** 设置颜色同步回调（用于与跑马灯颜色联动） */
+    /** 设置颜色同步回调（兼容） */
     public void setColorSyncCallback(ColorSyncCallback callback) {
         this.colorSyncCallback = callback;
     }
     
-    /** 启用/禁用颜色联动。 */
+    /** 启用/禁用颜色联动（兼容） */
     public void setColorSyncEnabled(boolean enabled) {
         this.colorSyncEnabled = enabled;
     }
-
-    /**
-     * 随机色池模式：在两次 onDraw 间隔较大时仍按 {@link #colorChangeIntervalMs} 对齐节拍（多拍可在一帧内追完）。
-     */
-    private void advanceRandomColorTargetsWithCatchUp(long currentTime) {
-        long interval = Math.max(1L, colorChangeIntervalMs);
-        if (lastColorChangeTime <= 0L) {
-            lastColorChangeTime = currentTime - interval;
-        }
-        int jumps = 0;
-        while (jumps < 48 && currentTime - lastColorChangeTime >= interval) {
-            currentTextColor = interpolateVividColor(colorTransitionStart, targetTextColor, 1f);
-            colorTransitionStart = currentTextColor;
-            targetTextColor = generateDistinctRandomColor(colorTransitionStart);
-            lastColorChangeTime += interval;
-            jumps++;
-        }
-        if (BuildConfig.DEBUG && jumps > 0) {
-            LogHelper.d(TAG, "🎨 颜色目标切换[source=random, at=" + currentTime
-                    + ", intervalMs=" + interval
-                    + ", catchUpJumps=" + jumps
-                    + ", from=#" + Integer.toHexString(colorTransitionStart)
-                    + ", to=#" + Integer.toHexString(targetTextColor) + "]");
-        }
-    }
     
-    /**
-     * 更新随机颜色（平滑过渡）
-     * 如果启用了颜色联动，则使用外部提供的颜色
-     * 注意：不在此函数入口做整段节流；逐字模式帧间隔可短于 33ms，节流会跳过「已满 colorChangeIntervalMs」的判定，导致换色节奏不跟随设置。
-     */
-    private void updateRandomColor() {
-        long currentTime = System.currentTimeMillis();
-
-        if (colorSyncEnabled && colorSyncCallback != null) {
-            try {
-                int syncColor = colorSyncCallback.getSyncColor();
-                if (syncColor != targetTextColor) {
-                    colorTransitionStart = currentTextColor;
-                    targetTextColor = syncColor;
-                    lastColorChangeTime = currentTime;
-                    colorTransitionProgress = 0f;
-                    if (BuildConfig.DEBUG) {
-                        LogHelper.d(TAG, "🎨 颜色目标切换[source=sync, at=" + currentTime
-                                + ", intervalMs=" + colorChangeIntervalMs
-                                + ", from=#" + Integer.toHexString(colorTransitionStart)
-                                + ", to=#" + Integer.toHexString(targetTextColor) + "]");
-                    }
-                }
-            } catch (Exception ignored) {
-                // 与跑马灯联动异常时回退随机节奏（同样用节拍追赶，避免稀疏重绘拉长周期）
-                advanceRandomColorTargetsWithCatchUp(currentTime);
-            }
-        } else {
-            // 随机源模式：按设置页「颜色变化节奏」切换目标色。
-            // 逐字模式常关呼吸动画，onDraw 可能仅 ~80ms 一拍；若每次换色把 lastColorChangeTime 设为「当下」
-            // 会吃掉整段已过时间，体感上「颜色变化节奏」与设置不一致。这里用 +=interval 追赶错过的节拍。
-            advanceRandomColorTargetsWithCatchUp(currentTime);
-        }
-
-        long elapsed = currentTime - lastColorChangeTime;
-        colorTransitionProgress = Math.min(1.0f, (float) elapsed / Math.max(1f, colorChangeIntervalMs));
-        currentTextColor = interpolateVividColor(colorTransitionStart, targetTextColor, colorTransitionProgress);
-
-        if (currentPaint != null) {
-            currentPaint.setColor(currentTextColor);
-        }
-    }
-    
-    /**
-     * 获取当前歌词文字颜色（用于与霓虹灯边框颜色联动）
-     */
+    /** 获取当前歌词文字颜色（用于与霓虹灯边框颜色联动） */
     public int getCurrentTextColor() {
         return currentTextColor;
     }
@@ -3178,7 +3228,10 @@ public class ModernLyricsView extends View {
     }
     
     // ========== 公共API ==========
-    
+
+    /** 返回当前歌词行数。 */
+    public int getLyricLineCount() { return lyricLines.size(); }
+
     /**
      * 设置歌词数据
      */
@@ -3190,6 +3243,10 @@ public class ModernLyricsView extends View {
         this.targetPlaybackPosition = this.currentPosition;
         this.lastPositionFrameUptimeMs = 0L;
         this.lastWordProgressLineKey = "";
+        this.mLastCharJumpLineKey = "";
+        this.mLastCharJumpFloat = 0f;
+        this.mCharJumpSmoothAccumPx = 0f;
+        this.mCharJumpLastFrameUptimeMs = 0L;
         this.lastWordProgressValue = 0f;
         this.lastWordProgressSampleUptimeMs = 0L;
         this.wordTimestampsRevision = 0;
@@ -3268,6 +3325,10 @@ public class ModernLyricsView extends View {
         this.targetPlaybackPosition = safePosition;
         this.lastPositionFrameUptimeMs = 0L;
         this.lastWordProgressLineKey = "";
+        this.mLastCharJumpLineKey = "";
+        this.mLastCharJumpFloat = 0f;
+        this.mCharJumpSmoothAccumPx = 0f;
+        this.mCharJumpLastFrameUptimeMs = 0L;
         this.lastWordProgressValue = 0f;
         this.lastWordProgressSampleUptimeMs = 0L;
         this.wordTimestampsRevision = 0;
@@ -3409,6 +3470,10 @@ public class ModernLyricsView extends View {
         lastLineChangedAtMs = 0L;
         lastLyricProgressInvalidateTime = 0L;
         lastWordProgressLineKey = "";
+        this.mLastCharJumpLineKey = "";
+        this.mLastCharJumpFloat = 0f;
+        this.mCharJumpSmoothAccumPx = 0f;
+        this.mCharJumpLastFrameUptimeMs = 0L;
         lastWordProgressValue = 0f;
         lastWordProgressSampleUptimeMs = 0L;
         wordTimestampsRevision = 0;
@@ -3459,7 +3524,10 @@ public class ModernLyricsView extends View {
             // 切句时保留当前呼吸相位，避免重置到固定缩放值导致视觉突变。
             applyPowerSavingLineColorIfNeeded(/*force*/ true);
             if (!isSuperLyricSingleLineMode()) {
-                if (!isDragging && Math.abs(scrollY - targetScrollY) > 4f) {
+                if (enableShuffleSplitEffect) {
+                    // 分词模式直接跳转，不做滚动动画
+                    scrollY = targetScrollY;
+                } else if (!isDragging && Math.abs(scrollY - targetScrollY) > 4f) {
                     animateScroll(scrollY, targetScrollY);
                 } else if (!isDragging) {
                     scrollY = targetScrollY;
@@ -3537,6 +3605,10 @@ public class ModernLyricsView extends View {
         currentPosition = targetPlaybackPosition;
         lastPositionFrameUptimeMs = SystemClock.uptimeMillis();
         lastWordProgressLineKey = "";
+        this.mLastCharJumpLineKey = "";
+        this.mLastCharJumpFloat = 0f;
+        this.mCharJumpSmoothAccumPx = 0f;
+        this.mCharJumpLastFrameUptimeMs = 0L;
         lastWordProgressValue = 0f;
         lastWordProgressSampleUptimeMs = 0L;
         lastLyricProgressInvalidateTime = 0L;
@@ -3610,7 +3682,10 @@ public class ModernLyricsView extends View {
             if (!isSuperLyricSingleLineMode()) {
                 targetScrollY = currentLineIndex * LINE_SPACING;
                 if (!isDragging) {
-                    if (!trackLoading && Math.abs(scrollY - targetScrollY) > 4f) {
+                    if (enableShuffleSplitEffect) {
+                        // 分词模式直接跳转
+                        scrollY = targetScrollY;
+                    } else if (!trackLoading && Math.abs(scrollY - targetScrollY) > 4f) {
                         animateScroll(scrollY, targetScrollY);
                     } else {
                         scrollY = targetScrollY;
@@ -3641,6 +3716,10 @@ public class ModernLyricsView extends View {
             stableShuffleSignature = "";
             lastStableShuffleContentSig = "";
             lastWordProgressLineKey = "";
+        this.mLastCharJumpLineKey = "";
+        this.mLastCharJumpFloat = 0f;
+        this.mCharJumpSmoothAccumPx = 0f;
+        this.mCharJumpLastFrameUptimeMs = 0L;
             lastWordProgressValue = 0f;
             lastWordProgressSampleUptimeMs = 0L;
             lastLyricProgressInvalidateTime = nowMs;
@@ -3650,7 +3729,7 @@ public class ModernLyricsView extends View {
             long intervalMs = playbackActive
                 ? (powerSavingModeEnabled
                     ? WORD_PROGRESS_FRAME_POWER_SAVE_MS
-                    : Math.min(LYRIC_PROGRESS_INVALIDATE_MS, Math.max(16L, colorChangeIntervalMs / 30)))
+                    : Math.min(LYRIC_PROGRESS_INVALIDATE_MS, Math.max(16L, COLOR_UPDATE_THROTTLE_MS)))
                 : PAUSED_LYRIC_INVALIDATE_MS;
             if (nowMs - lastLyricProgressInvalidateTime >= intervalMs) {
                 lastLyricProgressInvalidateTime = nowMs;
@@ -3664,7 +3743,7 @@ public class ModernLyricsView extends View {
             // 整行高亮：重绘节拍与「颜色变化节奏」挂钩，避免仅按固定 33ms 节流时慢节奏下过渡欠采样、快滑块时欠跟手。
             long intervalMs = powerSavingModeEnabled
                     ? 200L
-                    : Math.min(COLOR_UPDATE_THROTTLE_MS, Math.max(16L, colorChangeIntervalMs / 30));
+                    : COLOR_UPDATE_THROTTLE_MS;
             if (nowMs - lastSameLinePlayingInvalidateMs >= intervalMs) {
                 lastSameLinePlayingInvalidateMs = nowMs;
                 postInvalidateOnAnimation();
@@ -3860,9 +3939,16 @@ public class ModernLyricsView extends View {
         if (lineIndex >= 0 && lineIndex < lyricLines.size()) {
             currentLineIndex = lineIndex;
             targetScrollY = lineIndex * LINE_SPACING;
-            stableShuffleSignature = "";
-            stableShuffleTokens.clear();
-            animateScroll(scrollY, targetScrollY);
+            if (enableShuffleSplitEffect) {
+                // 分词模式：不清理token、不做滚动动画，直接跳转避免空白帧
+                scrollY = targetScrollY;
+                stableShuffleSignature = "";
+                postInvalidateOnAnimation();
+            } else {
+                stableShuffleSignature = "";
+                stableShuffleTokens.clear();
+                animateScroll(scrollY, targetScrollY);
+            }
         }
     }
     
@@ -3871,6 +3957,11 @@ public class ModernLyricsView extends View {
     public void setShowTranslation(boolean show) {
         this.showTranslation = show;
         applyAutoLineSpacingFromFontIfNeeded();
+        invalidate();
+    }
+
+    public void setShowTransliteration(boolean show) {
+        this.showTransliteration = show;
         invalidate();
     }
 
@@ -3894,8 +3985,12 @@ public class ModernLyricsView extends View {
         this.mKuwoWordHintTimestamp = android.os.SystemClock.uptimeMillis();
 
         // 酷我广播驱动：收到逐字位置时自动启用逐字模式
-        if (!enableWordByWord) {
-            setEnableWordByWord(true);
+        // 仅当该行有 wordTimestamps（准确逐字时间数据）时才启用，否则禁用上移效果
+        if (!enableWordByWord && lineIndex >= 0 && lineIndex < lyricLines.size()) {
+            EnhancedLRCParser.EnhancedLyricLine hintLine = lyricLines.get(lineIndex);
+            if (hintLine != null && hintLine.wordTimestamps != null && !hintLine.wordTimestamps.isEmpty()) {
+                setEnableWordByWord(true);
+            }
         }
 
         // Line change from broadcast: update current line and scroll
@@ -3905,9 +4000,13 @@ public class ModernLyricsView extends View {
             lastAutoCenterAnimatedLineIndex = -1;
             lastLineChangedAtMs = System.currentTimeMillis();
             stableShuffleSignature = "";
-            stableShuffleTokens.clear();
+            if (!enableShuffleSplitEffect) {
+                stableShuffleTokens.clear();
+            }
             applyPowerSavingLineColorIfNeeded(true);
-            if (!isDragging && Math.abs(scrollY - targetScrollY) > 4f) {
+            if (enableShuffleSplitEffect) {
+                scrollY = targetScrollY;
+            } else if (!isDragging && Math.abs(scrollY - targetScrollY) > 4f) {
                 animateScroll(scrollY, targetScrollY);
             } else if (!isDragging) {
                 scrollY = targetScrollY;
@@ -3950,6 +4049,20 @@ public class ModernLyricsView extends View {
         // 使用 postInvalidateOnAnimation 对齐 vsync，避免同一帧多次 onDraw
         postInvalidateOnAnimation();
     }
+    /** 逐字上移聚集开关（仅在有准确逐字时间信息时生效）。 */
+    public void setCharJumpEnabled(boolean enabled) {
+        if (this.charJumpEnabled == enabled) return;
+        this.charJumpEnabled = enabled;
+        postInvalidateOnAnimation();
+    }
+
+    /** 逐字上移高度（像素）。 */
+    public void setCharJumpHeightPx(float heightPx) {
+        if (this.charJumpHeightPx == heightPx) return;
+        this.charJumpHeightPx = Math.max(4f, Math.min(60f, heightPx));
+        postInvalidateOnAnimation();
+    }
+
 
     public void setShowProgress(boolean show) {
         this.showProgress = show;
@@ -4175,24 +4288,13 @@ public class ModernLyricsView extends View {
             return;
         }
         this.randomColorSwitchEnabled = enabled;
-        if (enabled) {
-            colorTransitionStart = currentTextColor;
-            targetTextColor = generateDistinctRandomColor(colorTransitionStart);
-            lastColorChangeTime = System.currentTimeMillis();
-            colorTransitionProgress = 0f;
-        } else {
-            applyReadableStaticColor();
-        }
+        LyricsColorManager.INSTANCE.setRandomMode(enabled);
         postInvalidateOnAnimation();
     }
 
     private void applyReadableStaticColor() {
-        int readableColor = 0xFFFFFFFF;
+        int readableColor = LyricsColorManager.INSTANCE.getColor();
         currentTextColor = readableColor;
-        targetTextColor = readableColor;
-        colorTransitionStart = readableColor;
-        colorTransitionProgress = 1f;
-        lastColorChangeTime = System.currentTimeMillis();
         if (currentPaint != null) {
             currentPaint.setColor(readableColor);
         }
@@ -4304,14 +4406,9 @@ public class ModernLyricsView extends View {
         this.breathingDisplacementStrength = clamped;
     }
 
+    /** 已改为换行触发，此方法保留兼容但不再生效。 */
     public void setColorChangeIntervalMs(long intervalMs) {
-        long clamped = Math.max(COLOR_CHANGE_INTERVAL_MIN_MS, Math.min(COLOR_CHANGE_INTERVAL_MAX_MS, intervalMs));
-        this.colorChangeIntervalMs = clamped;
-        // 调试页改节奏后立即生效，避免保留旧周期造成“跟随慢半拍”。
-        long now = System.currentTimeMillis();
-        this.lastColorChangeTime = now - clamped;
-        this.colorTransitionProgress = 0f;
-        postInvalidateOnAnimation();
+        // no-op
     }
 
     public void setShuffleLayoutRebuildIntervalMs(long intervalMs) {

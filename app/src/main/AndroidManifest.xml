@@ -12,9 +12,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <!-- API 34+閿涙udioRecord閿涘牆鎯?AudioPlaybackCapture 閸愬懎缍嶉敍澶庮潒娑撴椽瀹抽崗瀣棑缁澧犻崣棰佸▏閻㈩煉绱濇い璁崇瑢 manifest 娑?microphone 缁鐎锋稉鈧懛?-->
+    <!-- API 34+锛欰udioRecord锛堝�?AudioPlaybackCapture 鍐呭綍锛夎涓洪害鍏嬮绫诲墠鍙颁娇鐢紝椤讳笌 manifest �?microphone 绫诲瀷涓€鑷?-->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <!-- 閺?Root/Shizuku 閺冭泛褰?pm grant閿涙被EMOTE_SUBMIX 缁崵绮哄ǎ鐑界叾閸愬懎缍?-->
+    <!-- �?Root/Shizuku 鏃跺�?pm grant锛汻EMOTE_SUBMIX 绯荤粺娣烽煶鍐呭�?-->
     <uses-permission
         android:name="android.permission.CAPTURE_AUDIO_OUTPUT"
         tools:ignore="ProtectedPermissions" />
@@ -34,6 +34,7 @@
         android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation"
         tools:targetApi="s" />
+        <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
 
@@ -44,7 +45,7 @@
         <package android:name="rikka.shizuku" />
         <package android:name="com.xiaomi.subscreencenter" />
         <package android:name="com.geely.consumer" />
-        <!-- 閹剚璇炵粣妤嬬窗鐏忓繒鑳岀€瑰鍙忔稉顓炵妇閿涘湺iaomi HyperOS 閸忕厧顔愰敍澶嬫綀闂勬劙銆?-->
+        <!-- 鎮诞绐楋細灏忕背瀹夊叏涓績锛圶iaomi HyperOS 鍏煎锛夋潈闄愰�?-->
         <package android:name="com.miui.securitycenter" />
     </queries>
 
@@ -62,19 +63,19 @@
         android:networkSecurityConfig="@xml/network_security_config">
 
         <!--
-          Target API 36閿涙艾婀?sw600dp+ 婢堆冪潌娑撳﹦閮寸紒鐔肩帛鐠併倕鎷烽悾銉︽煙閸?濮ｆ柧绶ラ梽鎰煑閿?
-          閼冲苯鐫嗗宀冪槤缁涘绶风挧?setRequestedOrientation閿涘本娈忔穱婵堟殌閸忕厧顔愬Ο鈥崇础閿涘湏PI 37 鐠у嘲鐨㈡径杈ㄦ櫏閿涘矂娓堕弨閫涜礋閼奉亪鈧倸绨茬敮鍐ㄧ湰閿涘鈧?
+          Target API 36锛氬�?sw600dp+ 澶у睆涓婄郴缁熼粯璁ゅ拷鐣ユ柟�?姣斾緥闄愬埗�?
+          鑳屽睆姝岃瘝绛変緷璧?setRequestedOrientation锛屾殏淇濈暀鍏煎妯″紡锛圓PI 37 璧峰皢澶辨晥锛岄渶鏀逛负鑷€傚簲甯冨眬锛夈�?
         -->
         <property
             android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
             android:value="true" />
 
-        <!-- 棣冩斀 閸忔娊鏁敍姘冲剹鐏炲繐鍣崗銉ㄧ槈閿涗礁鍑℃宀冪槈閺堝鏅ラ敍?-->
+        <!-- 馃攽 鍏抽敭锛氳儗灞忓噯鍏ヨ瘉锛佸凡楠岃瘉鏈夋晥锛?-->
         <meta-data
             android:name="miui.rear.policy"
             android:value="1"/>
 
-        <!-- SuperLyric API 閹恒儱鍙嗘竟鐗堟 -->
+        <!-- SuperLyric API 鎺ュ叆澹版槑 -->
         <meta-data
             android:name="superlyricapi"
             android:value="true"
@@ -113,7 +114,7 @@
             android:label="@string/app_name"
             android:theme="@style/Theme.MiRoot"
             android:enableOnBackInvokedCallback="false">
-            <!-- 閼冲苯鐫嗙粵鏍殣娑撳簼绗撻悽銊┿€夋稉鈧懛杈剧窗miui.rear.policy閿涘牓顣╁ù瀣偓褑绻戦崶鐐插嚒閸忔娊妫撮敍?-->
+            <!-- 鑳屽睆绛栫暐涓庝笓鐢ㄩ〉涓€鑷达細miui.rear.policy锛堥娴嬫€ц繑鍥炲凡鍏抽棴锛?-->
             <meta-data
                 android:name="miui.rear.policy"
                 android:value="miui" />
@@ -154,7 +155,7 @@
                 android:value="miui" />
         </activity>
 
-        <!-- 閻欘剛鐝?taskAffinity閿涙岸浼╅崗宥勭瑢 MainActivity 閸氬奔鎹㈤崝鈽呯礉瀵懓鍤化鑽ょ埠瑜版洖鐫嗛幒鍫熸綀閺冭埖濡搁弫缈犻嚋 MiRoot 娑撹崵鏅棃銏″閸掓澘澧犻崣?-->
+        <!-- 鐙�?taskAffinity锛氶伩鍏嶄笌 MainActivity 鍚屼换鍔★紝寮瑰嚭绯荤粺褰曞睆鎺堟潈鏃舵妸鏁翠釜 MiRoot 涓荤晫闈㈡媺鍒板墠鍙?-->
         <activity
             android:name=".record.MediaProjectionRequestActivity"
             android:exported="false"
@@ -313,7 +314,7 @@
             android:name=".lyrics.ScreenshotSavedReceiver"
             android:exported="false" />
 
-        <!-- 闁氨鐓￠弽蹇曠波閺夌喐濮囩仦蹇ョ窗閺勬儳绱?Broadcast閿涘矂浼╅崗?PendingIntent 閹峰鎹?Activity 閸︺劋瀵岀仦蹇涙／娑撯偓娑?-->
+        <!-- 閫氱煡鏍忕粨鏉熸姇灞忥細鏄惧�?Broadcast锛岄伩鍏?PendingIntent 鎷夎�?Activity 鍦ㄤ富灞忛棯涓€�?-->
         <receiver
             android:name=".rear.ProjectionNotificationStopReceiver"
             android:exported="false" />
@@ -347,6 +348,19 @@
                 android:name="miui.rear.policy"
                 android:value="miui" />
         </activity>
+        <activity
+            android:name=".lyrics.MainScreenMusicActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity="com.wmqc.miroot.lyrics.main_music"
+            android:theme="@style/Theme.MiRoot.Transparent"
+            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode|smallestScreenSize|density"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:enableOnBackInvokedCallback="false">
+        </activity>
+
 
         <receiver
             android:name=".car.CarControlBroadcastReceiver"
@@ -422,6 +436,36 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/car_control_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".car.CarControlWidget6x2Provider"
+            android:exported="true"
+            android:label="@string/car_control_widget_name_6x2">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.CONFIGURATION_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/car_control_widget_info_6x2" />
+        </receiver>
+
+        <receiver
+            android:name=".car.CarControlWidget6x4Provider"
+            android:exported="true"
+            android:label="@string/car_control_widget_name_6x4">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.CONFIGURATION_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/car_control_widget_info_6x4" />
         </receiver>
 
         <receiver
@@ -678,8 +722,17 @@
             android:label="@string/save_strategy_test_title"
             android:theme="@style/Theme.MiRoot"
             android:enableOnBackInvokedCallback="false" />
-
+        <activity
+            android:name=".car.DigitalCarKeyDebugActivity"
+            android:exported="false"
+            android:label="��������Կ��"
+            android:theme="@style/Theme.MiRoot"
+            android:enableOnBackInvokedCallback="false">
+            <meta-data
+                android:name="miui.rear.policy"
+                android:value="miui" />
+        </activity>
 </application>
-
 </manifest>
+
 

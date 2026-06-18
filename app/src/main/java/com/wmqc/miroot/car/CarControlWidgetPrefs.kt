@@ -28,6 +28,16 @@ object CarControlWidgetPrefs {
     const val FLAG_ODOMETER = 1 shl 6
     const val FLAG_BATTERY = 1 shl 7
     const val FLAG_TIRE_PRESSURE = 1 shl 8
+    /** 平均油耗 */
+    const val FLAG_AVG_CONSUMPTION = 1 shl 9
+    /** 发动机冷却液温度 */
+    const val FLAG_COOLANT_TEMP = 1 shl 10
+    /** 保养剩余里程 */
+    const val FLAG_SERVICE_DISTANCE = 1 shl 11
+    /** 电子手刹状态 */
+    const val FLAG_EPB_STATUS = 1 shl 12
+    /** 发动机转速 */
+    const val FLAG_ENGINE_SPEED = 1 shl 13
 
     /** 油量与续航始终展示，不可在配置页关闭。 */
     val MANDATORY_DISPLAY_FLAGS: Int = FLAG_FUEL or FLAG_RANGE
@@ -109,8 +119,14 @@ object CarControlWidgetPrefs {
         val flags = globalDisplayFlags(appCtx)
         val cornerDp = globalCornerRadiusDp(appCtx)
         val manager = AppWidgetManager.getInstance(appCtx)
-        val component = ComponentName(appCtx, CarControlAppWidgetProvider::class.java)
-        val ids = manager.getAppWidgetIds(component)
+        val components = listOf(
+            ComponentName(appCtx, CarControlAppWidgetProvider::class.java),
+            ComponentName(appCtx, CarControlWidget6x2Provider::class.java),
+            ComponentName(appCtx, CarControlWidget6x4Provider::class.java),
+        )
+        val ids = components.flatMap {
+            manager.getAppWidgetIds(it).toList()
+        }.toIntArray()
         if (ids.isEmpty()) return
         val editor = prefs(appCtx).edit()
         for (id in ids) {

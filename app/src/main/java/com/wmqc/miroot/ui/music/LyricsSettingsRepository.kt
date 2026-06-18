@@ -24,6 +24,8 @@ object LyricsSettingsRepository {
             albumArtAlphaPercent = p.getInt("albumArtAlphaPercent", 35).coerceIn(0, 100),
             albumArtBlurRadius = p.getFloat("albumArtBlurRadius", 12f).coerceAtLeast(0f),
             wordByWord = p.getBoolean("wordByWord", false),
+            charJumpEnabled = p.getBoolean("charJumpEnabled", false),
+            charJumpHeightPx = p.getFloat("charJumpHeightPx", 20f),
             shuffleSplitEffect = p.getBoolean("shuffleSplitEffect", false),
             shuffleSplitMulticolor = p.getBoolean("shuffleSplitMulticolor", false),
             shuffleSplitMode = p.getString("shuffleSplitMode", "WORD") ?: "WORD",
@@ -45,6 +47,8 @@ object LyricsSettingsRepository {
             gestureControl = p.getBoolean("gestureControl", false),
             backgroundTexture = p.getBoolean("backgroundTexture", false),
             autoProjection = p.getBoolean("autoProjection", false),
+            showTranslation = p.getBoolean("showTranslation", true),
+            showTransliteration = p.getBoolean("showTransliteration", true),
             breathingEnabled = p.getBoolean("breathingEnabled", false),
             breathingBpm = p.getInt("breathingBpm", 15),
             breathingScaleVariance = p.getFloat("breathingScaleVariance", 0.10f),
@@ -52,6 +56,7 @@ object LyricsSettingsRepository {
             colorChangeIntervalMs = p.getInt("colorChangeIntervalMs", COLOR_CHANGE_INTERVAL_DEFAULT_MS)
                 .coerceIn(COLOR_CHANGE_INTERVAL_MIN_MS, COLOR_CHANGE_INTERVAL_MAX_MS),
             randomColorSwitchEnabled = p.getBoolean("randomColorSwitchEnabled", true),
+            fixedColor = p.getInt("fixedColor", 0xFFFFFFFF.toInt()),
             projectionSyncOffsetMs = p.getInt("projectionSyncOffsetMs", DEFAULT_PROJECTION_SYNC_OFFSET_MS),
             lyricsSourceMode = LyricsSourceMode.fromPrefValue(
                 p.getString(KEY_LYRICS_SOURCE_MODE, LyricsSourceMode.NETWORK_ONLY.prefValue),
@@ -78,7 +83,7 @@ object LyricsSettingsRepository {
         }
         val abyPath = if (aFontRaw == LyricsFontHelper.ID_CUSTOM && aPathOk != null) aPathOk else null
 
-        // 统一为单一字体：默认以投屏为准；若上次为深渊镜且两套偏好不一致，沿用深渊镜侧（旧版独立写入 abyssal 键）
+        // ͳһΪ��һ���壺Ĭ����Ͷ��Ϊ׼�����ϴ�Ϊ��Ԩ��������ƫ�ò�һ�£�������Ԩ���ࣨ�ɰ����д�� abyssal ����
         val prefsAbyssalOn = p.getBoolean("abyssalMirror", false)
         val pairsDiffer = projFont != abyFont || projPath != abyPath
         val canonFont: String
@@ -134,6 +139,8 @@ object LyricsSettingsRepository {
             .putInt("albumArtAlphaPercent", fixed.albumArtAlphaPercent.coerceIn(0, 100))
             .putFloat("albumArtBlurRadius", fixed.albumArtBlurRadius.coerceAtLeast(0f))
             .putBoolean("wordByWord", fixed.wordByWord)
+            .putBoolean("charJumpEnabled", fixed.charJumpEnabled)
+            .putFloat("charJumpHeightPx", fixed.charJumpHeightPx)
             .putBoolean("shuffleSplitEffect", fixed.shuffleSplitEffect)
             .putBoolean("shuffleSplitMulticolor", fixed.shuffleSplitMulticolor)
             .putString("shuffleSplitMode", fixed.shuffleSplitMode)
@@ -152,6 +159,8 @@ object LyricsSettingsRepository {
             .putBoolean("gestureControl", fixed.gestureControl)
             .putBoolean("backgroundTexture", fixed.backgroundTexture)
             .putBoolean("autoProjection", fixed.autoProjection)
+            .putBoolean("showTranslation", fixed.showTranslation)
+            .putBoolean("showTransliteration", fixed.showTransliteration)
             .putBoolean("breathingEnabled", fixed.breathingEnabled)
             .putInt("breathingBpm", fixed.breathingBpm)
             .putFloat("breathingScaleVariance", fixed.breathingScaleVariance)
@@ -164,6 +173,7 @@ object LyricsSettingsRepository {
                 ),
             )
             .putBoolean("randomColorSwitchEnabled", fixed.randomColorSwitchEnabled)
+            .putInt("fixedColor", fixed.fixedColor)
             .remove("shuffleLayoutRebuildIntervalMs")
             .putInt("projectionSyncOffsetMs", fixed.projectionSyncOffsetMs)
             .putString(KEY_LYRICS_SOURCE_MODE, fixed.lyricsSourceMode.prefValue)
@@ -181,8 +191,8 @@ object LyricsSettingsRepository {
     }
 
     /**
-     * 仅在「非 Root 通道」下锁定歌词来源为 NETWORK_ONLY（例如 Shizuku）。
-     * Root 通道允许用户切换并持久化 NETWORK_ONLY / SUPER_LYRIC_ONLY / MIXED。
+     * ���ڡ��� Root ͨ���������������ԴΪ NETWORK_ONLY������ Shizuku����
+     * Root ͨ�������û��л����־û� NETWORK_ONLY / SUPER_LYRIC_ONLY / MIXED��
      */
     private fun enforceLyricsSourceMode(context: Context, s: LyricsUiSettings): LyricsUiSettings {
         PrivilegeBackend.refreshIfUnknown()
@@ -200,8 +210,8 @@ object LyricsSettingsRepository {
     }
 
     /**
-     * 滑块未配置时按歌词字号给一个自适应默认值：
-     * 大字号默认浮动更小，小字号默认浮动更大。
+     * ����δ����ʱ������ֺŸ�һ������ӦĬ��ֵ��
+     * ���ֺ�Ĭ�ϸ�����С��С�ֺ�Ĭ�ϸ�������
      */
     private fun adaptiveShuffleSplitScaleVariance(textSize: Float): Float {
         val minSize = 40f
@@ -212,3 +222,5 @@ object LyricsSettingsRepository {
         return (maxVariance - (maxVariance - minVariance) * t).coerceIn(minVariance, maxVariance)
     }
 }
+
+

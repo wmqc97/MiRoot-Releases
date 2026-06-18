@@ -1,17 +1,3 @@
-/*
- * Author: AntiOblivionis
- * QQ: 319641317
- * Github: https://github.com/GoldenglowSusie/
- * Bilibili: 罗德岛T0驭械术师澄闪
- * 
- * Chief Tester: 汐木泽
- * 
- * Co-developed with AI assistants:
- * - Cursor
- * - Claude-4.5-Sonnet
- * - GPT-5
- * - Gemini-2.5-Pro
- */
 
 package com.wmqc.miroot.lyrics;
 
@@ -83,6 +69,7 @@ public class EnhancedLRCParser {
         public long time;                              // 行开始时间(毫秒)
         public String text;                            // 歌词文本
         public String translation;                     // 翻译(如果有)
+        public String transliteration;                // 音译(如果有)
         public List<WordTimestamp> wordTimestamps;     // 逐字时间戳(如果有)
         /** 为 true 表示 {@link #wordTimestamps} 来自 SuperLyric 模块推送，高亮应走模块轴而非 LRC 行区间推算。 */
         public boolean moduleWordTimeline;
@@ -92,6 +79,7 @@ public class EnhancedLRCParser {
             this.time = time;
             this.text = text;
             this.translation = null;
+            this.transliteration = null;
             this.wordTimestamps = new ArrayList<>();
             this.moduleWordTimeline = false;
             this.isTranslationLine = false;
@@ -99,8 +87,8 @@ public class EnhancedLRCParser {
         
         @Override
         public String toString() {
-            return String.format("EnhancedLyricLine{time=%d, text='%s', translation='%s', hasWordTimestamps=%b}", 
-                               time, text, translation, wordTimestamps != null && !wordTimestamps.isEmpty());
+            return String.format("EnhancedLyricLine{time=%d, text='%s', translation='%s', transliteration='%s', hasWordTimestamps=%b}", 
+                               time, text, translation, wordTimestamps != null && !wordTimestamps.isEmpty(), transliteration);
         }
     }
     

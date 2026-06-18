@@ -1,15 +1,3 @@
-/*
- * Author: AntiOblivionis
- * QQ: 319641317
- * Github: https://github.com/GoldenglowSusie/
- * Bilibili: ???T0??????
- * 
- * Co-developed with AI assistants:
- * - Cursor
- * - Claude-4.5-Sonnet
- * - GPT-5
- * - Gemini-2.5-Pro
- */
 
 package com.wmqc.miroot.lyrics;
 
@@ -86,12 +74,16 @@ public class RearScreenWakeService extends Service {
         return RearAssistPrefs.INSTANCE.intervalMs(this);
     }
 
+    /** 灭屏时背屏唤醒的固定间隔：不关闭循环（主屏灭屏不影响背屏），但降频以省电。 */
+    private static final int SCREEN_OFF_WAKE_INTERVAL_MS = 3000;
+
     private int getAdaptiveWakeIntervalMs() {
         int base = Math.max(600, getWakeIntervalMs());
         try {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
             if (pm != null && !pm.isInteractive()) {
-                return Math.min(base * 2, 6000);
+                // 灭屏时使用固定 3s 间隔：仍在持续唤醒背屏，但避免 1s 高频轮询
+                return SCREEN_OFF_WAKE_INTERVAL_MS;
             }
         } catch (Throwable ignored) {
         }

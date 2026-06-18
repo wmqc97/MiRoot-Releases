@@ -79,6 +79,10 @@ import kotlin.math.max
 import kotlin.math.roundToInt
 import com.wmqc.miroot.viewmodel.MainPermissionViewModel
 import com.wmqc.miroot.car.CarControlEntry
+import com.wmqc.miroot.car.CarControlHttpServer
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.SharedPreferences
 import com.wmqc.miroot.lyrics.ITaskService
 import com.wmqc.miroot.lyrics.LogHelper
 import com.wmqc.miroot.lyrics.RootTaskService
@@ -132,6 +136,10 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
 
     private val wakeSliderStepState = mutableIntStateOf(0)
     private val chargingFillSpeedStepState = mutableIntStateOf(27)
+
+    private var mcpHttpServer: CarControlHttpServer? = null
+    private var mcpServerPort: Int = 8080
+    private var mcpServerApiKey: String = ""
 
     private val pickChargingMascotLauncher = registerForActivityResult(
         ActivityResultContracts.PickVisualMedia(),
@@ -268,6 +276,20 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
         binding.textSectionFeaturesRecord.setOnClickListener {
             showSectionHelp(R.string.features_section_record_screenshot, R.string.help_features_record_screenshot)
         }
+        binding.textSectionFeaturesMcp.setOnClickListener {
+            showSectionHelp(R.string.features_mcp_help_title, R.string.help_features_mcp)
+        }
+        binding.buttonMcpCopyConfig.setOnClickListener {
+            copyMcpConfigToClipboard()
+        }
+
+        binding.switchMcpServer.setOnCheckedChangeListener { _, checked ->
+            if (checked) startMcpHttpServer() else stopMcpHttpServer()
+        }
+
+        loadMcpServerPrefs()
+        updateMcpServerStatusUi()
+
         binding.textSectionFeaturesCharging.setOnClickListener {
             showSectionHelp(R.string.features_section_charging_animation, R.string.help_features_charging)
         }
@@ -2102,6 +2124,83 @@ class FeaturesFragment : Fragment(R.layout.fragment_features) {
     override fun onDestroyView() {
         _binding = null
         super.onDestroyView()
+    }
+
+    private fun loadMcpServerPrefs() {
+        val ctx = requireContext()
+        val prefs = ctx.getSharedPreferences("mcp_server", Context.MODE_PRIVATE)
+        mcpServerPort = prefs.getInt("port", 8080)
+        mcpServerApiKey = prefs.getString("api_key", "") ?: ""
+        if (mcpServerApiKey.isEmpty()) {
+            mcpServerApiKey = java.util.UUID.randomUUID().toString().take(16)
+            prefs.edit().putString("api_key", mcpServerApiKey).apply()
+        }
+        val wasRunning = prefs.getBoolean("was_running", false)
+        if (wasRunning && _binding != null) {
+            binding.switchMcpServer.isChecked = true
+            startMcpHttpServer()
+        }
+    }
+
+    private fun startMcpHttpServer() {
+        val ctx = requireContext()
+        if (mcpHttpServer?.isRunning == true) return
+        stopMcpHttpServer()
+        if (mcpServerApiKey.isEmpty()) loadMcpServerPrefs()
+        val server = CarControlHttpServer(ctx, mcpServerPort, mcpServerApiKey)
+        if (server.start()) {
+            mcpHttpServer = server
+            ctx.getSharedPreferences("mcp_server", Context.MODE_PRIVATE)
+                .edit().putBoolean("was_running", true).apply()
+        } else {
+            MainDisplayUi.showToast(ctx, R.string.features_mcp_server_start_failed, Toast.LENGTH_SHORT)
+            binding.switchMcpServer.isChecked = false
+        }
+        updateMcpServerStatusUi()
+    }
+
+    private fun stopMcpHttpServer() {
+        mcpHttpServer?.stop()
+        mcpHttpServer = null
+        try {
+            requireContext().getSharedPreferences("mcp_server", Context.MODE_PRIVATE)
+                .edit().putBoolean("was_running", false).apply()
+        } catch (_: Exception) {}
+        updateMcpServerStatusUi()
+    }
+
+    private fun updateMcpServerStatusUi() {
+        if (_binding == null) return
+        val server = mcpHttpServer
+        if (server?.isRunning == true) {
+            val lanIp = CarControlHttpServer.getLocalIpAddress()
+        val ip = "127.0.0.1"
+            val effectivePort = if (server.actualPort > 0) server.actualPort else mcpServerPort
+            binding.textMcpServerStatus.text = getString(R.string.features_mcp_server_status_running, ip, effectivePort)
+        } else {
+            binding.textMcpServerStatus.setText(R.string.features_mcp_server_status_stopped)
+        }
+    }
+
+    private fun copyMcpConfigToClipboard() {
+        val ctx = requireContext()
+        val effectivePort = if (mcpHttpServer?.actualPort != null && mcpHttpServer!!.actualPort > 0) mcpHttpServer!!.actualPort else mcpServerPort
+        val lanIp = CarControlHttpServer.getLocalIpAddress()
+        val json = """
+{
+  "mcpServers": {
+    "miroot-vehicle": {
+      "url": "http://127.0.0.1:${effectivePort}/sse",
+      "headers": {
+        "X-API-Key": "${mcpServerApiKey}"
+      }
+    }
+  }
+}
+""".trimIndent()
+        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("MiRoot MCP Config", json))
+        MainDisplayUi.showToast(ctx, R.string.features_mcp_copied, Toast.LENGTH_SHORT)
     }
 
     private companion object {
