@@ -1075,7 +1075,14 @@ public class RearSwitchKeeperService extends Service {
         try {
             Context app = getApplicationContext();
             RearScreenWakeManager mgr = RearScreenWakeManager.getInstance();
-            mgr.stopWakeService(app, RearScreenDesktopActivity.class);
+            // 注销所有已注册的投屏 Activity，避免残留 stale 注册导致常亮服务泄漏
+            for (String name : new java.util.ArrayList<>(mgr.getRegisteredActivities())) {
+                try {
+                    Class<?> cls = Class.forName(name);
+                    mgr.stopWakeService(app, cls);
+                } catch (Exception ignored) {
+                }
+            }
             // 无论注册表是否已清空，都强制停 Wake，避免「MiRoot・投屏中」通知与唤醒循环残留
             stopService(new Intent(app, RearScreenWakeService.class));
             mgr.clearStaleRegistrationsWhenNoProjection(app);

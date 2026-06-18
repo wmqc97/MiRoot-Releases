@@ -255,6 +255,7 @@ class RearAssistService : Service() {
         running.set(false)
         mainHandler.removeCallbacksAndMessages(null)
         unregisterScreenOff()
+        stopForegroundGracefully()
         shellExecutor.shutdownNow()
         super.onDestroy()
     }

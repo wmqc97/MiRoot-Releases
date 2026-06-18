@@ -488,7 +488,15 @@ public class RearScreenWakeService extends Service {
                     LogHelper.d(TAG, "CFG: loop stop requested");
                 }
             }
-            
+
+            // 投屏常亮关闭且无投屏注册时，应停止服务而非仅停止循环
+            if (!enabled && !hasProjectionRegistration()) {
+                LogHelper.d(TAG, "CFG: keep_screen_on off + no projection -> stopSelf");
+                stopWakeupLoop();
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+
             updateForegroundNotification();
             return START_STICKY;
         }
