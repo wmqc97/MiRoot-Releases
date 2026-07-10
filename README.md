@@ -6,14 +6,14 @@
 
 <p align="center">
   <strong>小米 17 Pro 系列背屏增强工具 — 正式版 APK 发布仓库</strong><br>
-  背屏投屏 · 歌词投影 · 车控增强 · 数字蓝牙钥匙 · 配置云备份
+  背屏投屏 · 歌词投影 · 车控增强 · MCP 服务 · 配置云备份
 </p>
 
 <p align="center">
   <a href="https://github.com/wmqc97/MiRoot-Releases/releases/latest">
-    <img src="https://img.shields.io/badge/download-V2.7-blue" alt="download"/>
+    <img src="https://img.shields.io/badge/download-V3.1-blue" alt="download"/>
   </a>
-  <img src="https://img.shields.io/badge/version-2.7-blue" alt="version"/>
+  <img src="https://img.shields.io/badge/version-3.1-blue" alt="version"/>
   <img src="https://img.shields.io/badge/API-28%2B-brightgreen" alt="API"/>
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="license"/>
 </p>
@@ -22,24 +22,21 @@
 
 ## 关于
 
-本仓库仅托管 [MiRoot](https://github.com/wmqc97/MiRoot) **正式版 APK**，不含源码。MiRoot 面向小米 17 Pro 等背屏手机，提供背屏应用投影、歌词投影、车控增强、数字蓝牙钥匙、充电动画与 **WebDAV 配置云备份** 等功能。源码、文档与 Issue 请前往主仓库。
+本仓库仅托管 [MiRoot](https://github.com/wmqc97/MiRoot) **正式版 APK**，不含源码。MiRoot 面向小米 17 Pro 等背屏手机，提供背屏应用投影、歌词投影、车控增强、充电动画、WebDAV 配置云备份，以及可供 AI 客户端调用的 MCP HTTP/SSE 服务。源码、文档与 Issue 请前往主仓库。
 
-## 最新版本 · V2.7
+## 最新版本 · V3.1
 
 | 项目 | 说明 |
 |------|------|
-| 版本号 | **2.7**（`versionCode` 41） |
-| 安装包 | `MiRoot_2.7_Release.apk` |
+| 版本号 | **3.1**（`versionCode` 45） |
+| 安装包 | `MiRoot_3.1_*.apk` |
 
-### V2.7 更新摘要
+### V3.1 更新摘要
 
-- **数字蓝牙钥匙**：BLE 扫描搜索、配对连接、调试页面
-- **车控 6x2 / 6x4 桌面小组件**：远程车控快捷操作
-- **车控 HTTP 本地服务器**：本地网络车控接口
-- **歌词投屏色彩同步**：主屏与背屏歌词颜色实时同步
-- **主屏音乐活动页**：独立音乐控制界面
-- **背屏堆栈快照**：StackListSnapshot 状态管理
-- **MCP 服务器**：miroot-mcp-server 及辅助脚本
+- **背屏歌词与音乐投影增强**：优化主屏/背屏歌词切换、歌词状态同步、网络歌词匹配与 SuperLyric 解析
+- **视觉效果设置完善**：新增/整理摄像头环指示、频谱可视化、边缘光效、专辑图背景与歌词显示预设
+- **车控与 MCP 服务增强**：AI 客户端可通过 MCP HTTP/SSE 查询车辆状态、控制车辆、打开背屏桌面/歌词/小游戏、查询油耗与健康报告
+- **资源与构建发布整理**：重整车控与背屏机型资源，优化 Release 包命名、配置云备份、权限检查、开源声明与稳定性细节
 
 完整说明见主仓库 [README](https://github.com/wmqc97/MiRoot/blob/main/README.md)。
 
