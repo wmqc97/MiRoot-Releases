@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="../assets/MiRoot.png" alt="MiRoot" width="128"/>
+  <img src="MiRoot.png" alt="MiRoot" width="128"/>
 </p>
 
 <h1 align="center">MiRoot Releases</h1>
@@ -11,9 +11,9 @@
 
 <p align="center">
   <a href="https://github.com/wmqc97/MiRoot-Releases/releases/latest">
-    <img src="https://img.shields.io/badge/download-V3.4-blue" alt="download"/>
+    <img src="https://img.shields.io/badge/download-V3.7-blue" alt="download"/>
   </a>
-  <img src="https://img.shields.io/badge/version-3.4-blue" alt="version"/>
+  <img src="https://img.shields.io/badge/version-3.7-blue" alt="version"/>
   <img src="https://img.shields.io/badge/API-28%2B-brightgreen" alt="API"/>
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="license"/>
 </p>
@@ -24,12 +24,36 @@
 
 本仓库仅托管 [MiRoot](https://github.com/wmqc97/MiRoot) **正式版 APK**，不含源码。MiRoot 面向小米 17 Pro 等背屏手机，提供背屏应用投影、歌词投影、车控增强、充电动画、WebDAV 配置云备份，以及可供 AI 客户端调用的 MCP HTTP/SSE 服务。源码、文档与 Issue 请前往主仓库。
 
-## 最新版本 · V3.4
+## 最新版本 · V3.7
 
 | 项目 | 说明 |
 |------|------|
-| 版本号 | **3.4**（`versionCode` 48） |
-| 安装包 | `MiRoot_3.4_*.apk` |
+| 版本号 | **3.7**（`versionCode` 51） |
+| 安装包 | `MiRoot_3.7_20260808_232028.apk` |
+
+### V3.7 更新摘要
+
+- **主题包管理流程重构**：一键扫描/预览/应用/编辑/注入手势，顶部新增「主题功能」菜单
+- **应用主题可勾选注入手势**：已注入主题显示手势角标，系统主题编辑器内可随时关闭单主题手势
+- **手势注入更通用**：注入块提升至最顶层，兼容新旧注入形态、可重复注入/移除，带全屏动画层的主题右边缘手势不再失效
+- **指纹校验与解压缓存不依赖 Root/Shizuku**：注入后自动重建缓存，主题目录不再丢失
+- **主题包联动安装 JS 脚本**：包内 UriRoute 脚本本地直装，无需文件系统与跨应用权限，Android 10+ 全兼容
+- **全局 UI 统一**：主 Tab 与二级页面大标题风格统一，音乐页重构为仪表盘导航卡片 + 底部弹窗设置，删除确认弹窗统一为悬浮卡片风格
+- **MCP 车控优化**：服务卡片改为信息密集仪表盘，工具按类型分组管理；车辆状态按需拉取 + 60 秒节流
+- **歌词体验**：新增歌词边框特效卡片并适配深色模式，修复歌词设置弹窗滑动闪烁与随机色切换延迟
+
+### V3.6 更新摘要
+
+- **车控桌面小组件**：支持 2×2、6×2、6×4 三种尺寸，主屏直达车控
+- **车控全面深色模式适配**：车辆状态统一解析为中文显示，账号头像上传对齐 GKUI 规范
+- **歌词自适应**：歌词行数按背屏尺寸自动计算，新增行槽倍率、高亮渐变羽化与行切换提前量
+- **状态页新增背屏歌词状态卡片**：实时查看歌词来源与分词状态
+
+### V3.5 更新摘要
+
+- **歌词滚动过渡**：换行使用缓出动画取代硬切跳转，滚动时长按距离自适应
+- **逐字高亮修正**：修复换行瞬间下一行首字高亮跳过的时序偏差
+- **修复**：MIXED 智能歌词源与 NETWORK_ONLY 模式换行 scrollY 硬切导致的视觉割裂
 
 ### V3.4 更新摘要
 
