@@ -11,9 +11,9 @@
 
 <p align="center">
   <a href="https://github.com/wmqc97/MiRoot-Releases/releases/latest">
-    <img src="https://img.shields.io/badge/download-V3.7-blue" alt="download"/>
+    <img src="https://img.shields.io/badge/download-V3.8.4-blue" alt="download"/>
   </a>
-  <img src="https://img.shields.io/badge/version-3.7-blue" alt="version"/>
+  <img src="https://img.shields.io/badge/version-3.8.4-blue" alt="version"/>
   <img src="https://img.shields.io/badge/API-28%2B-brightgreen" alt="API"/>
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="license"/>
 </p>
@@ -24,12 +24,22 @@
 
 本仓库仅托管 [MiRoot](https://github.com/wmqc97/MiRoot) **正式版 APK**，不含源码。MiRoot 面向小米 17 Pro 等背屏手机，提供背屏应用投影、歌词投影、车控增强、充电动画、WebDAV 配置云备份，以及可供 AI 客户端调用的 MCP HTTP/SSE 服务。源码、文档与 Issue 请前往主仓库。
 
-## 最新版本 · V3.7
+## 最新版本 · V3.8.4
 
 | 项目 | 说明 |
 |------|------|
-| 版本号 | **3.7**（`versionCode` 51） |
-| 安装包 | `MiRoot_3.7_20260808_232028.apk` |
+| 版本号 | **3.8.4**（`versionCode` 56） |
+| 安装包 | `MiRoot_3.8.4_*.apk` |
+
+### V3.8.4 更新摘要
+
+- **背屏萌宠 Bloub 全面升级**：背屏手势唤起萌宠 + 桌面模式开关；陀螺仪眼神跟随，点击空白不再强制锁定视线，手机转动立即恢复跟随
+- **行为导演系统**：新增 13 个动画，绑定充电、车况、车控指令等手机状态事件，萌宠表情随状态自动反馈
+- **完整表情分配体系**：车况模式与车控指令自动反馈对应情绪；移植 aora-bot 表情标签系统 + 思考环绕彩带装饰，全部情绪表情动态优化
+- **emotionId 广播下发接口 + 徽章分组配色**：状态徽章支持分组配色，修复裁切、过渡期眼睛重叠等问题
+- **新增自定义桌宠模块**：支持 Codex Pet 精灵图格式导入，满屏二维走动 + 完整手势动作，兼容 V1/V2 全动作；桌宠素材资源站与格式规范卡
+- **界面与体验**：功能页卡片重排，萌宠/桌宠设置页统一 Miuix 风格；修复充电动画关闭后子项未隐藏、萌宠预览越界
+- **主题修复**：修复主题编辑写回 var_config 时 XML 声明与根元素断行、修正 Uriroute 关联应用包名、主题信息版本号支持小数输入；移除 REAREye 锁屏直启引导提示
 
 ### V3.7 更新摘要
 
