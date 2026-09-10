@@ -11,9 +11,9 @@
 
 <p align="center">
   <a href="https://github.com/wmqc97/MiRoot-Releases/releases/latest">
-    <img src="https://img.shields.io/badge/download-V3.8.4-blue" alt="download"/>
+    <img src="https://img.shields.io/badge/download-V3.8.5-blue" alt="download"/>
   </a>
-  <img src="https://img.shields.io/badge/version-3.8.4-blue" alt="version"/>
+  <img src="https://img.shields.io/badge/version-3.8.5-blue" alt="version"/>
   <img src="https://img.shields.io/badge/API-28%2B-brightgreen" alt="API"/>
   <img src="https://img.shields.io/badge/license-Apache%202.0-green" alt="license"/>
 </p>
@@ -24,12 +24,22 @@
 
 本仓库仅托管 [MiRoot](https://github.com/wmqc97/MiRoot) **正式版 APK**，不含源码。MiRoot 面向小米 17 Pro 等背屏手机，提供背屏应用投影、歌词投影、车控增强、充电动画、WebDAV 配置云备份，以及可供 AI 客户端调用的 MCP HTTP/SSE 服务。源码、文档与 Issue 请前往主仓库。
 
-## 最新版本 · V3.8.4
+## 最新版本 · V3.8.5
 
 | 项目 | 说明 |
 |------|------|
-| 版本号 | **3.8.4**（`versionCode` 56） |
-| 安装包 | `MiRoot_3.8.4_*.apk` |
+| 版本号 | **3.8.5**（`versionCode` 57） |
+| 安装包 | `MiRoot_3.8.5_*.apk` |
+
+### V3.8.5 更新摘要
+
+- **背屏手势扩展为八槽位**：新增顶部左滑/右滑手势（槽位 7/8），顶部热区整条可触发，右上角与右边缘条重叠处由顶部层接管
+- **手势注入开关拆分三路**：底部 / 右边 / 顶部手势可分别独立关闭，互不影响；系统主题编辑器内按需停用，已注入主题重新注入即可获得顶部手势
+- **「在背屏打开」按钮双向切换**：萌宠、自定义桌宠、自定义网页、背屏桌面、真心话大冒险均支持点击退出背屏，打开后自动同步状态（轮询等待落屏），进入页面/回到前台自动检测；按钮文案精简为四字，窄屏不溢出
+- **通知提示区分投屏类型**：MiRoot 自身界面投屏通知显示「点按结束投屏」，点击直接销毁背屏界面；第三方应用投屏保持「点按将应用迁回主屏幕」
+- **新增背屏自定义网页模块**：导入 HTML 包（zip/html）或在线网址直接投屏，铺满显示 + 强制缩放 + 浏览器 UA 切换，预览按背屏真实宽度对齐
+- **车控页支持导入 3D 车模**：.glb 模型可触摸旋转查看
+- **修复与体验**：修复背屏萌宠打开时进程崩溃（人脸追踪初始化容错降级）；自定义网页导入/添加入口改为并排卡片，列表显示作者信息；桌宠设置页 UI 对齐统一风格；多项细节修复
 
 ### V3.8.4 更新摘要
 
